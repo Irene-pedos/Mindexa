@@ -6,7 +6,7 @@ Pydantic schemas for the AI Question Generation domain.
 
 import uuid
 from datetime import datetime
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from pydantic import BaseModel, Field, field_validator, computed_field
 
@@ -307,8 +307,11 @@ class AIGenerationBatchResponse(BaseModel):
     ai_model_used: str | None
     ai_provider: str | None
     created_at: datetime
+    # Per-section progress written by the worker as each section finishes:
+    # {section_id, status: PENDING|RUNNING|DONE|PARTIAL|FAILED, generated, failed, error}
+    sections_progress: list[dict[str, Any]] | None = Field(default=None, validation_alias="sections_json")
 
-    model_config = {"from_attributes": True}
+    model_config = {"from_attributes": True, "populate_by_name": True}
 
 
 class AIGenerationBatchDetailResponse(AIGenerationBatchResponse):

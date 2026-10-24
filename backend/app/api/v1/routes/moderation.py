@@ -257,10 +257,13 @@ async def approve_review(
         current_user=current_user,
         decision_note=decision_note,
         acknowledge_warnings=ack,
+        override_failed_checks=body.override_failed_checks if body else False,
+        override_reason=body.override_reason if body else None,
     )
     return {
         "review_id": str(decided.id),
         "status": decided.status.value,
         "decision_note": decided.decision_note,
+        "compliance_override": decided.compliance_override,
         "decided_at": decided.decided_at.isoformat() if decided.decided_at else None,
     }

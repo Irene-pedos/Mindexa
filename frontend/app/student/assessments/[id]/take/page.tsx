@@ -173,6 +173,8 @@ export interface AssessmentQuestion {
   match_choices?: string[] | null;
   assessment_section_id?: string;
   section_title?: string;
+  /** "Answer N of M" sections: N. Null/undefined when every question counts. */
+  section_questions_to_answer?: number | null;
   section_instructions?: string;
   imageUrl?: string;
   caseStudyContext?: string;
@@ -382,6 +384,20 @@ function useIntegrityMonitor({
     assessment?.integrity_monitoring_enabled !== false &&
     isHighSecurity;
 
+  // Heuristic detections (possible AI tool / DevTools) are reported for the
+  // supervisor only — the server records them as log-only, they never warn or
+  // end the attempt. At most one report per type per minute.
+  const lastAdvisoryReportRef = useRef<Record<string, number>>({});
+  const reportAdvisory = useCallback(
+    (type: "AI_TOOL_SUSPECTED" | "DEVTOOLS_SUSPECTED", metadata: Record<string, unknown>) => {
+      const now = Date.now();
+      if (now - (lastAdvisoryReportRef.current[type] ?? 0) < 60_000) return;
+      lastAdvisoryReportRef.current[type] = now;
+      void handleIntegrityEvent(type, { ...metadata, heuristic: true });
+    },
+    [handleIntegrityEvent],
+  );
+
   // Fullscreen enforcement
   useEffect(() => {
     if (
@@ -476,8 +492,16 @@ function useIntegrityMonitor({
           window.outerHeight - window.innerHeight > threshold) &&
         (widthDiff > 50 || heightDiff > 50)
       ) {
-        console.warn("[Integrity] DevTools activity detected");
-        toast.warning("Developer Tools activity is monitored.");
+        // Advisory only: a window-size heuristic (also triggered by docked
+        // side panels). Reported log-only for the supervisor, never penalised.
+        console.warn("[Integrity] Possible DevTools activity");
+        toast.warning("Please keep browser developer tools closed during the assessment.", {
+          id: "devtools-notice",
+        });
+        reportAdvisory("DEVTOOLS_SUSPECTED", {
+          inner: [window.innerWidth, window.innerHeight],
+          outer: [window.outerWidth, window.outerHeight],
+        });
       }
       lastWidth = window.innerWidth;
       lastHeight = window.innerHeight;
@@ -498,7 +522,7 @@ function useIntegrityMonitor({
       document.removeEventListener("contextmenu", handleContextMenu);
       window.removeEventListener("resize", handleResize);
     };
-  }, [stage, isMonitoringActive, handleIntegrityEvent, setIsScreenBlurred]);
+  }, [stage, isMonitoringActive, handleIntegrityEvent, setIsScreenBlurred, reportAdvisory]);
 
   // AI extension detection (only for monitored assessments where AI is not allowed)
   useEffect(() => {
@@ -529,16 +553,24 @@ function useIntegrityMonitor({
         extensionKeywords.some((kw) => key.toLowerCase().includes(kw)),
       );
       if (detectedKeyword || detectedProperty) {
-        console.warn("[Integrity] AI extension detected", {
+        // Advisory only: a heuristic (user-agent / window globals) with false
+        // positives. Reported as a log-only event for the supervisor; it can
+        // never warn the student or end the attempt.
+        console.warn("[Integrity] Possible AI extension", {
           detected_keyword: detectedKeyword,
           detected_property: detectedProperty,
         });
-        toast.error(
-          "Academic Integrity Alert: AI extensions or assistant tools detected. This event has been logged.",
+        toast.warning(
+          "Notice: AI assistant tools are not allowed in this assessment. Please close any AI extensions or assistants.",
+          { id: "ai-extension-notice" },
         );
+        reportAdvisory("AI_TOOL_SUSPECTED", {
+          detected_keyword: detectedKeyword ?? null,
+          detected_property: detectedProperty ?? null,
+        });
       }
     }
-  }, [stage, assessment, handleIntegrityEvent, isOpenAssessment]);
+  }, [stage, assessment, isOpenAssessment, reportAdvisory]);
 }
 
 function useOfflineSync({
@@ -954,6 +986,26 @@ function seededShuffle<T>(array: T[], seed: string): T[] {
   return result;
 }
 
+/** CASE_STUDY / case_study / casestudy all identify the same question type. */
+const isCaseStudyType = (questionType: string | undefined | null): boolean =>
+  (questionType || "").toLowerCase().replace(/[^a-z0-9]/g, "") === "casestudy";
+
+/**
+ * "Answer N of M" sections: returns N when the section offers more questions
+ * than the student has to answer, otherwise null (every question counts).
+ */
+function choiceSectionLimit(
+  q: AssessmentQuestion | undefined,
+  all: AssessmentQuestion[],
+): number | null {
+  const n = q?.section_questions_to_answer;
+  if (!q || n === null || n === undefined) return null;
+  const pool = all.filter(
+    (x) => x.assessment_section_id === q.assessment_section_id,
+  ).length;
+  return pool > n ? n : null;
+}
+
 const getAnswerType = (questionType: string): AnswerType => {
   const normalized = (questionType || "")
     .toLowerCase()
@@ -1154,6 +1206,12 @@ export default function TakeAssessmentPage() {
     }
   }, [stage, attemptId, router, submitError]);
 
+  // "Answer N of M" sections: the questions the student has chosen
+  const [selectedQuestionIds, setSelectedQuestionIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [selectionBusy, setSelectionBusy] = useState(false);
+
   const [flaggedQuestions, setFlaggedQuestions] = useState<
     Record<string, boolean>
   >({});
@@ -1194,26 +1252,9 @@ export default function TakeAssessmentPage() {
   const readinessAbortControllerRef = useRef<AbortController | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const warningPauseStartRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    if (warningModalOpen) {
-      warningPauseStartRef.current = Date.now();
-    } else if (warningPauseStartRef.current !== null) {
-      const pauseDuration = Date.now() - warningPauseStartRef.current;
-      warningPauseStartRef.current = null;
-      if (expiresAt && pauseDuration > 1000) {
-        setExpiresAt((prev) => {
-          if (!prev) return null;
-          const currentExpiry = new Date(prev).getTime();
-          return new Date(currentExpiry + pauseDuration).toISOString();
-        });
-        toast.info(
-          `Timer extended by ${Math.round(pauseDuration / 1000)} seconds to account for warning review.`,
-        );
-      }
-    }
-  }, [warningModalOpen, expiresAt]);
+  // The deadline (`expiresAt`) always comes from the server. It used to be pushed
+  // later on the client while a warning dialog was open, but the server's
+  // deadline never moved — so the student saw time left yet saves were rejected.
 
   const [viewingSectionIntro, setViewingSectionIntro] = useState<string | null>(
     null,
@@ -1452,10 +1493,7 @@ export default function TakeAssessmentPage() {
       };
 
       if (answerType === "TEXT") {
-        const isCS =
-          (qType || "").toLowerCase().replace(/[^a-z0-9_]/g, "") ===
-          "casestudy";
-        if (isCS) {
+        if (isCaseStudyType(qType)) {
           payload.answer_text =
             typeof answerVal === "object" && answerVal !== null
               ? JSON.stringify(answerVal)
@@ -1531,9 +1569,91 @@ export default function TakeAssessmentPage() {
     saveAnswerRef.current = saveAnswer;
   }, [saveAnswer]);
 
-  // Sync / Load logic: Detect existing attempt on mount (Resume attempt support)
-  const syncSavedSubmissions = async (attId: string) => {
+  // ── "Answer N of M" sections ─────────────────────────────────────────────
+  /**
+   * Attempts started before choices existed may already hold answers in a choice
+   * section. Record those as choices (up to N per section) so the student can
+   * keep working, then publish the final set to state.
+   */
+  const reconcileChoices = async (
+    attId: string,
+    qs: AssessmentQuestion[],
+    chosenIds: string[],
+    answered: Record<string, unknown>,
+  ) => {
+    const chosen = new Set(chosenIds);
+    const perSection: Record<string, number> = {};
+    for (const q of qs) {
+      if (chosen.has(q.id) && q.assessment_section_id) {
+        perSection[q.assessment_section_id] = (perSection[q.assessment_section_id] || 0) + 1;
+      }
+    }
+    for (const q of qs) {
+      const limit = choiceSectionLimit(q, qs);
+      const sectionId = q.assessment_section_id;
+      if (limit === null || !sectionId || chosen.has(q.id)) continue;
+      if (!isQuestionAnswered(q, answered[q.id])) continue;
+      if ((perSection[sectionId] || 0) >= limit) continue;
+      try {
+        await attemptApi.selectQuestion(attId, sectionId, q.id);
+        chosen.add(q.id);
+        perSection[sectionId] = (perSection[sectionId] || 0) + 1;
+      } catch {
+        // The server enforces the limit; leave this answer unchosen
+      }
+    }
+    setSelectedQuestionIds(chosen);
+  };
+
+  const chooseQuestion = async (q: AssessmentQuestion) => {
+    if (!attemptId || !q.assessment_section_id) return;
+    setSelectionBusy(true);
     try {
+      await attemptApi.selectQuestion(attemptId, q.assessment_section_id, q.id);
+      setSelectedQuestionIds((prev) => new Set(prev).add(q.id));
+    } catch (err: unknown) {
+      toast.error(
+        err instanceof Error && err.message
+          ? err.message
+          : "Could not choose this question.",
+      );
+    } finally {
+      setSelectionBusy(false);
+    }
+  };
+
+  const unchooseQuestion = async (q: AssessmentQuestion) => {
+    if (!attemptId) return;
+    setSelectionBusy(true);
+    try {
+      await attemptApi.deselectQuestion(attemptId, q.id);
+      setSelectedQuestionIds((prev) => {
+        const next = new Set(prev);
+        next.delete(q.id);
+        return next;
+      });
+    } catch (err: unknown) {
+      toast.error(
+        err instanceof Error && err.message
+          ? err.message
+          : "Could not remove your choice.",
+      );
+    } finally {
+      setSelectionBusy(false);
+    }
+  };
+
+  // Sync / Load logic: Detect existing attempt on mount (Resume attempt support)
+  // `loadedQuestions` is passed in explicitly: this runs right after
+  // setQuestions(), and reading the `questions` state here would still see the
+  // previous (empty) value.
+  const syncSavedSubmissions = async (
+    attId: string,
+    loadedQuestions: AssessmentQuestion[],
+    chosenIds: string[] = [],
+  ) => {
+    try {
+      const questions = loadedQuestions;
       const subRes = await submissionApi.getSubmissionsForAttempt(attId);
       const savedAnswers: Record<string, any> = {};
       subRes.submissions?.forEach((s: any) => {
@@ -1571,17 +1691,13 @@ export default function TakeAssessmentPage() {
           };
         else {
           const q = questions.find((x) => x.id === s.question_id);
-          const isCaseStudy =
-            q &&
-            (q.type || q.question_type || "")
-              .toLowerCase()
-              .replace(/[^a-z0-9_]/g, "") === "casestudy";
+          const isCaseStudy = !!q && isCaseStudyType(q.type || q.question_type);
           if (isCaseStudy) {
             if (typeof s.answer_text === "string") {
               try {
                 savedAnswers[s.question_id] = JSON.parse(s.answer_text);
               } catch {
-                const subId = q.options?.[0]?.id || "default";
+                const subId = q?.options?.[0]?.id || "default";
                 savedAnswers[s.question_id] = { [subId]: s.answer_text };
               }
             } else {
@@ -1601,11 +1717,12 @@ export default function TakeAssessmentPage() {
           !savedAnswers[q.id]
         ) {
           const rawIds = q.options?.map((o) => o.id) || [];
-          savedAnswers[q.id] = seededShuffle(rawIds, `${attemptId}-${q.id}`);
+          savedAnswers[q.id] = seededShuffle(rawIds, `${attId}-${q.id}`);
         }
       });
       setAnswers(savedAnswers);
       lastSavedValuesRef.current = trulySavedAnswers;
+      await reconcileChoices(attId, questions, chosenIds, trulySavedAnswers);
     } catch (err: unknown) {
       const message =
         err instanceof Error ? err.message : "Failed to sync submissions";
@@ -1677,11 +1794,16 @@ export default function TakeAssessmentPage() {
                   newToken,
                 );
                 if (controller.signal.aborted) return;
-                setQuestions(attemptDetail.questions || []);
-                await syncSavedSubmissions(activeAttempt.id);
+                const resumedQuestions = attemptDetail.questions || [];
+                setQuestions(resumedQuestions);
+                await syncSavedSubmissions(
+                  activeAttempt.id,
+                  resumedQuestions,
+                  attemptDetail.selected_question_ids || [],
+                );
                 if (controller.signal.aborted) return;
                 setStage("taking");
-                if (assessment?.fullscreen_required) enterFullscreen();
+                if (data?.fullscreen_required) enterFullscreen();
                 toast.success("Attempt resumed successfully.");
               } catch (err: unknown) {
                 if (controller.signal.aborted) return;
@@ -1702,11 +1824,16 @@ export default function TakeAssessmentPage() {
                   savedToken,
                 );
                 if (controller.signal.aborted) return;
-                setQuestions(attemptDetail.questions || []);
-                await syncSavedSubmissions(activeAttempt.id);
+                const resumedQuestions = attemptDetail.questions || [];
+                setQuestions(resumedQuestions);
+                await syncSavedSubmissions(
+                  activeAttempt.id,
+                  resumedQuestions,
+                  attemptDetail.selected_question_ids || [],
+                );
                 if (controller.signal.aborted) return;
                 setStage("taking");
-                if (assessment?.fullscreen_required) enterFullscreen();
+                if (data?.fullscreen_required) enterFullscreen();
               } catch (err: unknown) {
                 if (controller.signal.aborted) return;
                 toast.error("Session token validation failed.");
@@ -1714,10 +1841,42 @@ export default function TakeAssessmentPage() {
               }
             }
           } else {
-            toast.info(
-              "Active attempt found, but session token is not present on this device.",
-            );
-            setStage("intro");
+            // This browser lost the session token (new device / cleared storage).
+            // Ask the server to re-issue it to the attempt's owner; it refuses
+            // where resuming is not allowed (e.g. supervised exams).
+            try {
+              const reclaimed = await attemptApi.reclaimAttempt(activeAttempt.id);
+              if (controller.signal.aborted) return;
+              const newToken = reclaimed.access_token;
+              setAttemptToken(newToken);
+              localStorage.setItem(`attempt_token_${activeAttempt.id}`, newToken);
+              setExpiresAt(reclaimed.expires_at);
+
+              const attemptDetail = await attemptApi.getAttemptDetail(
+                activeAttempt.id,
+                newToken,
+              );
+              if (controller.signal.aborted) return;
+              const resumedQuestions = attemptDetail.questions || [];
+              setQuestions(resumedQuestions);
+              await syncSavedSubmissions(
+                activeAttempt.id,
+                resumedQuestions,
+                attemptDetail.selected_question_ids || [],
+              );
+              if (controller.signal.aborted) return;
+              setStage("taking");
+              if (data?.fullscreen_required) enterFullscreen();
+              toast.success("Your attempt was restored on this device.");
+            } catch (err: unknown) {
+              if (controller.signal.aborted) return;
+              toast.error(
+                err instanceof Error && err.message
+                  ? err.message
+                  : "Your attempt is open on another device and cannot be resumed here.",
+              );
+              setStage("intro");
+            }
           }
         } else {
           setStage("intro");
@@ -2176,6 +2335,7 @@ export default function TakeAssessmentPage() {
       );
       if (controller.signal.aborted) return;
       setQuestions(attemptData.questions || []);
+      setSelectedQuestionIds(new Set<string>(attemptData.selected_question_ids || []));
       const savedAnswers: Record<string, any> = {};
       try {
         const subRes = await submissionApi.getSubmissionsForAttempt(data.id);
@@ -2219,17 +2379,13 @@ export default function TakeAssessmentPage() {
             const q = (attemptData.questions || []).find(
               (x: any) => x.id === s.question_id,
             );
-            const isCaseStudy =
-              q &&
-              (q.type || q.question_type || "")
-                .toLowerCase()
-                .replace(/[^a-z0-9_]/g, "") === "casestudy";
+            const isCaseStudy = !!q && isCaseStudyType(q.type || q.question_type);
             if (isCaseStudy) {
               if (typeof s.answer_text === "string") {
                 try {
                   savedAnswers[s.question_id] = JSON.parse(s.answer_text);
                 } catch {
-                  const subId = q.options?.[0]?.id || "default";
+                  const subId = q?.options?.[0]?.id || "default";
                   savedAnswers[s.question_id] = { [subId]: s.answer_text };
                 }
               } else {
@@ -3090,15 +3246,58 @@ export default function TakeAssessmentPage() {
     );
   }
 
+  // In "answer N of M" sections, a question the student did not choose is not
+  // part of their paper: it must never block submission or count as unanswered.
+  const isOutOfPlay = (q: AssessmentQuestion): boolean =>
+    choiceSectionLimit(q, questions) !== null && !selectedQuestionIds.has(q.id);
+
   const unansweredRequired = questions.filter(
-    (q) => q.is_required && !isQuestionAnswered(q, answers[q.id]),
+    (q) =>
+      q.is_required && !isOutOfPlay(q) && !isQuestionAnswered(q, answers[q.id]),
   );
   const unansweredOptional = questions.filter(
     (q) =>
       !q.is_required &&
+      !isOutOfPlay(q) &&
       !isQuestionAnswered(q, answers[q.id]) &&
       !skippedQuestions[q.id],
   );
+
+  // Sections where the student has chosen fewer questions than they must answer
+  const choiceShortfalls: string[] = [];
+  {
+    const seen = new Set<string>();
+    for (const q of questions) {
+      const sectionId = q.assessment_section_id;
+      const limit = choiceSectionLimit(q, questions);
+      if (!sectionId || limit === null || seen.has(sectionId)) continue;
+      seen.add(sectionId);
+      const chosen = questions.filter(
+        (x) => x.assessment_section_id === sectionId && selectedQuestionIds.has(x.id),
+      ).length;
+      if (chosen < limit) {
+        choiceShortfalls.push(
+          `${q.section_title || "A section"}: you chose ${chosen} of ${limit} questions`,
+        );
+      }
+    }
+  }
+
+  // Current question in a choice section
+  const choiceLimit = currentQ ? choiceSectionLimit(currentQ, questions) : null;
+  const isChosen = currentQ ? selectedQuestionIds.has(currentQ.id) : false;
+  const chosenInSection = currentQ
+    ? questions.filter(
+        (x) =>
+          x.assessment_section_id === currentQ.assessment_section_id &&
+          selectedQuestionIds.has(x.id),
+      ).length
+    : 0;
+  const poolInSection = currentQ
+    ? questions.filter(
+        (x) => x.assessment_section_id === currentQ.assessment_section_id,
+      ).length
+    : 0;
   const unansweredRequiredNums = unansweredRequired.map(
     (q) => questions.findIndex((x) => x.id === q.id) + 1,
   );
@@ -3107,6 +3306,7 @@ export default function TakeAssessmentPage() {
   );
   const firstUnansweredIndex = questions.findIndex(
     (q) =>
+      !isOutOfPlay(q) &&
       !isQuestionAnswered(q, answers[q.id]) &&
       (q.is_required || !skippedQuestions[q.id]),
   );
@@ -4072,10 +4272,50 @@ export default function TakeAssessmentPage() {
                           </div>
                         )}
                       </div>
+                      {choiceLimit !== null && currentQ && (
+                        <div className="ml-10.5 mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-primary/20 bg-primary/[0.03] p-3 text-xs">
+                          <span className="text-foreground/80">
+                            <strong>Choice section:</strong> answer {choiceLimit} of{" "}
+                            {poolInSection} questions. You have chosen{" "}
+                            <strong>
+                              {chosenInSection} of {choiceLimit}
+                            </strong>
+                            .
+                          </span>
+                          {isChosen ? (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={selectionBusy}
+                              onClick={() => unchooseQuestion(currentQ)}
+                              className="h-8 text-xs"
+                            >
+                              Remove my choice
+                            </Button>
+                          ) : (
+                            <Button
+                              size="sm"
+                              disabled={selectionBusy || chosenInSection >= choiceLimit}
+                              onClick={() => chooseQuestion(currentQ)}
+                              className="h-8 text-xs"
+                            >
+                              Choose this question
+                            </Button>
+                          )}
+                        </div>
+                      )}
                       <div className="ml-10.5 min-h-[120px]">
-                        <QuestionErrorBoundary questionId={currentQ?.id || ""}>
-                          {renderQuestion(currentQ)}
-                        </QuestionErrorBoundary>
+                        {choiceLimit !== null && !isChosen ? (
+                          <p className="rounded-xl border border-dashed border-border/60 p-6 text-center text-sm text-muted-foreground">
+                            {chosenInSection >= choiceLimit
+                              ? `You have already chosen ${choiceLimit} questions in this section. Remove one of your choices if you would rather answer this question.`
+                              : "Choose this question to start answering it."}
+                          </p>
+                        ) : (
+                          <QuestionErrorBoundary questionId={currentQ?.id || ""}>
+                            {renderQuestion(currentQ)}
+                          </QuestionErrorBoundary>
+                        )}
                       </div>
                     </CardContent>
                     <CardFooter className="bg-muted/5 p-4 flex justify-between border-t border-border/40">
@@ -4476,6 +4716,19 @@ export default function TakeAssessmentPage() {
                   <span className="block mt-1 font-semibold">
                     Question numbers: {unansweredRequiredNums.join(", ")}
                   </span>
+                </div>
+              </div>
+            )}
+
+            {choiceShortfalls.length > 0 && (
+              <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-start gap-2.5 text-left">
+                <AlertTriangle className="size-4 text-amber-600 shrink-0 mt-0.5" />
+                <div className="text-xs text-amber-700 dark:text-amber-300 leading-relaxed">
+                  {choiceShortfalls.map((s) => (
+                    <span key={s} className="block">
+                      {s}
+                    </span>
+                  ))}
                 </div>
               </div>
             )}

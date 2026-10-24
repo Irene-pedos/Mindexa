@@ -77,8 +77,24 @@ export interface AskAIReaderResponse {
   provider?: string;
 }
 
+export interface ReaderMetadata {
+  id: string;
+  kind: ReaderSourceKind;
+  title: string;
+  extension: string;
+  mime_type: string;
+  page_count?: number | null;
+  processing_status: string;
+  workspace_id?: string | null;
+  course_code?: string | null;
+  course_title?: string | null;
+  version: number;
+  is_current: boolean;
+  latest_material_id?: string | null;
+}
+
 export const studyReaderApi = {
-  getMetadata: async (kind: ReaderSourceKind, id: string) => {
+  getMetadata: async (kind: ReaderSourceKind, id: string): Promise<ReaderMetadata> => {
     return apiClient(`/student/reader/${kind}/${id}`);
   },
 

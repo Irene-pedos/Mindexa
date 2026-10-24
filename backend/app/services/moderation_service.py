@@ -23,6 +23,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core import links as frontend_links
 from app.core.constants import AssessmentType, Duty, UserRole
 from app.core.exceptions import (
     BadRequestError,
@@ -30,6 +31,7 @@ from app.core.exceptions import (
     NotFoundError,
     PermissionDeniedError,
 )
+from app.core.logging import get_logger
 from app.core.permissions import has_duty, is_hod_of, is_moderator_for
 from app.db.base import utcnow
 from app.db.enums import (
@@ -55,10 +57,13 @@ from app.db.repositories.approval_policy_repo import ApprovalPolicyRepository
 from app.db.repositories.moderation_repo import ModerationRepository
 from app.db.repositories.notification_repo import NotificationRepository
 from app.services.assessment_marks import _effective_aq_marks
+from app.services.compliance_rules import ComplianceConfig, config_from_policy
 from app.services.moderation_checklist_service import (
     ChecklistResult,
     ModerationChecklistService,
 )
+
+logger = get_logger(__name__)
 
 
 def serialize_assessment_content(assessment: Any) -> dict:
@@ -216,6 +221,24 @@ class ModerationService:
             raise PermissionDeniedError("Only the author, co-author, or active delegate may perform this action.")
         return delegation_id
 
+    async def _notify(self, **kwargs: Any) -> None:
+        """Send a notification without ever failing the action that triggered it.
+
+        A rejected notification (for example an enum value the database lacks) used to
+        roll back the moderator's whole decision. It now runs in a savepoint: on failure
+        only the notification is dropped, and the failure is logged.
+        """
+        try:
+            async with self.db.begin_nested():
+                await self.notification_repo.create(**kwargs)
+        except Exception as exc:  # noqa: BLE001 - notification is best-effort by design
+            logger.warning(
+                "moderation_notification_failed",
+                notification_type=str(kwargs.get("notification_type")),
+                recipient_id=str(kwargs.get("recipient_id")),
+                error=str(exc),
+            )
+
     async def _assert_no_conflict_of_interest(self, assessment: Assessment, user: User) -> None:
         """
         Rule A-14: anyone on the authoring side — author, supervisor, collaborator,
@@ -285,14 +308,23 @@ class ModerationService:
                 f"Moderation is not required for assessment type {assessment.assessment_type.value}."
             )
 
-        policy_total = policy.summative_total_marks if (policy and policy.summative_total_marks) else 100
+        # Moderators are matched to papers by the course's department. Without one the
+        # review would be created but no moderator could ever see it.
+        if not (assessment.course and assessment.course.department_id):
+            raise BadRequestError(
+                "This course has no department, so no moderator can be assigned to review it. "
+                "Ask an administrator to assign the course to a department.",
+                code="COURSE_HAS_NO_DEPARTMENT",
+            )
 
-        # Run automated checklist
+        compliance = config_from_policy(policy)
+
+        # Run automated checklist under the institution's rules
         checklist_result = await ModerationChecklistService.run(
             assessment=assessment,
-            policy_total=policy_total,
             db=self.db,
             run_ai_review=run_ai_review,
+            config=compliance,
         )
 
         if checklist_result.has_blocking_failures:
@@ -350,14 +382,14 @@ class ModerationService:
             mod_ids = (await self.db.execute(mod_stmt)).scalars().all()
             for mod_id in mod_ids:
                 if mod_id != current_user.id:
-                    await self.notification_repo.create(
+                    await self._notify(
                         recipient_id=mod_id,
                         notification_type=NotificationType.MODERATION_SUBMITTED,
                         title="New Assessment Awaiting Moderation",
                         body=f"Assessment '{assessment.title}' has been submitted for moderation.",
                         reference_id=assessment.id,
                         reference_type="assessment",
-                        action_url=f"/moderator/reviews/{review.id}",
+                        action_url=frontend_links.moderation_queue(),
                     )
 
         # Record audit log
@@ -424,6 +456,20 @@ class ModerationService:
             raise ConflictError("This review round has already been claimed by another moderator.")
 
         claimed = await self.repo.claim_review(review_id, current_user.id)
+
+        # Tell the author a moderator has taken the paper, so "pending" no longer looks idle
+        await self._notify(
+            recipient_id=assessment.created_by_id,
+            notification_type=NotificationType.MODERATION_STARTED,
+            title="Moderation Started",
+            body=(
+                f"A moderator has started reviewing '{assessment.title}' "
+                f"(Round {review.round_no}). You will be notified of the outcome."
+            ),
+            reference_id=assessment.id,
+            reference_type="assessment",
+            action_url=frontend_links.lecturer_assessment(assessment.id),
+        )
 
         # Record audit log
         audit = AuditLog(
@@ -528,13 +574,27 @@ class ModerationService:
         if review.reviewer_id != current_user.id:
             raise PermissionDeniedError("Only the claiming reviewer may decide this review.")
 
+        note = (decision_note or "").strip()
         comments = await self.repo.list_comments_by_review(review_id)
-        if not comments:
-            raise BadRequestError("At least one comment is required when requesting changes.")
+        if not comments and not note:
+            raise BadRequestError("Explain what must change: add a comment or a note with your request.")
 
         assessment = await self._get_assessment_with_details(review.assessment_id)
         # Re-checked at decision time: a collaborator/delegation may have been added after the claim
         await self._assert_no_conflict_of_interest(assessment, current_user)
+
+        if not comments:
+            # The note typed into the decision dialog is the moderator's feedback. Keep it as
+            # the round's comment so the author sees it (and can resolve it) on the paper,
+            # instead of rejecting the request because "Post Feedback" was never pressed.
+            await self.repo.create_comment(
+                review_id=review_id,
+                target_type=ModerationCommentTarget.ASSESSMENT,
+                target_id=None,
+                category=ModerationCommentCategory.OTHER,
+                comment=note[:2000],
+                created_by_id=current_user.id,
+            )
 
         # Update review
         decided = await self.repo.decide_review(
@@ -545,19 +605,27 @@ class ModerationService:
 
         # Update assessment status
         assessment.status = AssessmentStatus.CHANGES_REQUESTED
+        # Reopen the draft: AI generation and blueprint tools refuse a paper marked complete,
+        # which would block the very edits the moderator asked for.
+        assessment.draft_is_complete = False
         assessment.updated_by_id = current_user.id
         assessment.updated_at = utcnow()
         await self.db.flush()
 
         # Notify author
-        await self.notification_repo.create(
+        await self._notify(
             recipient_id=assessment.created_by_id,
             notification_type=NotificationType.MODERATION_CHANGES_REQUESTED,
             title="Moderation Changes Requested",
-            body=f"Changes requested for assessment '{assessment.title}' in Round {review.round_no}.",
+            body=(
+                f"Changes requested for assessment '{assessment.title}' in Round {review.round_no}: "
+                f"{note[:240]}{'…' if len(note) > 240 else ''}"
+                if note
+                else f"Changes requested for assessment '{assessment.title}' in Round {review.round_no}."
+            ),
             reference_id=assessment.id,
             reference_type="assessment",
-            action_url=f"/lecturer/assessments/{assessment.id}/moderation",
+            action_url=frontend_links.lecturer_assessment(assessment.id),
         )
 
         # Audit
@@ -640,14 +708,14 @@ class ModerationService:
             )
 
         policy = await self._resolve_policy(assessment)
-        policy_total = policy.summative_total_marks if (policy and policy.summative_total_marks) else 100
+        compliance = config_from_policy(policy)
 
-        # Check automated checklist
+        # Check automated checklist under the institution's rules
         checklist_result = await ModerationChecklistService.run(
             assessment=assessment,
-            policy_total=policy_total,
             db=self.db,
             run_ai_review=run_ai_review,
+            config=compliance,
         )
 
         if checklist_result.has_blocking_failures:
@@ -702,14 +770,14 @@ class ModerationService:
             mod_ids = (await self.db.execute(mod_stmt)).scalars().all()
             for mod_id in mod_ids:
                 if mod_id != current_user.id:
-                    await self.notification_repo.create(
+                    await self._notify(
                         recipient_id=mod_id,
                         notification_type=NotificationType.MODERATION_SUBMITTED,
                         title=f"Assessment Resubmitted (Round {next_round_no})",
                         body=f"Assessment '{assessment.title}' has been resubmitted for moderation.",
                         reference_id=assessment.id,
                         reference_type="assessment",
-                        action_url=f"/moderator/reviews/{review.id}",
+                        action_url=frontend_links.moderation_queue(),
                     )
 
         # Audit
@@ -744,13 +812,18 @@ class ModerationService:
         current_user: User,
         decision_note: Optional[str] = None,
         acknowledge_warnings: bool = True,
+        override_failed_checks: bool = False,
+        override_reason: Optional[str] = None,
     ) -> ModerationReview:
         """
         Approve an assessment review.
         Enforces:
             - current_user is the claiming reviewer, with no conflict of interest
             - review is OPEN
-            - all BLOCKING checklist items passed
+        Required (BLOCKING) automatic checks are evaluated under the institution's current rules.
+        If any fail, the moderator can still approve by waiving them with a written reason
+        (`override_failed_checks` + `override_reason`); the waiver is stored on the review, audited,
+        and passed on to the author and the exam office. Warnings never block.
         Transitions assessment status to APPROVED.
         Notifies exam officers and author.
         """
@@ -771,17 +844,41 @@ class ModerationService:
         # Re-checked at decision time: a collaborator/delegation may have been added after the claim
         await self._assert_no_conflict_of_interest(assessment, current_user)
 
-        # Check for unresolved blocking failures in checklist
-        checklist = getattr(review, "checklist_result", None) or {}
-        items = checklist.get("items", []) if isinstance(checklist, dict) else []
-        blocking_failures = [
-            it for it in items
-            if (not it.get("passed")) and it.get("severity") == "BLOCKING"
+        # Evaluate the automatic checks under the institution's CURRENT rules: an admin may have
+        # changed them since submission, and the paper is locked while under review, so only the
+        # rules can differ from the snapshot taken at submission.
+        fresh = await ModerationChecklistService.run(
+            assessment=assessment,
+            db=self.db,
+            run_ai_review=False,
+            config=config_from_policy(await self._resolve_policy(assessment)),
+        )
+        review.checklist_result = fresh.to_dict()
+        failed_required = [
+            it for it in fresh.items if (not it.passed) and it.severity.value == "BLOCKING"
         ]
-        if blocking_failures:
-            raise BadRequestError(
-                f"Cannot approve: blocking checklist items failed ({', '.join(it.get('code') for it in blocking_failures)})."
-            )
+        override: Optional[dict] = None
+        if failed_required:
+            if not override_failed_checks:
+                raise ConflictError(
+                    "Some required checks did not pass: "
+                    + "; ".join(f"{it.code} ({it.message})" for it in failed_required)
+                    + ". As the moderator you can approve anyway by waiving them with a reason.",
+                    code="COMPLIANCE_CHECKS_FAILED",
+                )
+            reason = (override_reason or "").strip()
+            if len(reason) < 10:
+                raise BadRequestError(
+                    "Explain why you are waiving the failed checks (at least 10 characters).",
+                    code="OVERRIDE_REASON_REQUIRED",
+                )
+            override = {
+                "codes": [it.code for it in failed_required],
+                "messages": [it.message for it in failed_required],
+                "reason": reason[:1000],
+                "by_id": str(current_user.id),
+                "at": utcnow().isoformat(),
+            }
 
         # Update review
         decided = await self.repo.decide_review(
@@ -789,6 +886,7 @@ class ModerationService:
             status=ModerationReviewStatus.APPROVED,
             decision_note=decision_note,
         )
+        decided.compliance_override = override
 
         # Update assessment status
         assessment.status = AssessmentStatus.APPROVED
@@ -797,14 +895,17 @@ class ModerationService:
         await self.db.flush()
 
         # Notify author
-        await self.notification_repo.create(
+        await self._notify(
             recipient_id=assessment.created_by_id,
             notification_type=NotificationType.MODERATION_APPROVED,
             title="Moderation Approved",
-            body=f"Assessment '{assessment.title}' has been approved by the moderator.",
+            body=(
+                f"Assessment '{assessment.title}' has been approved by the moderator."
+                + (f" Checks waived: {', '.join(override['codes'])}." if override else "")
+            ),
             reference_id=assessment.id,
             reference_type="assessment",
-            action_url=f"/lecturer/assessments/{assessment.id}",
+            action_url=frontend_links.lecturer_assessment(assessment.id),
         )
 
         # Notify exam officers of institution
@@ -821,14 +922,22 @@ class ModerationService:
             )
             eo_ids = (await self.db.execute(eo_stmt)).scalars().all()
             for eo_id in eo_ids:
-                await self.notification_repo.create(
+                await self._notify(
                     recipient_id=eo_id,
                     notification_type=NotificationType.MODERATION_APPROVED,
                     title="Assessment Approved — Ready to Seal",
-                    body=f"Assessment '{assessment.title}' is approved and ready for exam office sealing.",
+                    body=(
+                        f"Assessment '{assessment.title}' is approved and ready for exam office sealing."
+                        + (
+                            f" The moderator waived: {', '.join(override['codes'])} "
+                            f"(reason: {override['reason'][:160]})."
+                            if override
+                            else ""
+                        )
+                    ),
                     reference_id=assessment.id,
                     reference_type="assessment",
-                    action_url=f"/exam-office/assessments/{assessment.id}",
+                    action_url=frontend_links.exam_office_queue(),
                 )
 
         # Audit
@@ -837,10 +946,18 @@ class ModerationService:
             actor_role=current_user.role,
             entity_type="moderation_review",
             entity_id=review.id,
-            action="moderation_approved",
-            description=f"Assessment '{assessment.title}' approved in Round {review.round_no}.",
+            action="moderation_approved_with_override" if override else "moderation_approved",
+            description=(
+                f"Assessment '{assessment.title}' approved in Round {review.round_no}"
+                + (f" with waived checks {', '.join(override['codes'])}: {override['reason']}" if override else "")
+                + "."
+            ),
             before_state={"status": "OPEN", "assessment_status": "PENDING_MODERATION"},
-            after_state={"status": "APPROVED", "assessment_status": "APPROVED"},
+            after_state={
+                "status": "APPROVED",
+                "assessment_status": "APPROVED",
+                "compliance_override": override,
+            },
         )
         self.db.add(audit)
         await self.db.commit()
@@ -873,12 +990,30 @@ class ModerationService:
         reviews = await self.repo.list_reviews_by_assessment(assessment_id)
         latest_version = await self.repo.get_latest_version(assessment_id)
 
+        # While a round is open, evaluate the automatic checks against the institution's
+        # CURRENT rules so the moderator decides on today's rules, not the submission snapshot.
+        current_checklist: Optional[dict] = None
+        if reviews and reviews[-1].status == ModerationReviewStatus.OPEN:
+            try:
+                current_checklist = (
+                    await ModerationChecklistService.run(
+                        assessment=assessment,
+                        db=self.db,
+                        run_ai_review=False,
+                        config=config_from_policy(await self._resolve_policy(assessment)),
+                    )
+                ).to_dict()
+            except Exception as exc:  # noqa: BLE001 - the overview must still load without it
+                logger.warning("current_checklist_failed", error=str(exc))
+
         return {
             "assessment_id": str(assessment.id),
             "status": assessment.status.value,
             "latest_version_no": latest_version.version_no if latest_version else 0,
+            "current_checklist": current_checklist,
             "rounds": [
                 {
+                    "compliance_override": r.compliance_override,
                     "id": str(r.id),
                     "round_no": r.round_no,
                     "reviewer_id": str(r.reviewer_id) if r.reviewer_id else None,
@@ -971,12 +1106,10 @@ class ModerationService:
                 assessment_type=assessment.assessment_type,
             )
 
-        policy_total = policy.summative_total_marks if (policy and policy.summative_total_marks) else 100
-
         return await ModerationChecklistService.run(
             assessment=assessment,
-            policy_total=policy_total,
             db=self.db,
             run_ai_review=run_ai_review,
+            config=config_from_policy(policy),
         )
 

@@ -130,20 +130,24 @@ async def generate_questions(
                     question_type=context.question_type,
                     difficulty=context.difficulty,
                     raw_content=q.model_dump_json(),
-                    parsed_successfully=True,
+                    # A question that is unusable as generated (e.g. a case study with no
+                    # sub-questions) is stored as a failure with the reason, not as a success.
+                    parsed_successfully=not q.hard_failure,
                     question_text=q.question,
                     options=[opt.model_dump() for opt in q.options],
                     explanation=q.explanation,
+                    parse_error="; ".join(q.issues) if q.issues else None,
                     bloom_level=q.bloom_level or context.bloom_level,
                 )
             )
 
+        usable = sum(1 for r in raw_questions if r.parsed_successfully)
         return GenerationResult(
             request_id=context.request_id,
             context=context,
             questions=raw_questions,
-            total_generated=len(raw_questions),
-            total_failed=0,
+            total_generated=usable,
+            total_failed=max(0, context.count - usable),
             provider=provider.name,
             model_used=provider.default_model,
             full_prompt=full_prompt,

@@ -32,6 +32,7 @@ from collections.abc import Awaitable
 from datetime import UTC, datetime, timedelta
 from typing import Any, TypeVar
 
+from app.core import links as frontend_links
 from app.core.celery_app import celery
 from app.core.exceptions import NotFoundError
 from app.core.logger import get_logger
@@ -691,8 +692,22 @@ async def _process_ai_generation_async(batch_id: str) -> dict[str, Any]:
             total_generated = 0
             total_failed = 0
             final_status = AIBatchStatus.COMPLETED
+            # Per-section progress is committed as each section starts and finishes, so the
+            # UI can show real progress and the exact reason a section failed.
+            progress: list[dict[str, Any]] = [
+                {**s, "status": "PENDING", "generated": 0, "failed": 0, "error": None}
+                for s in batch.sections_json
+            ]
 
-            for sec in batch.sections_json:
+            for sec_idx, sec in enumerate(batch.sections_json):
+                progress[sec_idx]["status"] = "RUNNING"
+                await repo.update_batch_status(
+                    batch_id=batch.id,
+                    status=AIBatchStatus.PROCESSING,
+                    sections_json=progress,
+                )
+                await session.commit()
+
                 sec_id_str = sec.get("section_id")
                 sec_uuid = uuid.UUID(sec_id_str) if sec_id_str else None
                 sec_topic = sec.get("topic") or batch.topic
@@ -736,6 +751,16 @@ async def _process_ai_generation_async(batch_id: str) -> dict[str, Any]:
                     result = await generate_questions(context, db=session)
                     total_generated += result.total_generated
                     total_failed += result.total_failed
+                    progress[sec_idx].update(
+                        generated=result.total_generated,
+                        failed=result.total_failed,
+                        error=result.error,
+                        status=(
+                            "FAILED" if result.total_generated == 0
+                            else "PARTIAL" if result.total_failed > 0
+                            else "DONE"
+                        ),
+                    )
 
                     # Store each generated question
                     for generated in result.questions:
@@ -760,6 +785,16 @@ async def _process_ai_generation_async(batch_id: str) -> dict[str, Any]:
                 except Exception as sec_exc:
                     logger.error("Failed to generate for section %s: %s", sec_id_str, str(sec_exc))
                     total_failed += sec_count
+                    progress[sec_idx].update(status="FAILED", failed=sec_count, error=str(sec_exc)[:500])
+
+                await repo.update_batch_status(
+                    batch_id=batch.id,
+                    status=AIBatchStatus.PROCESSING,
+                    total_generated=total_generated,
+                    total_failed=total_failed,
+                    sections_json=progress,
+                )
+                await session.commit()
 
             # Determine final batch status
             if total_generated == 0:
@@ -768,12 +803,15 @@ async def _process_ai_generation_async(batch_id: str) -> dict[str, Any]:
                 final_status = AIBatchStatus.PARTIAL_FAILURE
 
             completed_at = datetime.now(UTC)
+            failures = [p["error"] for p in progress if p.get("error")]
             await repo.update_batch_status(
                 batch_id=batch.id,
                 status=final_status,
                 total_generated=total_generated,
                 total_failed=total_failed,
                 completed_at=completed_at,
+                error_message=(failures[0][:500] if failures and final_status != AIBatchStatus.COMPLETED else None),
+                sections_json=progress,
             )
 
             await session.commit()
@@ -1044,7 +1082,7 @@ async def _grading_reminder_async() -> dict[str, Any]:
                             "lecturer_name": lecturer.profile.first_name if lecturer.profile else "Lecturer",
                             "assessment_title": assessment.title,
                             "pending_count": count,
-                            "grading_url": f"/lecturer/grading?assessment_id={assessment_id}",
+                            "grading_url": frontend_links.lecturer_grading(assessment_id),
                             "notification_type": NotificationType.ASSESSMENT_REMINDER.value
                         }
                     )

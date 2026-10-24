@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Optional
 
 import sqlalchemy as sa
 from sqlalchemy import Column, ForeignKey, UniqueConstraint
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlmodel import Field, Relationship
 
 from app.core.constants import (
@@ -86,6 +86,13 @@ class ApprovalPolicy(BaseModel, table=True):
     sealing_warning_days: int | None = Field(
         default=None,
         nullable=True,
+    )
+    # How strictly each automatic pre-moderation check applies at this institution:
+    # {"MARKS_TOTAL": {"mode": "BLOCKING|WARNING|OFF"}, "STRUCTURE": {..., "expected_sections": 3}, ...}
+    # Empty/NULL = platform defaults (see app/services/compliance_rules.py).
+    compliance_rules: Optional[dict] = Field(
+        default=None,
+        sa_column=Column(JSONB, nullable=True),
     )
     is_active: bool = Field(
         default=True,

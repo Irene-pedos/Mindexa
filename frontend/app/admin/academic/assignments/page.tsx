@@ -28,7 +28,9 @@ import {
   AcademicClassGroup,
   AcademicClassSection,
   AcademicCourse,
-  getAcademicPeriods
+  getAcademicPeriods,
+  academicYearOf,
+  type TeachingAssignmentRole,
 } from "@/lib/api/academic";
 import { adminApi } from "@/lib/api/admin";
 import { apiClient } from "@/lib/api/client";
@@ -292,8 +294,9 @@ export default function AdminAssignmentPanel() {
 
     setSubmitting(true);
     try {
-      const promises = Array.from(selectedCourses).map(courseId =>
-        adminAcademicApi.assignLecturer({
+      // One atomic request: a partial failure no longer leaves half the courses assigned.
+      await adminAcademicApi.assignLecturerBulk(
+        Array.from(selectedCourses).map((courseId) => ({
           lecturer_id: selectedLecturer,
           institution_id: selectedInst,
           campus_id: selectedCampus !== "none" ? selectedCampus : null,
@@ -303,12 +306,10 @@ export default function AdminAssignmentPanel() {
           course_id: courseId,
           class_section_id: selectedSection !== "none" ? selectedSection : null,
           academic_period_id: selectedPeriodId,
-          academic_year: selectedPeriod.name,
-          role: selectedRole
-        })
+          academic_year: academicYearOf(selectedPeriod),
+          role: selectedRole as TeachingAssignmentRole,
+        })),
       );
-
-      await Promise.all(promises);
       toast.success("Courses assigned successfully");
       setSelectedCourses(new Set());
       await loadAssignments();
@@ -667,6 +668,7 @@ export default function AdminAssignmentPanel() {
                                             <SelectContent>
                                                 <SelectItem value="MAIN_LECTURER" className="text-xs font-medium">Main Lecturer</SelectItem>
                                                 <SelectItem value="ASSISTANT_LECTURER" className="text-xs font-medium">Assistant</SelectItem>
+                                                <SelectItem value="CO_LECTURER" className="text-xs font-medium">Co-Lecturer</SelectItem>
                                                 <SelectItem value="SUPERVISOR" className="text-xs font-medium">Supervisor</SelectItem>
                                                 <SelectItem value="REVIEWER" className="text-xs font-medium">Reviewer</SelectItem>
                                             </SelectContent>

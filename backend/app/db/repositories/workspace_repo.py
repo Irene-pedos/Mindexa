@@ -37,50 +37,44 @@ class WorkspaceRepository:
         result = await self.db.execute(stmt)
         return list(result.scalars().all())
 
-    async def list_by_student(
-        self, student_id: uuid.UUID
-    ) -> List[TeachingWorkspace]:
-        """List all workspaces a student is enrolled in (section-specific or global)."""
-        # A student sees workspaces that:
-        # 1) Direct: Workspace has class_section_id and student is active in that section
-        # 2) Global: Workspace has class_section_id is Null, student is active in a section
-        #    that belongs to the workspace's assignment department (and option if option_id is set).
-        stmt = (
-            select(TeachingWorkspace)
-            .join(TeachingAssignment, TeachingAssignment.id == TeachingWorkspace.teaching_assignment_id)
-            .where(
-                TeachingWorkspace.is_deleted == False,
-                or_(
-                    # Direct link
-                    exists().where(
-                        and_(
-                            StudentEnrollment.student_id == student_id,
-                            StudentEnrollment.class_section_id == TeachingWorkspace.class_section_id,
-                            StudentEnrollment.enrollment_status == EnrollmentStatus.ACTIVE.value,
-                            StudentEnrollment.is_deleted == False
-                        )
-                    ),
-                    # Global/course-wide link
+    @staticmethod
+    def _student_access_clause(student_id: uuid.UUID):
+        """SQL predicate: the student may access a TeachingWorkspace joined to its TeachingAssignment.
+
+        A student sees workspaces that:
+        1) Direct: Workspace has class_section_id and student is active in that section
+        2) Global: Workspace has class_section_id is Null, student is active in a section
+           that belongs to the workspace's assignment department (and option if option_id is set).
+        """
+        return or_(
+            # Direct link
+            exists().where(
+                and_(
+                    StudentEnrollment.student_id == student_id,
+                    StudentEnrollment.class_section_id == TeachingWorkspace.class_section_id,
+                    StudentEnrollment.enrollment_status == EnrollmentStatus.ACTIVE.value,
+                    StudentEnrollment.is_deleted == False
+                )
+            ),
+            # Global/course-wide link
+            and_(
+                TeachingWorkspace.class_section_id == None,
+                exists().where(
                     and_(
-                        TeachingWorkspace.class_section_id == None,
+                        StudentEnrollment.student_id == student_id,
+                        StudentEnrollment.enrollment_status == EnrollmentStatus.ACTIVE.value,
+                        StudentEnrollment.is_deleted == False,
                         exists().where(
                             and_(
-                                StudentEnrollment.student_id == student_id,
-                                StudentEnrollment.enrollment_status == EnrollmentStatus.ACTIVE.value,
-                                StudentEnrollment.is_deleted == False,
-                                exists().where(
-                                    and_(
-                                        ClassSection.id == StudentEnrollment.class_section_id,
-                                        ClassSection.department_id == TeachingAssignment.department_id,
-                                        ClassSection.is_active == True,
-                                        or_(
-                                            TeachingAssignment.option_id == None,
-                                            exists().where(
-                                                and_(
-                                                    ClassGroup.id == ClassSection.class_group_id,
-                                                    ClassGroup.option_id == TeachingAssignment.option_id
-                                                )
-                                            )
+                                ClassSection.id == StudentEnrollment.class_section_id,
+                                ClassSection.department_id == TeachingAssignment.department_id,
+                                ClassSection.is_active == True,
+                                or_(
+                                    TeachingAssignment.option_id == None,
+                                    exists().where(
+                                        and_(
+                                            ClassGroup.id == ClassSection.class_group_id,
+                                            ClassGroup.option_id == TeachingAssignment.option_id
                                         )
                                     )
                                 )
@@ -88,6 +82,33 @@ class WorkspaceRepository:
                         )
                     )
                 )
+            ),
+        )
+
+    async def is_student_enrolled(self, student_id: uuid.UUID, workspace_id: uuid.UUID) -> bool:
+        """True when the student has active access to the given workspace."""
+        stmt = (
+            select(TeachingWorkspace.id)
+            .join(TeachingAssignment, TeachingAssignment.id == TeachingWorkspace.teaching_assignment_id)
+            .where(
+                TeachingWorkspace.id == workspace_id,
+                TeachingWorkspace.is_deleted == False,
+                self._student_access_clause(student_id),
+            )
+            .limit(1)
+        )
+        return (await self.db.execute(stmt)).first() is not None
+
+    async def list_by_student(
+        self, student_id: uuid.UUID
+    ) -> List[TeachingWorkspace]:
+        """List all workspaces a student is enrolled in (section-specific or global)."""
+        stmt = (
+            select(TeachingWorkspace)
+            .join(TeachingAssignment, TeachingAssignment.id == TeachingWorkspace.teaching_assignment_id)
+            .where(
+                TeachingWorkspace.is_deleted == False,
+                self._student_access_clause(student_id),
             )
             .options(
                 selectinload(TeachingWorkspace.course).selectinload(Course.institution),

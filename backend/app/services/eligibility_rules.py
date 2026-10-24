@@ -117,9 +117,16 @@ def summative_entry(
     pending_count: int,
     has_coursework: bool,
     policy: Any,
+    pending_titles: Optional[List[str]] = None,
 ) -> EntryDecision:
     """
     Evaluate summative exam entry eligibility against institutional policy (R-20).
+
+    pending_marks_behavior decides what unfinished coursework does:
+        BLOCK          -> entry blocked until the marks are released
+        MANUAL_REVIEW  -> entry held for HOD / board review
+        EXCLUDE        -> pending items are left out of the average
+    pending_titles only enriches the message so the student knows what is outstanding.
     """
     no_cw_behavior = getattr(policy, "no_coursework_behavior", NoCourseworkBehavior.MANUAL_REVIEW)
     pending_behavior = getattr(policy, "pending_marks_behavior", PendingMarksBehavior.BLOCK)
@@ -153,13 +160,29 @@ def summative_entry(
         )
 
     # 2. Pending marks exist and policy blocks on pending
-    if pending_count > 0 and pending_behavior == PendingMarksBehavior.BLOCK:
+    if pending_count > 0 and pending_behavior in (PendingMarksBehavior.BLOCK, PendingMarksBehavior.MANUAL_REVIEW):
+        titles = [t for t in (pending_titles or []) if t]
+        listed = f" ({', '.join(titles[:5])})" if titles else ""
+        if pending_behavior == PendingMarksBehavior.BLOCK:
+            return EntryDecision(
+                result=EligibilityResult.BLOCKED,
+                reason_code="MARKS_PENDING",
+                average_percentage=avg,
+                pending_count=pending_count,
+                message=(
+                    f"Blocked: Student has {pending_count} pending coursework assessment(s) "
+                    f"awaiting grading{listed}."
+                ),
+            )
         return EntryDecision(
-            result=EligibilityResult.BLOCKED,
+            result=EligibilityResult.MANUAL_REVIEW,
             reason_code="MARKS_PENDING",
             average_percentage=avg,
             pending_count=pending_count,
-            message=f"Blocked: Student has {pending_count} pending coursework assessment(s) awaiting grading.",
+            message=(
+                f"Manual Review Required: {pending_count} coursework assessment(s) still awaiting "
+                f"grading{listed}."
+            ),
         )
 
     # 3. Average threshold evaluation

@@ -12,10 +12,11 @@ from fastapi import UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.exceptions import ValidationError
+from app.core.exceptions import AuthorizationError, ValidationError
 from app.db.models.resource import LecturerMaterial, StudentResource
 from app.db.models.academic_resource import AcademicResource
 from app.db.repositories.resource_repo import ResourceRepository
+from app.db.repositories.workspace_repo import WorkspaceRepository
 from app.db.schemas.resource import LecturerMaterialCreate, StudentResourceResponse
 
 
@@ -35,6 +36,8 @@ class ResourceService:
         """
         Save a lecturer material file to disk and record it in the DB.
         """
+        await self.assert_can_manage_workspace_material(lecturer_id, metadata)
+
         # 1. Validate file extension
         ext = os.path.splitext(file.filename)[1].lower()
         if ext not in settings.ALLOWED_UPLOAD_EXTENSIONS:
@@ -135,6 +138,40 @@ class ResourceService:
     async def get_material(self, material_id: uuid.UUID) -> Optional[LecturerMaterial]:
         """Get a specific material."""
         return await self.repo.get_material_by_id(material_id)
+
+    async def assert_can_manage_workspace_material(
+        self, lecturer_id: uuid.UUID, metadata: LecturerMaterialCreate
+    ) -> None:
+        """Only the lecturer assigned to a workspace may add material to it, and any course /
+        assessment the upload is tagged with must belong to that same workspace."""
+        from sqlalchemy import select
+
+        from app.db.models.assessment import Assessment
+
+        workspace = await WorkspaceRepository(self.db).get_by_id(metadata.teaching_workspace_id)
+        if (
+            workspace is None
+            or workspace.teaching_assignment is None
+            or workspace.teaching_assignment.lecturer_id != lecturer_id
+        ):
+            raise AuthorizationError("You do not teach this workspace")
+
+        if metadata.course_id and metadata.course_id != workspace.course_id:
+            raise ValidationError("The course does not match this workspace.", code="COURSE_MISMATCH")
+
+        if metadata.assessment_id:
+            owner = (
+                await self.db.execute(
+                    select(Assessment.teaching_workspace_id).where(
+                        Assessment.id == metadata.assessment_id,
+                        Assessment.is_deleted == False,
+                    )
+                )
+            ).scalar_one_or_none()
+            if owner != metadata.teaching_workspace_id:
+                raise ValidationError(
+                    "The assessment does not belong to this workspace.", code="ASSESSMENT_MISMATCH"
+                )
 
     async def delete_lecturer_material(self, lecturer_id: uuid.UUID, material_id: uuid.UUID) -> bool:
         """Soft delete a lecturer material if they own it."""

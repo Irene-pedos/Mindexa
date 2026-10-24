@@ -194,11 +194,14 @@ class AIGateway:
                     if attempt >= max_retries:
                         errors.append(f"{provider.name}: Rate limit exceeded after {attempt} retries ({exc})")
                         break  # Fallback to next provider
+                    # A single request larger than the provider's per-minute limit cannot
+                    # succeed on retry. Shrinking max_tokens here would silently truncate the
+                    # output (broken JSON, cut-off questions) and the change would leak into the
+                    # fallback providers, so fail over with the request untouched instead.
+                    if "Request too large" in str(exc) or "TPM" in str(exc) or "413" in str(exc):
+                        errors.append(f"{provider.name}: Request exceeds the provider token limit ({exc})")
+                        break
                     attempt += 1
-                    
-                    # If error was caused by single-request TPM overflow, dynamically reduce completion tokens
-                    if ("Request too large" in str(exc) or "TPM" in str(exc) or "413" in str(exc)) and request.max_tokens and request.max_tokens > 800:
-                        request.max_tokens = max(800, int(request.max_tokens * 0.75))
 
                     # Prefer the provider's own Retry-After value; fall back to
                     # exponential back-off with a small jitter.

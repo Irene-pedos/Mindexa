@@ -33,6 +33,7 @@ from typing import Any, List, Optional, Tuple
 
 from sqlalchemy import select
 
+from app.core import links as frontend_links
 from app.core.constants import AssessmentStatus, Duty, UserRole
 from app.core.exceptions import (AuthorizationError, ConflictError,
                                  NotFoundError, ValidationError)
@@ -945,7 +946,8 @@ class AssessmentService:
                 errors.append(f"Choice pool: {issue.message}")
 
             # Check 4c: Summative structure rules
-            policy_total = 100
+            policy_total: int | None = 100
+            total_rule_mode = "BLOCKING"
             inst_id = None
             if assessment.course and getattr(assessment.course, "institution_id", None):
                 inst_id = assessment.course.institution_id
@@ -958,17 +960,24 @@ class AssessmentService:
             if inst_id and hasattr(self, "db") and self.db:
                 from app.core.constants import AssessmentType
                 from app.db.repositories.approval_policy_repo import ApprovalPolicyRepository
+                from app.services.compliance_rules import config_from_policy
                 policy_repo = ApprovalPolicyRepository(self.db)
                 policy = await policy_repo.get_by_institution_and_type(
                     institution_id=inst_id,
                     assessment_type=AssessmentType.SUMMATIVE,
                 )
-                if policy and policy.summative_total_marks is not None:
-                    policy_total = policy.summative_total_marks
+                if policy:
+                    # The institution's own rules: a fixed total may be absent, or only a warning.
+                    compliance = config_from_policy(policy)
+                    policy_total = compliance.policy_total
+                    total_rule_mode = compliance.mode("MARKS_TOTAL")
 
             struct_result = validate_summative_structure(assessment, policy_total=policy_total)
             for v in struct_result.hard_violations:
-                errors.append(f"Structure: {v.message}")
+                if total_rule_mode == "BLOCKING":
+                    errors.append(f"Structure: {v.message}")
+                elif total_rule_mode == "WARNING":
+                    warnings.append(f"Structure warning: {v.message}")
             for w in struct_result.soft_warnings:
                 warnings.append(f"Structure warning: {w.message}")
 
@@ -1046,14 +1055,24 @@ class AssessmentService:
             if course_rec:
                 mod_inst_id = course_rec.institution_id
 
-        if mod_inst_id and hasattr(self, "db") and self.db:
-            from app.db.repositories.approval_policy_repo import ApprovalPolicyRepository
-            mod_policy_repo = ApprovalPolicyRepository(self.db)
-            mod_policy = await mod_policy_repo.get_by_institution_and_type(
-                institution_id=mod_inst_id,
-                assessment_type=assessment.assessment_type,
-            )
-            if mod_policy and mod_policy.requires_moderation:
+        if hasattr(self, "db") and self.db:
+            requires_moderation = False
+            if mod_inst_id:
+                from app.db.repositories.approval_policy_repo import ApprovalPolicyRepository
+                mod_policy = await ApprovalPolicyRepository(self.db).get_by_institution_and_type(
+                    institution_id=mod_inst_id,
+                    assessment_type=assessment.assessment_type,
+                )
+                if mod_policy is not None:
+                    requires_moderation = bool(mod_policy.requires_moderation)
+                else:
+                    # No policy configured: apply the seeded default (spec §5.2) —
+                    # SUMMATIVE assessments need moderation and a seal.
+                    requires_moderation = assessment.assessment_type == DbAssessmentType.SUMMATIVE
+            elif assessment.assessment_type == DbAssessmentType.SUMMATIVE:
+                requires_moderation = True
+
+            if requires_moderation:
                 curr_status = assessment.status.value if hasattr(assessment.status, "value") else str(assessment.status)
                 if curr_status != DbAssessmentStatus.SEALED.value:
                     errors.append(
@@ -1182,7 +1201,7 @@ class AssessmentService:
                         body=f"You have been assigned to group '{group.name}' for assessment '{assessment.title}'.",
                         reference_id=assessment.id,
                         reference_type="assessment",
-                        action_url=f"/student/group-work/{assessment.id}",
+                        action_url=frontend_links.student_group_work(assessment.id),
                     )
         else:
             lecturer_name = current_user.profile.display_name if current_user.profile and current_user.profile.display_name else "Your Lecturer"
@@ -1196,7 +1215,7 @@ class AssessmentService:
                     body=f"Lecturer {lecturer_name} has published a new assessment: '{assessment.title}'.",
                     reference_id=assessment.id,
                     reference_type="assessment",
-                    action_url=f"/student/assessments",
+                    action_url=frontend_links.student_assessments(),
                 )
 
                 # If already active, send start work notification too
@@ -1209,7 +1228,7 @@ class AssessmentService:
                         body=f"The assessment '{assessment.title}' is now active. You can start working on it.",
                         reference_id=assessment.id,
                         reference_type="assessment",
-                        action_url=f"/student/assessments/{assessment.id}/take",
+                        action_url=frontend_links.student_assessment_take(assessment.id),
                     )
 
         if delegation_id:
@@ -1238,6 +1257,13 @@ class AssessmentService:
         )
 
     # ─── Read ─────────────────────────────────────────────────────────────────
+
+    async def assert_can_edit_assessment(self, assessment_id: uuid.UUID, current_user: User) -> None:
+        """Raise unless the user may author this assessment (admin, author, co-author or delegate)."""
+        assessment = await self._repo.get_by_id(assessment_id)
+        if not assessment:
+            raise NotFoundError("Assessment not found.")
+        await self._async_assert_can_edit(assessment, current_user)
 
     async def get_assessment(
         self,
@@ -1319,8 +1345,21 @@ class AssessmentService:
         page: int = 1,
         page_size: int = 20,
         sort: str = "newest",
+        grading_mode: str | None = None,
     ):
         """Paginated list of assessments (role-aware)."""
+        db_grading_mode = None
+        if grading_mode:
+            # The lecturer UI calls the semi-automatic mode "AI assisted"
+            wanted = "SEMI" if grading_mode.upper() == "AI_ASSISTED" else grading_mode.upper()
+            try:
+                db_grading_mode = GradingMode(wanted)
+            except ValueError as e:
+                raise ValidationError(
+                    f"Invalid grading_mode: '{grading_mode}'. "
+                    f"Valid values are: {', '.join([m.value for m in GradingMode])}"
+                ) from e
+
         db_status = None
         if status:
             try:
@@ -1345,6 +1384,7 @@ class AssessmentService:
             items, total = await self._repo.list_all(
                 status=db_status,
                 assessment_type=db_type,
+                grading_mode=db_grading_mode,
                 workspace_id=workspace_id,
                 search=search,
                 page=page,
@@ -1356,6 +1396,7 @@ class AssessmentService:
                 created_by_id=current_user.id,
                 status=db_status,
                 assessment_type=db_type,
+                grading_mode=db_grading_mode,
                 workspace_id=workspace_id,
                 search=search,
                 page=page,
@@ -1473,6 +1514,18 @@ class AssessmentService:
             raise NotFoundError("Assessment not found.")
 
         self._assert_can_edit(assessment, current_user)
+
+        # Papers inside the moderation pipeline carry an audit trail (reviews,
+        # seals, print jobs); they are withdrawn through the moderation workflow.
+        if assessment.status in (
+            DbAssessmentStatus.PENDING_MODERATION,
+            DbAssessmentStatus.APPROVED,
+            DbAssessmentStatus.SEALED,
+        ):
+            raise ConflictError(
+                "This assessment is in the moderation pipeline and cannot be deleted.",
+                code="CANNOT_DELETE_IN_MODERATION",
+            )
 
         # Only block if it's currently ACTIVE (being taken by students)
         if assessment.status == DbAssessmentStatus.ACTIVE and current_user.role != UserRole.ADMIN.value:
@@ -1849,7 +1902,14 @@ class AssessmentService:
         await self._repo.update_fields(assessment.id, updated_by_id=current_user.id, **security_fields)
 
         # 3.1. Target Classes (Many-to-Many)
+        seen_target_ids: set[uuid.UUID] = set()
+
         async def add_or_restore_target_in_bulk(class_sec_id):
+            # The workspace's own section usually also arrives in target_section_ids; inserting it
+            # twice in one save broke the unique (assessment, section) key.
+            if class_sec_id in seen_target_ids:
+                return
+            seen_target_ids.add(class_sec_id)
             res = await self.db.execute(
                 select(AssessmentTargetSection).where(
                     AssessmentTargetSection.assessment_id == assessment.id,
@@ -2115,6 +2175,8 @@ class AssessmentService:
                     # Store sample answer in explanation if provided
                     if q.options and len(q.options) > 0 and q.options[0].option_text:
                         new_q.explanation = q.options[0].option_text
+                    else:
+                        new_q.explanation = None  # cleared in the editor: do not keep the old answer
                 elif db_q_type == DbQuestionType.CASE_STUDY:
                     for idx, opt in enumerate(q.options):
                         await self._question_repo.add_option(
@@ -2163,11 +2225,18 @@ class AssessmentService:
                 assessment_id=assessment.id,
                 question_id=new_q.id,
                 order_index=i,
-                added_via=QuestionAddedVia.BANK_INSERT if parent_q_id else QuestionAddedVia.MANUAL_WRITE,
+                # Remember where the question came from, so the editor can flag AI drafts again.
+                added_via=(
+                    QuestionAddedVia.BANK_INSERT
+                    if parent_q_id
+                    else QuestionAddedVia.AI_GENERATED_ACCEPTED
+                    if q.aiGenerated
+                    else QuestionAddedVia.MANUAL_WRITE
+                ),
                 assessment_section_id=section_id,
                 group_id=target_group_id,
                 marks_override=q.marks,
-                is_required=q.is_required if q.is_required is not None else True,
+                is_required=bool(q.is_required),
                 bank_entry_id=bank_entry_id,
             )
 
@@ -2286,17 +2355,22 @@ class AssessmentService:
         if not (is_creator or is_admin or is_supervisor or is_moderator):
             raise AuthorizationError("Not authorized to view marks summary for this assessment")
 
-        policy_total = 100
+        policy_total: int | None = 100
+        policy_total_mode = "BLOCKING"
         if inst_id and hasattr(self, "db") and self.db:
             from app.core.constants import AssessmentType
             from app.db.repositories.approval_policy_repo import ApprovalPolicyRepository
+            from app.services.compliance_rules import config_from_policy
             policy_repo = ApprovalPolicyRepository(self.db)
             policy = await policy_repo.get_by_institution_and_type(
                 institution_id=inst_id,
                 assessment_type=AssessmentType.SUMMATIVE,
             )
-            if policy and policy.summative_total_marks is not None:
-                policy_total = policy.summative_total_marks
+            if policy:
+                compliance = config_from_policy(policy)
+                # None = this institution sets no fixed total for summative papers
+                policy_total = compliance.policy_total
+                policy_total_mode = compliance.mode("MARKS_TOTAL")
 
         from app.services.assessment_marks import (
             required_marks,
@@ -2331,6 +2405,7 @@ class AssessmentService:
             "configured_total_marks": assessment.total_marks,
             "configured_policy_total_marks": policy_total,
             "policy_total": policy_total,
+            "policy_total_mode": policy_total_mode,
             "is_summative": is_summative,
             "is_valid_structure": struct_res.is_valid and len(pool_issues) == 0,
             "choice_pool_issues": [

@@ -1,5 +1,5 @@
 // frontend/lib/api/exam-office.ts
-import { apiClient } from "./client";
+import { apiClient, getToken, resolveApiUrl } from "./client";
 
 export interface ExamOfficeQueueItem {
   assessment_id: string;
@@ -55,6 +55,11 @@ export interface PrintJob {
   created_at: string;
 }
 
+export type ExamDocumentType = "paper" | "marking-scheme" | "moderation-form";
+
+/** Print job lifecycle, in order (backend PrintJobStatus). */
+export const PRINT_JOB_FLOW = ["REQUESTED", "PRINTED", "STORED", "DISTRIBUTED"] as const;
+
 export const examOfficeApi = {
   getExamOfficeQueue: (status?: string): Promise<ExamOfficeQueueItem[]> => {
     const query = status ? `?status=${encodeURIComponent(status)}` : "";
@@ -82,13 +87,48 @@ export const examOfficeApi = {
       body: JSON.stringify({ reason }),
     }),
 
-  getPrintableUrl: (assessmentId: string): string => {
-    const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
-    return `${baseUrl}/exam-office/assessments/${assessmentId}/printable`;
-  },
+  /**
+   * Download a generated DOCX (paper, marking scheme or moderation form).
+   * The endpoint needs the bearer token, so this fetches a blob rather than
+   * linking to the URL.
+   */
+  downloadDocument: async (
+    assessmentId: string,
+    documentType: ExamDocumentType,
+    fallbackName: string,
+  ): Promise<void> => {
+    const token = getToken();
+    if (!token) throw new Error("Authentication required");
 
-  getPrintJob: (jobId: string): Promise<PrintJob> =>
-    apiClient(`/exam-office/print-jobs/${jobId}`),
+    const response = await fetch(
+      `${resolveApiUrl()}/assessments/${assessmentId}/documents/${documentType}`,
+      { headers: { Authorization: `Bearer ${token}` }, credentials: "include" },
+    );
+    if (!response.ok) {
+      let detail = "";
+      try {
+        const body = await response.json();
+        detail = body?.detail?.message || body?.detail || body?.message || "";
+      } catch {
+        // not JSON
+      }
+      throw new Error(typeof detail === "string" && detail ? detail : "Could not download the document");
+    }
+
+    const disposition = response.headers.get("Content-Disposition") || "";
+    const match = /filename="?([^";]+)"?/i.exec(disposition);
+    const filename = match?.[1] || fallbackName;
+
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
+  },
 
   updatePrintJob: (
     jobId: string,
@@ -100,5 +140,5 @@ export const examOfficeApi = {
     }),
 
   verifyPublicSeal: (verificationCode: string) =>
-    apiClient(`/public/seals/verify/${encodeURIComponent(verificationCode)}`),
+    apiClient(`/public/verify-seal/${encodeURIComponent(verificationCode)}`, { requireAuth: false }),
 };

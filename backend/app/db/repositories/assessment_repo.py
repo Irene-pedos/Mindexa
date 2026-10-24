@@ -307,6 +307,7 @@ class AssessmentRepository:
         created_by_id: uuid.UUID,
         status: AssessmentStatus | None = None,
         assessment_type: AssessmentType | None = None,
+        grading_mode: GradingMode | None = None,
         workspace_id: uuid.UUID | None = None,
         search: str | None = None,
         page: int = 1,
@@ -314,17 +315,42 @@ class AssessmentRepository:
         sort: str = "newest",
     ) -> tuple[list[Assessment], int]:
         """
-        Paginated list of assessments owned by a given user.
+        Paginated list of assessments a lecturer works on: the ones they created,
+        plus ones where they are an active co-author or hold an active delegation
+        (the same people _async_assert_can_edit lets in).
         Returns (items, total_count).
         """
+        from app.db.base import utcnow
+        from app.db.enums import DelegationStatus
+        from app.db.models.authoring import AssessmentCollaborator, AuthorDelegation
+
+        now = utcnow()
+        co_authored = select(AssessmentCollaborator.assessment_id).where(
+            AssessmentCollaborator.lecturer_id == created_by_id,
+            AssessmentCollaborator.is_active == True,  # noqa: E712
+            AssessmentCollaborator.is_deleted == False,  # noqa: E712
+        )
+        delegated = select(AuthorDelegation.assessment_id).where(
+            AuthorDelegation.delegate_id == created_by_id,
+            AuthorDelegation.status == DelegationStatus.ACTIVE,
+            AuthorDelegation.is_deleted == False,  # noqa: E712
+            AuthorDelegation.valid_from <= now,
+            AuthorDelegation.valid_to >= now,
+        )
         filters = [
-            col(Assessment.created_by_id) == created_by_id,
+            or_(
+                col(Assessment.created_by_id) == created_by_id,
+                col(Assessment.id).in_(co_authored),
+                col(Assessment.id).in_(delegated),
+            ),
             col(Assessment.is_deleted) == False,  # noqa: E712
         ]
         if status:
             filters.append(col(Assessment.status) == status)
         if assessment_type:
             filters.append(col(Assessment.assessment_type) == assessment_type)
+        if grading_mode:
+            filters.append(col(Assessment.grading_mode) == grading_mode)
         if workspace_id:
             filters.append(col(Assessment.teaching_workspace_id) == workspace_id)
         if search and search.strip():
@@ -382,6 +408,7 @@ class AssessmentRepository:
         *,
         status: AssessmentStatus | None = None,
         assessment_type: AssessmentType | None = None,
+        grading_mode: GradingMode | None = None,
         course_id: uuid.UUID | None = None,
         workspace_id: uuid.UUID | None = None,
         search: str | None = None,
@@ -398,6 +425,8 @@ class AssessmentRepository:
             filters.append(col(Assessment.status) == status)
         if assessment_type:
             filters.append(col(Assessment.assessment_type) == assessment_type)
+        if grading_mode:
+            filters.append(col(Assessment.grading_mode) == grading_mode)
         if course_id:
             filters.append(col(Assessment.course_id) == course_id)
         if workspace_id:
@@ -685,7 +714,7 @@ class AssessmentRepository:
         assessment_section_id: uuid.UUID | None = None,
         group_id: uuid.UUID | None = None,
         marks_override: int | None = None,
-        is_required: bool = True,
+        is_required: bool = False,
         ai_review_id: uuid.UUID | None = None,
         bank_entry_id: uuid.UUID | None = None,
     ) -> AssessmentQuestion:

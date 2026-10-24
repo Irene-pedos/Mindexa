@@ -22,6 +22,12 @@ from app.schemas.lecturer_ai import (
     SlideDeckGenerateRequest,
     SlideDeckGenerateResponse,
 )
+from app.schemas.question_ai import (
+    EnhanceQuestionRequest,
+    EnhanceQuestionResponse,
+    ReviewPaperRequest,
+    ReviewPaperResponse,
+)
 from app.services.lecturer_ai_service import LecturerAIService
 
 router = APIRouter(prefix="/lecturers/ai", tags=["Lecturer AI"])
@@ -98,6 +104,36 @@ async def export_slide_deck(
             "Content-Disposition": f'attachment; filename="{filename}"',
         },
     )
+
+
+# ─── Question authoring assistant ─────────────────────────────────────────────
+
+@router.post(
+    "/questions/enhance",
+    status_code=status.HTTP_200_OK,
+    response_model=EnhanceQuestionResponse,
+    summary="Propose an improved or completed version of one draft question",
+)
+async def enhance_question(
+    body: EnhanceQuestionRequest,
+    current_user: User = Depends(require_lecturer_or_admin),
+    db: AsyncSession = Depends(get_db),
+) -> EnhanceQuestionResponse:
+    return await LecturerAIService(db).enhance_question(body, current_user)
+
+
+@router.post(
+    "/questions/review",
+    status_code=status.HTTP_200_OK,
+    response_model=ReviewPaperResponse,
+    summary="Review a draft paper for coverage, balance, duplicates and ambiguity",
+)
+async def review_paper(
+    body: ReviewPaperRequest,
+    current_user: User = Depends(require_lecturer_or_admin),
+    db: AsyncSession = Depends(get_db),
+) -> ReviewPaperResponse:
+    return await LecturerAIService(db).review_paper(body, current_user)
 
 
 # ─── Rubric Assistant ─────────────────────────────────────────────────────────

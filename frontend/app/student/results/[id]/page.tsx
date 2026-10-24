@@ -3,6 +3,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { format } from "date-fns";
 import {
@@ -43,6 +44,7 @@ import { toast } from "sonner";
 import { assessmentApi } from "@/lib/api/assessment";
 import { attemptApi } from "@/lib/api/attempt";
 import { resultApi } from "@/lib/api/result";
+import { appealApi, APPEAL_REASON_MIN_LENGTH } from "@/lib/api/appeals";
 import { submissionApi } from "@/lib/api/submission";
 import {
   isOpenEnded,
@@ -124,6 +126,7 @@ interface QuestionBreakdown {
   answer_table_template?: any;
   answerTableTemplate?: any;
   section_title?: string | null;
+  topic_tag?: string | null;
   max_score: number;
   awarded_score: number;
   score?: number | null;
@@ -157,6 +160,7 @@ interface AssessmentResultResponse {
   assessment_id: string;
   assessment_title: string | null;
   academic_year?: string | null;
+  course_id?: string | null;
   course_code?: string | null;
   course_name?: string | null;
   institution_name?: string | null;
@@ -563,6 +567,56 @@ function QuestionCard({
   );
 }
 
+const WEAK_TOPIC_THRESHOLD_PCT = 60;
+
+/** Topics scored below the threshold, weakest first, each linking to the AI tutor. */
+function ImproveTopicsCard({ breakdowns }: { breakdowns: QuestionBreakdown[] }) {
+  const weak = useMemo(() => {
+    const totals = new Map<string, { score: number; max: number }>();
+    for (const item of breakdowns) {
+      const tag = item.topic_tag?.trim();
+      if (!tag || !item.max_score) continue;
+      const entry = totals.get(tag) ?? { score: 0, max: 0 };
+      entry.score += item.score ?? 0;
+      entry.max += item.max_score;
+      totals.set(tag, entry);
+    }
+    return Array.from(totals, ([topic, { score, max }]) => ({ topic, pct: (score / max) * 100 }))
+      .filter((t) => t.pct < WEAK_TOPIC_THRESHOLD_PCT)
+      .sort((a, b) => a.pct - b.pct);
+  }, [breakdowns]);
+
+  if (weak.length === 0) return null;
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Sparkles className="size-4 text-primary" /> Improve these topics
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <p className="text-sm text-muted-foreground">
+          You scored below {WEAK_TOPIC_THRESHOLD_PCT}% on these topics. Your study planner already
+          prioritises them; open the tutor to work on one now.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {weak.map((t) => (
+            <Button key={t.topic} asChild variant="outline" size="sm">
+              <Link href={`/student/study/tutor?topic=${encodeURIComponent(t.topic)}`}>
+                {t.topic} ({Math.round(t.pct)}%)
+              </Link>
+            </Button>
+          ))}
+          <Button asChild variant="ghost" size="sm">
+            <Link href="/student/study">Open study planner</Link>
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 function ScoreBreakdownCard({
   breakdowns,
 }: {
@@ -695,6 +749,13 @@ function SubmittedQuestionCard({
   );
 }
 
+const REVIEW_CATEGORY_LABELS: Record<string, string> = {
+  recalculation: "Score recalculation",
+  question_appeal: "Question / rubric appeal",
+  technical: "Technical discrepancy",
+  other: "Other clarification",
+};
+
 export default function ResultDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -745,24 +806,39 @@ export default function ResultDetailPage() {
 
   const handleReviewSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (reviewNotes.trim().length < 10) {
+    if (reviewNotes.trim().length < APPEAL_REASON_MIN_LENGTH) {
       toast.error(
-        "Please provide at least 10 characters detailing your review request.",
+        `Please provide at least ${APPEAL_REASON_MIN_LENGTH} characters detailing your review request.`,
       );
+      return;
+    }
+    if (!result?.attempt_id || !result.course_id) {
+      toast.error("This result cannot be appealed from here (missing attempt or course).");
       return;
     }
 
     setReviewSubmitting(true);
     try {
-      // Simulate backend review dispatch / ticket logging
-      await new Promise((resolve) => setTimeout(resolve, 800));
+      // The category is part of the reason so the reviewer sees what was asked
+      const categoryLabel = REVIEW_CATEGORY_LABELS[reviewType] ?? reviewType;
+      await appealApi.create({
+        attempt_id: result.attempt_id,
+        assessment_id: result.assessment_id,
+        course_id: result.course_id,
+        reason: `[${categoryLabel}] ${reviewNotes.trim()}`,
+      });
       toast.success(
-        "Your result review request has been logged and forwarded to the course faculty.",
+        "Your review request has been submitted. You will be notified of the outcome.",
       );
       setReviewDialogOpen(false);
       setReviewNotes("");
-    } catch {
-      toast.error("Failed to submit review request. Please try again.");
+    } catch (err: unknown) {
+      // Surfaces the server's reason, e.g. "appeal window closed" or "already appealed"
+      toast.error(
+        err instanceof Error && err.message
+          ? err.message
+          : "Failed to submit review request. Please try again.",
+      );
     } finally {
       setReviewSubmitting(false);
     }
@@ -1359,6 +1435,10 @@ export default function ResultDetailPage() {
         <ScoreBreakdownCard breakdowns={result.breakdowns} />
       )}
 
+      {result.breakdowns?.length > 0 && (
+        <ImproveTopicsCard breakdowns={result.breakdowns} />
+      )}
+
       {/* ── Detailed Question-by-Question Review ── */}
       {result.breakdowns?.length > 0 && (
         <div className="space-y-4">
@@ -1456,8 +1536,8 @@ export default function ResultDetailPage() {
                 required
               />
               <p className="text-[10px] text-muted-foreground">
-                Minimum 10 characters required. Your request will be forwarded
-                to the course lecturer.
+                Minimum {APPEAL_REASON_MIN_LENGTH} characters required. Your request is
+                assigned to a reviewer who did not mark your work.
               </p>
             </div>
 
@@ -1474,7 +1554,7 @@ export default function ResultDetailPage() {
               <Button
                 type="submit"
                 size="sm"
-                disabled={reviewSubmitting || reviewNotes.trim().length < 10}
+                disabled={reviewSubmitting || reviewNotes.trim().length < APPEAL_REASON_MIN_LENGTH}
                 className="h-8 text-xs font-semibold rounded-xl bg-primary hover:bg-primary/95 text-primary-foreground"
               >
                 <Send className="size-3 mr-1.5" /> Submit Appeal

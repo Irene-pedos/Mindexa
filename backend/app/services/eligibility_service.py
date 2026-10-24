@@ -15,6 +15,7 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core import links as frontend_links
 from app.core.exceptions import (
     EligibilityBlockedError,
     NotFoundError,
@@ -23,7 +24,9 @@ from app.core.exceptions import (
 )
 from app.db.base import utcnow
 from app.db.enums import (
+    AssessmentStatus,
     AssessmentType,
+    AttemptStatus,
     EnrollmentStatus,
     EligibilityDecisionType,
     EligibilityResult,
@@ -74,6 +77,46 @@ from app.services.eligibility_rules import (
     summative_entry,
     summative_outcome,
 )
+
+# Coursework only counts once students could see it; DRAFT / moderation states never do.
+_COURSEWORK_COUNTABLE_STATUSES = (
+    AssessmentStatus.PUBLISHED,
+    AssessmentStatus.ACTIVE,
+    AssessmentStatus.CLOSED,
+    AssessmentStatus.ARCHIVED,
+)
+
+# Attempts whose marks are not final: open, or finished and waiting for grading.
+_PENDING_ATTEMPT_STATUSES = frozenset(
+    s.value
+    for s in (
+        AttemptStatus.PENDING,
+        AttemptStatus.IN_PROGRESS,
+        AttemptStatus.PAUSED,
+        AttemptStatus.SUBMITTED,
+        AttemptStatus.AUTO_SUBMITTED,
+        AttemptStatus.TIMED_OUT,
+        AttemptStatus.FLAGGED,
+    )
+)
+
+
+def _attempt_status_value(attempt: Any) -> str:
+    status = getattr(attempt, "status", None)
+    return str(getattr(status, "value", status))
+
+
+def _assessment_is_closed(assessment: Any, now: datetime) -> bool:
+    """True once nobody can take the assessment any more, so a missing attempt is a real absence."""
+    status = getattr(assessment, "status", None)
+    if getattr(status, "value", status) in (AssessmentStatus.CLOSED.value, AssessmentStatus.ARCHIVED.value):
+        return True
+    window_end = getattr(assessment, "window_end", None)
+    if window_end is None:
+        return False
+    if window_end.tzinfo is None:
+        window_end = window_end.replace(tzinfo=now.tzinfo)
+    return window_end < now
 
 
 class EligibilityService:
@@ -187,7 +230,7 @@ class EligibilityService:
                 f"Your score on {assessment.title} was {pct:.1f}%, which is below the exemption "
                 f"threshold ({policy.formative_exempt_pct:.1f}%). A reassessment is required."
             ),
-            action_url=f"/student/eligibility/courses/{course.id}",
+            action_url=frontend_links.student_requests("retakes"),
             reference_id=str(requirement.id),
             reference_type="reassessment_requirement",
         )
@@ -202,7 +245,7 @@ class EligibilityService:
                     f"A student scored {pct:.1f}% on formative assessment '{assessment.title}' "
                     f"and requires a reassessment."
                 ),
-                action_url=f"/lecturer/courses/{course.id}/eligibility",
+                action_url=frontend_links.lecturer_course(course.id),
                 reference_id=str(requirement.id),
                 reference_type="reassessment_requirement",
             )
@@ -235,7 +278,7 @@ class EligibilityService:
                 notification_type=NotificationType.REASSESSMENT_ASSIGNED,
                 title="Reassessment Assigned",
                 body=f"You have been assigned the reassessment '{reassessment.title}' for course {course.code}.",
-                action_url=f"/student/assessments/{reassessment.id}",
+                action_url=frontend_links.student_assessment_take(reassessment.id),
                 reference_id=str(reassessment.id),
                 reference_type="assessment",
             )
@@ -334,7 +377,7 @@ class EligibilityService:
                     f"Your summative exam score on {assessment.title} was {pct:.1f}%, which is below "
                     f"the pass threshold ({policy.summative_pass_pct:.1f}%). You have been flagged for retake."
                 ),
-                action_url=f"/student/retakes",
+                action_url=frontend_links.student_retakes(),
                 reference_id=str(retake.id),
                 reference_type="retake_record",
             )
@@ -366,14 +409,20 @@ class EligibilityService:
         Unweighted average (R-20): unexcused absence -> 0%; excused -> excluded;
         reassessments -> excluded; ungraded -> counted as pending.
         """
+        # Only coursework that was actually released to students can count for or against them;
+        # drafts and unpublished items must never turn into a 0% "absence".
         stmt = select(Assessment).where(
             Assessment.course_id == course_id,
             Assessment.assessment_type.in_([AssessmentType.CAT, AssessmentType.FORMATIVE]),
+            Assessment.status.in_(_COURSEWORK_COUNTABLE_STATUSES),
             Assessment.is_deleted == False,
         )
+        # NOTE: Assessment has no academic_period_id column, so `academic_period_id` cannot narrow this
+        # query yet; coursework is collected per course across periods.
 
         res = await self.db.execute(stmt)
         assessments = list(res.scalars().all())
+        now = utcnow()
 
         items: List[Dict[str, Any]] = []
 
@@ -414,9 +463,11 @@ class EligibilityService:
                 AssessmentAttempt.is_deleted == False,
             )
             att_res = await self.db.execute(att_stmt)
-            attempt = att_res.scalars().first()
+            attempts = list(att_res.scalars().all())
 
-            if attempt and attempt.status in ["SUBMITTED", "IN_PROGRESS", "PAUSED"]:
+            # Any attempt that is finished-but-ungraded or still open means marks are pending.
+            # (Auto-submitted / timed-out / flagged attempts were previously mistaken for absences.)
+            if any(_attempt_status_value(a) in _PENDING_ATTEMPT_STATUSES for a in attempts):
                 items.append({
                     "assessment_id": str(asm.id),
                     "title": asm.title,
@@ -434,6 +485,10 @@ class EligibilityService:
                     "is_excused": True,
                     "status": "EXCUSED",
                 })
+                continue
+
+            # Not attempted and still open (or not yet started): the student cannot have been absent yet.
+            if not _assessment_is_closed(asm, now):
                 continue
 
             # Otherwise, unexcused absence -> counts as 0% (A-03)
@@ -526,7 +581,7 @@ class EligibilityService:
                         f"You cannot start CAT '{assessment.title}' until your pending formative reassessments "
                         f"are submitted."
                     ),
-                    action_url=f"/student/eligibility/courses/{course.id}",
+                    action_url=frontend_links.student_requests("retakes"),
                     reference_id=str(decision.id),
                     reference_type="eligibility_decision",
                 )
@@ -573,6 +628,7 @@ class EligibilityService:
                 pending_count=pending_count,
                 has_coursework=has_coursework,
                 policy=policy,
+                pending_titles=[it.get("title", "") for it in items if it.get("is_pending")],
             )
 
             policy_snapshot = {
@@ -674,6 +730,7 @@ class EligibilityService:
             pending_count=pending_count,
             has_coursework=has_coursework,
             policy=policy,
+            pending_titles=[it.get("title", "") for it in items if it.get("is_pending")],
         )
 
         pending_reqs = await self.repo.list_pending_reassessments(
@@ -778,6 +835,7 @@ class EligibilityService:
                 pending_count=pending_count,
                 has_coursework=has_coursework,
                 policy=policy,
+                pending_titles=[it.get("title", "") for it in items if it.get("is_pending")],
             )
 
             p_reqs = await self.repo.list_pending_reassessments(
@@ -987,7 +1045,7 @@ class EligibilityService:
                     notification_type=NotificationType.RETAKE_PAYMENT_CONFIRMED,
                     title="Retake Payment Confirmed",
                     body="Your payment reference for course retake has been confirmed.",
-                    action_url="/student/retakes",
+                    action_url=frontend_links.student_retakes(),
                     reference_id=str(retake.id),
                     reference_type="retake_record",
                 )
@@ -1102,7 +1160,7 @@ class EligibilityService:
             notification_type=NotificationType.RETAKE_ENROLLED,
             title="Retake Enrolled",
             body=f"You have been officially enrolled into the retake offering for {course.code}.",
-            action_url="/student/retakes",
+            action_url=frontend_links.student_retakes(),
             reference_id=str(retake.id),
             reference_type="retake_record",
         )

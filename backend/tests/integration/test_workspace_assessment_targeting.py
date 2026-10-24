@@ -302,9 +302,11 @@ async def test_workspace_targeting_and_visibility(client: AsyncClient, make_auth
     ass_svc = AssessmentService(db)
 
     # Setup assessment draft (to finalize/publish)
+    # A CAT: this test is about the enrollment snapshot taken on publish. SUMMATIVE
+    # papers can only be published after moderation and sealing (covered elsewhere).
     ass_draft = Assessment(
         title="Draft Assessment",
-        assessment_type=AssessmentType.SUMMATIVE,
+        assessment_type=AssessmentType.CAT,
         status=AssessmentStatus.DRAFT,
         created_by_id=lid,
         teaching_workspace_id=global_workspace.id,

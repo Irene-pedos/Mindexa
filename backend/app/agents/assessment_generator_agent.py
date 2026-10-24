@@ -28,6 +28,91 @@ class GeneratedQuestion(BaseModel):
     difficulty: str | None = None
     bloom_level: str | None = None
     source_reference: str | None = Field(default=None, max_length=500)
+    # Completeness findings from `completeness_issues`. A hard failure means the question
+    # cannot be used as generated (e.g. a case study with no sub-questions).
+    issues: list[str] = Field(default_factory=list)
+    hard_failure: bool = False
+
+
+# Completion-token budget per question. Case studies carry a 150-300 word scenario plus
+# 2-4 sub-questions with grading guidance, which the old flat 400 tokens could not hold:
+# the output was cut off and silently repaired into a question with no sub-questions.
+TOKENS_PER_QUESTION: dict[str, int] = {
+    "case_study": 1100,
+    "essay": 650,
+    "short_answer": 380,
+    "computational": 420,
+    "practical": 420,
+    "matching": 300,
+    "ordering": 260,
+    "fill_blank": 260,
+}
+DEFAULT_TOKENS_PER_QUESTION = 230
+MAX_COMPLETION_TOKENS = 6000
+# Heavy types are generated a couple at a time so one call never needs a huge budget.
+MAX_PER_CALL: dict[str, int] = {"case_study": 2, "essay": 3}
+TRUNCATED_FINISH_REASONS = {"length", "max_tokens"}
+
+
+def completion_token_budget(question_type: str | None, count: int) -> int:
+    per_question = TOKENS_PER_QUESTION.get((question_type or "").lower(), DEFAULT_TOKENS_PER_QUESTION)
+    return min(per_question * max(1, count) + 500, MAX_COMPLETION_TOKENS)
+
+
+def completeness_issues(
+    question_type: str | None,
+    question_text: str,
+    options: list[dict[str, Any]],
+    explanation: str | None,
+) -> tuple[list[str], bool]:
+    """Return (issues, hard_failure) for a normalized question.
+
+    Nothing is invented here: a question the model left incomplete is reported as such so
+    the lecturer (or an automatic repair pass) can finish it, rather than being padded with
+    placeholder answers that look like real AI output.
+    """
+    q_type = (question_type or "").lower().replace("-", "_")
+    issues: list[str] = []
+    hard = False
+    texts = [str(o.get("text") or "").strip() for o in options]
+    correct = sum(1 for o in options if o.get("is_correct"))
+
+    if q_type == "case_study":
+        if len(options) < 2:
+            issues.append("Case study has no sub-questions (at least 2 are required).")
+            hard = True
+        elif any(not t for t in texts):
+            issues.append("A sub-question has no text.")
+            hard = True
+        if options and any(not str(o.get("explanation") or "").strip() for o in options):
+            issues.append("Some sub-questions have no answer guidance.")
+    elif q_type == "mcq":
+        if len(options) < 2:
+            issues.append("Multiple-choice question has fewer than 2 options.")
+            hard = True
+        elif correct == 0:
+            issues.append("Multiple-choice question has no correct option marked.")
+            hard = True
+    elif q_type in ("true_false", "truefalse"):
+        if len(options) != 2 or correct != 1:
+            issues.append("True/false question must have exactly one correct option.")
+            hard = True
+    elif q_type == "matching":
+        if len(options) < 2 or any(not str(o.get("explanation") or "").strip() for o in options):
+            issues.append("Matching question needs at least 2 complete pairs.")
+            hard = True
+    elif q_type == "ordering":
+        if len(options) < 2:
+            issues.append("Ordering question needs at least 2 items.")
+            hard = True
+    elif q_type in ("fill_blank", "fillblank"):
+        if "[blank]" not in question_text.lower():
+            issues.append("Fill-in-the-blank question has no [blank] marker.")
+            hard = True
+    elif q_type in ("short_answer", "shortanswer", "essay", "computational", "practical"):
+        if not (explanation or "").strip():
+            issues.append("No model answer / marking guidance was generated.")
+    return issues, hard
 
 
 class AssessmentGeneratorAgent(BaseAgent):
@@ -54,8 +139,78 @@ class AssessmentGeneratorAgent(BaseAgent):
         marks_per_question: int | None = None,
         batch_id: uuid.UUID | None = None,
     ) -> tuple[list[GeneratedQuestion], str]:
+        """Generate `count` questions, a few per model call for heavy types, then complete
+        any case study that came back without sub-questions.
+
+        Returns (questions, full_prompt). Questions that could not be completed are returned
+        with `hard_failure=True` and readable `issues` instead of being padded with invented content.
         """
-        Generate a batch of questions using the AI gateway.
+        q_type_lower = (question_type or "").lower()
+        chunk_size = MAX_PER_CALL.get(q_type_lower, max(1, count))
+        questions: list[GeneratedQuestion] = []
+        full_prompt = ""
+        remaining = max(1, count)
+        first_error: Exception | None = None
+
+        while remaining > 0:
+            take = min(chunk_size, remaining)
+            remaining -= take
+            try:
+                chunk, full_prompt = await self._generate_chunk(
+                    lecturer_id=lecturer_id,
+                    question_type=question_type,
+                    difficulty=difficulty,
+                    count=take,
+                    subject=subject,
+                    topic=topic,
+                    bloom_level=bloom_level,
+                    additional_context=additional_context,
+                    course_material_context=course_material_context,
+                    blueprint_constraints=blueprint_constraints,
+                    learning_outcomes=learning_outcomes,
+                    marks_per_question=marks_per_question,
+                    batch_id=batch_id,
+                )
+            except Exception as exc:  # keep what earlier chunks produced
+                first_error = first_error or exc
+                continue
+            questions.extend(chunk)
+
+        if not questions and first_error is not None:
+            raise first_error
+
+        if q_type_lower == "case_study":
+            for q in questions:
+                if q.hard_failure:
+                    await self._repair_case_study(
+                        q,
+                        lecturer_id=lecturer_id,
+                        marks=marks_per_question,
+                        topic=topic,
+                        batch_id=batch_id,
+                    )
+                self._finalize_case_study_marks(q, marks_per_question)
+        return questions, full_prompt
+
+    async def _generate_chunk(
+        self,
+        *,
+        lecturer_id: uuid.UUID,
+        question_type: str,
+        difficulty: str,
+        count: int,
+        subject: str | None = None,
+        topic: str | None = None,
+        bloom_level: str | None = None,
+        additional_context: str | None = None,
+        course_material_context: str | None = None,
+        blueprint_constraints: str | None = None,
+        learning_outcomes: str | None = None,
+        marks_per_question: int | None = None,
+        batch_id: uuid.UUID | None = None,
+    ) -> tuple[list[GeneratedQuestion], str]:
+        """
+        One model call producing `count` questions using the AI gateway.
 
         The prompt is grounded in:
         - course_material_context: retrieved chunks from lecturer's uploaded materials (RAG)
@@ -69,18 +224,8 @@ class AssessmentGeneratorAgent(BaseAgent):
 
         prompt_template = self._get_prompt()
 
-        # Compute accurate completion token budget based on question type and count
-        # Standard MCQs/True-False/Matching take ~150-220 tokens each.
-        # Open-ended / Case Study / Essay take ~300-450 tokens each.
-        q_type_lower = (question_type or "").lower()
-        if q_type_lower in ("essay", "case_study"):
-            budget_per_q = 400
-        elif q_type_lower in ("short_answer", "computational", "practical"):
-            budget_per_q = 280
-        else:
-            budget_per_q = 200
-
-        max_tokens = min(budget_per_q * max(1, count) + 400, 2400)
+        # Completion budget by question type (case studies need far more than MCQs).
+        max_tokens = completion_token_budget(question_type, count)
 
         # Budget RAG context so that prompt input + max_tokens is well under provider TPM limits (e.g. 6000 safe ceiling for Groq 8k TPM)
         if course_material_context and course_material_context.strip():
@@ -130,7 +275,7 @@ class AssessmentGeneratorAgent(BaseAgent):
                 "⚠️ Flag source_reference as 'Lecturer notes only — no uploaded material retrieved'."
             )
 
-        marks_str = str(marks_per_question) if marks_per_question else "Not specified"
+        marks_str = str(marks_per_question) if marks_per_question else "a sensible total (e.g. 10)"
 
         if not is_rag:
             prompt_template = (
@@ -218,6 +363,21 @@ class AssessmentGeneratorAgent(BaseAgent):
                 )
 
                 parsed_questions = self._parse_generated_questions(response.content, expected_question_type=question_type)
+
+                # A response cut off at the token limit is "repaired" into valid JSON that is
+                # missing its tail. If that cost us questions or made some unusable, try again
+                # with a bigger budget rather than accepting a silently degraded result.
+                finish_reason = (getattr(response, "finish_reason", None) or "").lower()
+                if (
+                    finish_reason in TRUNCATED_FINISH_REASONS
+                    and gen_attempt < max_attempts - 1
+                    and (len(parsed_questions) < count or any(q.hard_failure for q in parsed_questions))
+                ):
+                    request.max_tokens = min(int(request.max_tokens * 1.6), MAX_COMPLETION_TOKENS)
+                    raise ValidationError(
+                        "The AI output was cut off before it finished.",
+                        code="AI_OUTPUT_TRUNCATED",
+                    )
                 return parsed_questions, system_content
             except Exception as exc:
                 last_exc = exc
@@ -225,6 +385,122 @@ class AssessmentGeneratorAgent(BaseAgent):
                     request.temperature = min(0.7, request.temperature + 0.1)
                     continue
                 raise last_exc
+
+    async def _repair_case_study(
+        self,
+        q: GeneratedQuestion,
+        *,
+        lecturer_id: uuid.UUID,
+        marks: int | None,
+        topic: str | None,
+        batch_id: uuid.UUID | None,
+    ) -> None:
+        """Ask for just the sub-questions of an existing scenario.
+
+        The first call sometimes returns the scenario and no parts (often because the output
+        was cut off). A short follow-up that only has to write the parts is far more reliable
+        than failing the whole question. If it also fails the question stays a hard failure.
+        """
+        total = marks or 10
+        request = AICompletionRequest(
+            messages=[
+                AIMessage(
+                    role="system",
+                    content=(
+                        "You write exam sub-questions for a case study. Given a scenario, return ONLY a "
+                        "JSON array of 2 to 4 objects. Each object has: \"text\" (an analytical "
+                        "sub-question answerable from the scenario), \"explanation\" (the answer guidance "
+                        f"and marking criteria), and \"marks\" (integer). The marks must add up to {total}."
+                    ),
+                ),
+                AIMessage(
+                    role="user",
+                    content=f"Topic: {topic or 'General'}\n\nScenario:\n{q.question}\n\nReturn ONLY the JSON array.",
+                ),
+            ],
+            temperature=0.4,
+            max_tokens=1400,
+        )
+        try:
+            response = await self.gateway.complete(
+                request,
+                action_type=AIActionType.QUESTION_GENERATION,
+                actor_id=lecturer_id,
+                actor_role="lecturer",
+                subject_entity_type="ai_generation_batch",
+                subject_entity_id=batch_id,
+                prompt_summary="Completing missing sub-questions for a generated case study",
+                prompt_version=f"{self.prompt_name}_{self.prompt_version}_case_study_repair",
+            )
+        except Exception:
+            return
+
+        parts = self._parse_sub_questions(response.content)
+        if len(parts) < 2:
+            return
+        q.options = [GeneratedQuestionOption.model_validate(p) for p in parts]
+        issues, hard = completeness_issues("case_study", q.question, [p for p in parts], None)
+        q.issues = issues
+        q.hard_failure = hard
+
+    def _parse_sub_questions(self, content: str) -> list[dict[str, Any]]:
+        import json_repair
+
+        try:
+            data = json_repair.loads((content or "").strip())
+        except Exception:
+            return []
+        if isinstance(data, dict):
+            for key in ("sub_questions", "subQuestions", "parts", "questions", "items", "options"):
+                if isinstance(data.get(key), list):
+                    data = data[key]
+                    break
+        if not isinstance(data, list):
+            return []
+        parts: list[dict[str, Any]] = []
+        for raw in data:
+            if not isinstance(raw, dict):
+                continue
+            text = raw.get("text") or raw.get("sub_question") or raw.get("question") or raw.get("prompt")
+            if not text or not str(text).strip():
+                continue
+            points = raw.get("marks", raw.get("points", raw.get("match_key")))
+            parts.append(
+                {
+                    "text": str(text).strip()[:1000],
+                    "is_correct": True,
+                    "explanation": str(
+                        raw.get("explanation") or raw.get("guidance") or raw.get("answer") or ""
+                    ).strip()[:2000]
+                    or None,
+                    "match_key": str(points) if points is not None else None,
+                }
+            )
+        return parts
+
+    @staticmethod
+    def _finalize_case_study_marks(q: GeneratedQuestion, marks: int | None) -> None:
+        """Make the sub-question marks add up to the question's marks.
+
+        The model's own split is not trusted to sum correctly. With a known total the marks are
+        shared evenly (remainder to the first parts); without one, any part missing marks gets 5.
+        """
+        if not q.options:
+            return
+        count = len(q.options)
+        if marks and marks >= count:
+            base, extra = divmod(int(marks), count)
+            shares = [base + (1 if i < extra else 0) for i in range(count)]
+        else:
+            shares = []
+            for opt in q.options:
+                try:
+                    shares.append(max(1, int(float(opt.match_key or 5))))
+                except (TypeError, ValueError):
+                    shares.append(5)
+        for opt, share in zip(q.options, shares):
+            opt.match_key = str(share)
+            opt.is_correct = True
 
     def _parse_generated_questions(
         self,
@@ -367,11 +643,15 @@ class AssessmentGeneratorAgent(BaseAgent):
         if not question_text:
             raise ValueError("A generated question is missing its text/stem.")
 
-        raw_options = item.get("options")
+        # Models sometimes name the case-study parts differently from the schema asked for.
+        raw_options = None
+        for key in ("options", "choices", "answers", "sub_questions", "subQuestions", "parts"):
+            candidate = item.get(key)
+            if candidate:
+                raw_options = candidate
+                break
         if raw_options is None:
-            raw_options = item.get("choices")
-        if raw_options is None:
-            raw_options = item.get("answers") or []
+            raw_options = []
 
         normalized_options: list[dict[str, Any]] = []
         if isinstance(raw_options, list):
@@ -382,14 +662,28 @@ class AssessmentGeneratorAgent(BaseAgent):
                         or opt.get("option_text")
                         or opt.get("content")
                         or opt.get("label")
+                        or opt.get("sub_question")
+                        or opt.get("question")
+                        or opt.get("prompt")
                     )
-                    if option_text or opt.get("explanation") is not None:
+                    guidance = (
+                        opt.get("explanation")
+                        or opt.get("reason")
+                        or opt.get("guidance")
+                        or opt.get("model_answer")
+                        or opt.get("answer")
+                        or opt.get("criteria")
+                    )
+                    points = opt.get("match_key")
+                    if points is None:
+                        points = opt.get("marks", opt.get("points"))
+                    if option_text or guidance is not None:
                         normalized_options.append(
                             {
                                 "text": str(option_text or ""),
                                 "is_correct": bool(opt.get("is_correct", False)),
-                                "explanation": opt.get("explanation") or opt.get("reason"),
-                                "match_key": str(opt.get("match_key")) if opt.get("match_key") is not None else None,
+                                "explanation": guidance,
+                                "match_key": str(points) if points is not None else None,
                             }
                         )
                 elif isinstance(opt, str):
@@ -451,17 +745,17 @@ class AssessmentGeneratorAgent(BaseAgent):
             or item.get("guidance")
         )
 
+        # Never invent a model answer: placeholder text such as "Model Answer: Core expected
+        # answer..." reads like real AI output and would be accepted unnoticed. A missing one is
+        # reported through `issues` so the lecturer (or the AI "complete" action) can fill it in.
         if not explanation or not str(explanation).strip():
-            if q_type_str in ("short_answer", "shortanswer"):
-                explanation = f"Model Answer: Core expected answer and conceptual reasoning for: {clean_question_text[:120]}.\n\nRubric: 1 mark for core concept, 1 mark for detail."
-            elif q_type_str == "essay":
-                explanation = f"Model Answer: Comprehensive analysis covering core arguments and supporting evidence for: {clean_question_text[:120]}.\n\nRubric: Content understanding, critical evaluation, and clear structure."
-            elif q_type_str == "computational":
-                explanation = "Solution Steps: Follow standard mathematical derivation steps.\n\nNumerical Answer: Computed value based on formula."
-            elif q_type_str in ("mcq", "true_false", "truefalse"):
-                explanation = "The correct answer is derived from the course material context and standard academic concepts."
-            else:
-                explanation = f"Model Answer / Grading Guidance for: {clean_question_text[:100]}."
+            explanation = None
+        if q_type_str == "case_study":
+            explanation = None  # the guidance lives on each sub-question
+
+        issues, hard_failure = completeness_issues(
+            q_type_str, clean_question_text, normalized_options, explanation
+        )
 
         return {
             "question": clean_question_text,
@@ -470,6 +764,8 @@ class AssessmentGeneratorAgent(BaseAgent):
             "difficulty": item.get("difficulty") or item.get("level"),
             "bloom_level": item.get("bloom_level") or item.get("bloom") or item.get("taxonomy"),
             "source_reference": item.get("source_reference") or item.get("source"),
+            "issues": issues,
+            "hard_failure": hard_failure,
         }
 
     def _get_type_instructions(self, question_type: str, is_rag: bool = True) -> str:

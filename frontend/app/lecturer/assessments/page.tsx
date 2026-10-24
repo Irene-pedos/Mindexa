@@ -43,6 +43,7 @@ import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import Link from "next/link";
 import { assessmentApi } from "@/lib/api/assessment";
+import { useAuth } from "@/hooks/use-auth";
 import { cn, formatAssessmentType } from "@/lib/utils";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/interfaces-skeleton";
@@ -69,6 +70,7 @@ import { useRouter } from "next/navigation";
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 interface Assessment {
+  created_by_id?: string;
   id: string;
   title: string;
   assessment_type: string;
@@ -98,25 +100,39 @@ interface Assessment {
 const STATUS_TABS = [
   { value: "all", label: "All" },
   { value: "DRAFT", label: "Drafts" },
+  { value: "PENDING_MODERATION", label: "In moderation" },
+  { value: "CHANGES_REQUESTED", label: "Changes requested" },
+  { value: "APPROVED", label: "Approved" },
+  { value: "SEALED", label: "Sealed" },
   { value: "PUBLISHED", label: "Published" },
   { value: "ACTIVE", label: "Active" },
   { value: "CLOSED", label: "Closed" },
 ] as const;
 
+// Mirrors the backend AssessmentType enum — anything else is rejected with a 422.
 const ASSESSMENT_TYPES = [
-  "CAT",
-  "EXAM",
-  "HOMEWORK",
-  "ASSIGNMENT",
-  "QUIZ",
   "FORMATIVE",
+  "CAT",
   "SUMMATIVE",
-  "PRACTICE",
+  "HOMEWORK",
+  "GROUP_WORK",
+  "REASSESSMENT",
 ];
 
 const GRADING_MODES = ["AUTO", "MANUAL", "AI_ASSISTED"];
 
-const RISKY_STATUSES = new Set(["PUBLISHED", "ACTIVE", "CLOSED", "SCHEDULED"]);
+const RISKY_STATUSES = new Set([
+  "PUBLISHED",
+  "ACTIVE",
+  "CLOSED",
+  "PENDING_MODERATION",
+  "APPROVED",
+  "SEALED",
+]);
+// Content can only be changed by the wizard in these states.
+const EDITABLE = new Set(["DRAFT", "CHANGES_REQUESTED"]);
+// Papers inside the moderation pipeline or in use must not be deleted from here.
+const NOT_DELETABLE = new Set(["PENDING_MODERATION", "APPROVED", "SEALED", "ACTIVE", "CLOSED"]);
 const DRAFT_ONLY_BULK = true; // Only allow bulk-delete of DRAFTs
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -124,6 +140,10 @@ const DRAFT_ONLY_BULK = true; // Only allow bulk-delete of DRAFTs
 function statusStyle(status: string): string {
   const m: Record<string, string> = {
     DRAFT: "bg-muted text-muted-foreground border-border/40",
+    PENDING_MODERATION: "bg-purple-500/10 text-purple-600 border-purple-500/20",
+    CHANGES_REQUESTED: "bg-orange-500/10 text-orange-600 border-orange-500/20",
+    APPROVED: "bg-blue-500/10 text-blue-600 border-blue-500/20",
+    SEALED: "bg-emerald-500/10 text-emerald-600 border-emerald-500/20",
     PUBLISHED: "bg-primary/10 text-primary border-primary/20",
     SCHEDULED: "bg-primary/5 text-primary border-primary/15",
     ACTIVE: "bg-success/10 text-success border-success/20",
@@ -315,6 +335,7 @@ function BulkDeleteDialog({
 
 export default function ManageAssessmentsPage() {
   const router = useRouter();
+  const { user } = useAuth();
   const [assessments, setAssessments] = useState<Assessment[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
@@ -452,7 +473,14 @@ export default function ManageAssessmentsPage() {
   const handleFinalize = async (id: string) => {
     setFinalizingId(id);
     try {
-      await assessmentApi.finalizeAssessment(id);
+      // The server answers 200 even when it refuses to publish
+      const result = await assessmentApi.finalizeAssessment(id);
+      if (!result.validation_passed) {
+        toast.error(result.errors?.[0] || "The assessment could not be published.", {
+          description: result.errors?.length > 1 ? result.errors.slice(1, 3).join(" · ") : undefined,
+        });
+        return;
+      }
       toast.success("Assessment finalized and published");
       fetchAssessments();
       fetchTabCounts();
@@ -914,10 +942,11 @@ export default function ManageAssessmentsPage() {
                           const isDraft = item.status === "DRAFT";
                           const isActive = item.status === "ACTIVE";
                           const isClosed = item.status === "CLOSED";
-                          const canEdit =
-                            isDraft ||
-                            item.status === "PUBLISHED" ||
-                            item.status === "SCHEDULED";
+                          const canEdit = EDITABLE.has(item.status);
+                          // Only the creator may delete; co-authors and delegates edit but cannot
+                          const isOwner = !user?.id || item.created_by_id === user.id;
+                          const canDelete = isOwner && !NOT_DELETABLE.has(item.status);
+                          const isSummative = item.assessment_type === "SUMMATIVE";
                           const totalQ = (item as any).question_count ?? null;
                           const draftStep = isDraft ? item.draft_step : null;
 
@@ -1056,7 +1085,7 @@ export default function ManageAssessmentsPage() {
                               {/* Actions */}
                               <TableCell className="text-right pr-3">
                                 <div className="flex justify-end gap-0.5 transition-opacity">
-                                  {/* View — non-drafts */}
+                                  {/* View — everything that is not a plain draft */}
                                   {!isDraft && (
                                     <Button
                                       variant="ghost"
@@ -1096,6 +1125,7 @@ export default function ManageAssessmentsPage() {
 
                                   {/* Finalize shortcut — drafts only */}
                                   {isDraft &&
+                                    !isSummative &&
                                     item.draft_step &&
                                     item.draft_step >= 4 && (
                                       <Button
@@ -1139,7 +1169,7 @@ export default function ManageAssessmentsPage() {
                                       title="Results & Grading"
                                     >
                                       <Link
-                                        href={`/lecturer/assessments/${item.id}/results`}
+                                        href={`/lecturer/grading?assessment=${item.id}`}
                                       >
                                         <BarChart2 className="size-3 text-muted-foreground" />
                                       </Link>
@@ -1163,16 +1193,18 @@ export default function ManageAssessmentsPage() {
                                     </Button>
                                   )}
 
-                                  {/* Delete */}
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="h-6 w-6 rounded hover:bg-red-50"
-                                    title="Delete"
-                                    onClick={() => setDeleteTarget(item)}
-                                  >
-                                    <Trash2 className="size-3 text-muted-foreground hover:text-destructive" />
-                                  </Button>
+                                  {/* Delete — not while in moderation, sealed, or in use */}
+                                  {canDelete && (
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-6 w-6 rounded hover:bg-red-50"
+                                      title="Delete"
+                                      onClick={() => setDeleteTarget(item)}
+                                    >
+                                      <Trash2 className="size-3 text-muted-foreground hover:text-destructive" />
+                                    </Button>
+                                  )}
                                 </div>
                               </TableCell>
                             </TableRow>

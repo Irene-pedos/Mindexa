@@ -18,7 +18,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import Column, DateTime, ForeignKey, Index, UniqueConstraint, text
+from sqlalchemy import Column, DateTime, ForeignKey, Index, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlmodel import Field, Relationship
 
@@ -218,7 +218,9 @@ class QuestionOption(BaseModel, table=True):
     content: str = Field(nullable=False)
     is_correct: bool | None = Field(default=None, nullable=True)
     match_key: str | None = Field(default=None, nullable=True, max_length=500)
-    match_value: str | None = Field(default=None, nullable=True, max_length=500)
+    # Matching: the right-hand side. Case study: the sub-question's answer guidance, which is
+    # routinely longer than a short label, so it must not be length-capped.
+    match_value: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
     order_index: int = Field(nullable=False)
 
     question: Optional["Question"] = Relationship(back_populates="options")
@@ -307,7 +309,12 @@ class AssessmentQuestion(BaseModel, table=True):
     )
     order_index: int = Field(nullable=False)
     marks_override: int | None = Field(default=None, nullable=True)
-    is_required: bool = Field(default=True, nullable=False)
+    # Opt-in: a required question blocks early submission until it is answered.
+    is_required: bool = Field(
+        default=False,
+        nullable=False,
+        sa_column_kwargs={"server_default": text("false")},
+    )
 
     added_via: QuestionAddedVia = Field(default=QuestionAddedVia.MANUAL_WRITE, nullable=False)
     ai_review_id: uuid.UUID | None = Field(

@@ -48,14 +48,6 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
   Select,
   SelectContent,
   SelectItem,
@@ -65,10 +57,32 @@ import {
 
 import {
   moderationApi,
+  COMMENT_CATEGORY_LABELS,
   ModeratorQueueItem,
+  ModerationCommentCategory,
   ModerationOverview,
   ChecklistItem,
 } from "@/lib/api/moderation";
+import { buildFeedbackFromChecks, failedChecks, mergeFeedback } from "@/lib/moderation-feedback";
+
+/**
+ * The backend has no "CLAIMED" status: a claimed review is an OPEN round with a
+ * reviewer. Derive the label the moderator expects from that.
+ */
+type QueueState = "UNCLAIMED" | "CLAIMED" | "CHANGES_REQUESTED" | "APPROVED";
+
+function queueState(item: ModeratorQueueItem): QueueState {
+  if (item.review_status === "APPROVED") return "APPROVED";
+  if (item.review_status === "CHANGES_REQUESTED") return "CHANGES_REQUESTED";
+  return item.reviewer_id ? "CLAIMED" : "UNCLAIMED";
+}
+
+const STATE_LABELS: Record<QueueState, string> = {
+  UNCLAIMED: "Unclaimed",
+  CLAIMED: "Claimed",
+  CHANGES_REQUESTED: "Changes requested",
+  APPROVED: "Approved",
+};
 import { assessmentApi } from "@/lib/api/assessment";
 import { useAuth } from "@/hooks/use-auth";
 import { cn } from "@/lib/utils";
@@ -90,17 +104,19 @@ export function ModerationQueueView({ portal = "lecturer" }: ModerationQueueView
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [overview, setOverview] = useState<ModerationOverview | null>(null);
   const [questions, setQuestions] = useState<any[]>([]);
+  const [questionsError, setQuestionsError] = useState<string | null>(null);
 
-  // Dialog states for Actions
+  // Decision panel (inside the review sheet, not a second pop-up)
   const [actionType, setActionType] = useState<"APPROVE" | "REQUEST_CHANGES" | null>(null);
   const [decisionNote, setDecisionNote] = useState("");
+  const [waiveReason, setWaiveReason] = useState("");
+  const [decisionError, setDecisionError] = useState<string | null>(null);
   const [submittingAction, setSubmittingAction] = useState(false);
 
   // New Comment state
   const [newCommentText, setNewCommentText] = useState("");
-  const [newCommentCategory, setNewCommentCategory] = useState<
-    "GENERAL" | "SYLLABUS_ALIGNMENT" | "DIFFICULTY" | "CLARITY" | "MARKING_SCHEME"
-  >("GENERAL");
+  const [newCommentCategory, setNewCommentCategory] =
+    useState<ModerationCommentCategory>("WORDING");
   const [addingComment, setAddingComment] = useState(false);
 
   const fetchQueue = useCallback(async () => {
@@ -123,10 +139,15 @@ export function ModerationQueueView({ portal = "lecturer" }: ModerationQueueView
     if (e) e.stopPropagation();
     try {
       await moderationApi.claimReview(item.review_id);
-      toast.success("Moderation review claimed successfully!");
+      toast.success("Review claimed. Read the paper, then request changes or approve it.");
       fetchQueue();
+      // Claiming keeps the round OPEN; it only records who is reviewing. The author is
+      // told nothing more until a decision is made, so go straight to the review.
+      const claimed = { ...item, reviewer_id: user?.id };
       if (selectedItem?.review_id === item.review_id) {
-        setSelectedItem({ ...item, review_status: "CLAIMED", reviewer_id: user?.id });
+        setSelectedItem(claimed);
+      } else {
+        void handleOpenInspection(claimed);
       }
     } catch (err: any) {
       toast.error(err.message || "Failed to claim review");
@@ -137,10 +158,20 @@ export function ModerationQueueView({ portal = "lecturer" }: ModerationQueueView
     setSelectedItem(item);
     setInspectionOpen(true);
     setLoadingDetails(true);
+    setQuestionsError(null);
+    setQuestions([]);
     try {
       const [overviewRes, questionsRes] = await Promise.all([
         moderationApi.getAssessmentModeration(item.assessment_id).catch(() => null),
-        assessmentApi.getAssessmentQuestions(item.assessment_id).catch(() => []),
+        assessmentApi.getAssessmentQuestions(item.assessment_id).catch((err: unknown) => {
+          // Surface the failure instead of showing "no questions attached"
+          setQuestionsError(
+            err instanceof Error && err.message
+              ? err.message
+              : "The questions could not be loaded.",
+          );
+          return [];
+        }),
       ]);
       setOverview(overviewRes);
       setQuestions(questionsRes || []);
@@ -174,28 +205,67 @@ export function ModerationQueueView({ portal = "lecturer" }: ModerationQueueView
     }
   };
 
+  const openDecision = (type: "APPROVE" | "REQUEST_CHANGES") => {
+    setActionType(type);
+    // Changes start from the automated checks that were not met; the moderator adds their own words.
+    setDecisionNote(type === "REQUEST_CHANGES" ? buildFeedbackFromChecks(checklistItems) : "");
+    setWaiveReason("");
+    setDecisionError(null);
+  };
+
+  const closeDecision = () => {
+    setActionType(null);
+    setDecisionError(null);
+  };
+
   const handleExecuteDecision = async () => {
     if (!selectedItem || !actionType) return;
+    setDecisionError(null);
     if (actionType === "REQUEST_CHANGES" && !decisionNote.trim()) {
-      toast.error("Please enter specific feedback notes for the changes requested.");
+      setDecisionError("Write what the lecturer must change, so they can fix it.");
+      return;
+    }
+    if (actionType === "APPROVE" && failedRequired.length > 0 && waiveReason.trim().length < 10) {
+      setDecisionError("Explain why you are approving despite the failed checks (at least 10 characters).");
       return;
     }
 
     try {
       setSubmittingAction(true);
+      // Feedback typed in the comment box but never posted must not be lost.
+      if (actionType === "REQUEST_CHANGES" && newCommentText.trim()) {
+        await moderationApi.addComment(selectedItem.review_id, {
+          category: newCommentCategory,
+          comment: newCommentText.trim(),
+          target_type: "ASSESSMENT",
+        });
+        setNewCommentText("");
+      }
       if (actionType === "APPROVE") {
-        await moderationApi.approveReview(selectedItem.review_id, decisionNote.trim() || undefined);
-        toast.success("Summative assessment approved! Sent to Exam Office.");
+        await moderationApi.approveReview(selectedItem.review_id, decisionNote.trim() || undefined, {
+          overrideReason: failedRequired.length > 0 ? waiveReason.trim() : undefined,
+        });
+        toast.success(
+          failedRequired.length > 0
+            ? "Approved with waived checks. The lecturer and exam office have been told."
+            : "Approved. The paper is now with the Exam Office.",
+        );
       } else {
         await moderationApi.requestChanges(selectedItem.review_id, decisionNote.trim());
-        toast.info("Changes requested. Assessment returned to author.");
+        toast.success("Changes requested. The lecturer has been notified and can edit the paper now.");
       }
-      setActionType(null);
+      closeDecision();
       setDecisionNote("");
+      setWaiveReason("");
       setInspectionOpen(false);
       fetchQueue();
     } catch (err: any) {
-      toast.error(err.message || "Failed to submit decision");
+      // Shown inside the panel (a toast can be missed) and kept until the moderator acts again.
+      const message = err?.message || "The decision could not be saved. Please try again.";
+      setDecisionError(message);
+      toast.error(message);
+      // The rules may have changed since the sheet opened: reload what is shown.
+      if (selectedItem) void moderationApi.getAssessmentModeration(selectedItem.assessment_id).then(setOverview).catch(() => undefined);
     } finally {
       setSubmittingAction(false);
     }
@@ -207,16 +277,21 @@ export function ModerationQueueView({ portal = "lecturer" }: ModerationQueueView
       (item.assessment_id || "").toLowerCase().includes(search.toLowerCase());
 
     if (!matchesSearch) return false;
-    if (filterStatus === "ALL") return true;
-    if (filterStatus === "OPEN") return item.review_status === "OPEN";
-    if (filterStatus === "CLAIMED") return item.review_status === "CLAIMED";
-    if (filterStatus === "CHANGES_REQUESTED") return item.review_status === "CHANGES_REQUESTED";
-    if (filterStatus === "APPROVED") return item.review_status === "APPROVED";
-    return true;
+    return filterStatus === "ALL" || queueState(item) === filterStatus;
   });
 
   const latestRound = overview?.rounds?.[overview.rounds.length - 1];
-  const checklistItems = latestRound?.checklist_result?.items || [];
+  // Today's result under the institution's rules when the round is open, else the snapshot.
+  const checklistItems: ChecklistItem[] =
+    overview?.current_checklist?.items ?? latestRound?.checklist_result?.items ?? [];
+  const failedRequired = checklistItems.filter((c) => !c.passed && c.severity === "BLOCKING");
+  const failedAdvisory = checklistItems.filter((c) => !c.passed && c.severity === "WARNING");
+
+  // Only the moderator who claimed an open round may comment or decide. When the signed-in
+  // account has not loaded yet, do not hide the buttons: the server enforces who may decide.
+  const selectedState = selectedItem ? queueState(selectedItem) : null;
+  const canActOnSelected =
+    selectedState === "CLAIMED" && (!user?.id || selectedItem?.reviewer_id === user.id);
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
@@ -264,15 +339,15 @@ export function ModerationQueueView({ portal = "lecturer" }: ModerationQueueView
           </div>
 
           <div className="flex items-center gap-1.5 flex-wrap w-full md:w-auto">
-            {["ALL", "OPEN", "CLAIMED", "CHANGES_REQUESTED", "APPROVED"].map((st) => (
+            {(["ALL", "UNCLAIMED", "CLAIMED", "CHANGES_REQUESTED", "APPROVED"] as const).map((st) => (
               <Button
                 key={st}
                 variant={filterStatus === st ? "default" : "outline"}
                 size="sm"
                 onClick={() => setFilterStatus(st)}
-                className="h-8 text-xs capitalize"
+                className="h-8 text-xs"
               >
-                {st.replace("_", " ").toLowerCase()}
+                {st === "ALL" ? "All" : STATE_LABELS[st]}
               </Button>
             ))}
           </div>
@@ -301,8 +376,8 @@ export function ModerationQueueView({ portal = "lecturer" }: ModerationQueueView
       ) : (
         <div className="grid grid-cols-1 gap-3">
           {filteredQueue.map((item) => {
-            const isClaimedByMe = item.reviewer_id === user?.id;
-            const isUnclaimed = !item.reviewer_id || item.review_status === "OPEN";
+            const state = queueState(item);
+            const isUnclaimed = state === "UNCLAIMED";
 
             return (
               <Card
@@ -322,13 +397,13 @@ export function ModerationQueueView({ portal = "lecturer" }: ModerationQueueView
                       <Badge
                         className={cn(
                           "text-[10px] font-semibold h-5 uppercase tracking-wide",
-                          item.review_status === "OPEN" && "bg-amber-500/10 text-amber-600 border border-amber-500/20",
-                          item.review_status === "CLAIMED" && "bg-blue-500/10 text-blue-600 border border-blue-500/20",
-                          item.review_status === "CHANGES_REQUESTED" && "bg-orange-500/10 text-orange-600 border border-orange-500/20",
-                          item.review_status === "APPROVED" && "bg-emerald-500/10 text-emerald-600 border border-emerald-500/20"
+                          state === "UNCLAIMED" && "bg-amber-500/10 text-amber-600 border border-amber-500/20",
+                          state === "CLAIMED" && "bg-blue-500/10 text-blue-600 border border-blue-500/20",
+                          state === "CHANGES_REQUESTED" && "bg-orange-500/10 text-orange-600 border border-orange-500/20",
+                          state === "APPROVED" && "bg-emerald-500/10 text-emerald-600 border border-emerald-500/20"
                         )}
                       >
-                        {item.review_status.replace("_", " ")}
+                        {STATE_LABELS[state]}
                       </Badge>
                     </div>
 
@@ -337,9 +412,10 @@ export function ModerationQueueView({ portal = "lecturer" }: ModerationQueueView
                       {item.started_at && (
                         <span>Submitted: {format(new Date(item.started_at), "PPP p")}</span>
                       )}
-                      {item.claimed_at && (
+                      {state === "CLAIMED" && (
                         <span className="flex items-center gap-1 text-primary">
-                          <UserCheck className="size-3" /> Claimed
+                          <UserCheck className="size-3" />
+                          {item.reviewer_id === user?.id ? "Claimed by you" : "Claimed by another moderator"}
                         </span>
                       )}
                     </div>
@@ -384,11 +460,12 @@ export function ModerationQueueView({ portal = "lecturer" }: ModerationQueueView
                   {selectedItem?.assessment_title}
                 </SheetTitle>
                 <SheetDescription className="text-xs">
-                  Moderation Review Round {selectedItem?.round_no} · Status: {selectedItem?.review_status}
+                  Moderation Review Round {selectedItem?.round_no} · Status:{" "}
+                  {selectedState ? STATE_LABELS[selectedState] : ""}
                 </SheetDescription>
               </div>
 
-              {selectedItem?.review_status === "OPEN" && (
+              {selectedState === "UNCLAIMED" && (
                 <Button
                   size="sm"
                   onClick={() => selectedItem && handleClaim(selectedItem)}
@@ -411,10 +488,27 @@ export function ModerationQueueView({ portal = "lecturer" }: ModerationQueueView
               <div className="space-y-6">
                 {/* Pre-Moderation Automated Checklist */}
                 <div>
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-3 flex items-center gap-2">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-1 flex items-center gap-2">
                     <CheckCircle2 className="size-4 text-primary" />
                     Automated Pre-Moderation Compliance
                   </h4>
+                  <p className="mb-3 text-[11px] text-muted-foreground">
+                    Checked against your institution&apos;s current rules. These checks guide you; the
+                    decision is yours.
+                    {failedRequired.length > 0
+                      ? " You can approve despite a failed required check by giving a reason."
+                      : ""}
+                  </p>
+                  {latestRound?.compliance_override && (
+                    <div className="mb-3 rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 text-xs">
+                      <p className="font-semibold text-amber-800 dark:text-amber-300">
+                        Approved with waived checks: {latestRound.compliance_override.codes.join(", ")}
+                      </p>
+                      <p className="mt-1 text-muted-foreground">
+                        Reason: {latestRound.compliance_override.reason}
+                      </p>
+                    </div>
+                  )}
 
                   {checklistItems.length === 0 ? (
                     <div className="p-4 rounded-xl border border-border/60 bg-muted/20 text-xs text-muted-foreground text-center">
@@ -429,14 +523,14 @@ export function ModerationQueueView({ portal = "lecturer" }: ModerationQueueView
                             "p-3 rounded-xl border text-xs flex items-start gap-3",
                             chk.passed
                               ? "bg-emerald-500/5 border-emerald-500/20 text-emerald-900 dark:text-emerald-300"
-                              : chk.severity === "HARD_FAIL"
+                              : chk.severity === "BLOCKING"
                               ? "bg-rose-500/5 border-rose-500/20 text-rose-900 dark:text-rose-300"
                               : "bg-amber-500/5 border-amber-500/20 text-amber-900 dark:text-amber-300"
                           )}
                         >
                           {chk.passed ? (
                             <CheckCircle2 className="size-4 shrink-0 text-emerald-600 mt-0.5" />
-                          ) : chk.severity === "HARD_FAIL" ? (
+                          ) : chk.severity === "BLOCKING" ? (
                             <XCircle className="size-4 shrink-0 text-rose-600 mt-0.5" />
                           ) : (
                             <AlertTriangle className="size-4 shrink-0 text-amber-600 mt-0.5" />
@@ -445,6 +539,18 @@ export function ModerationQueueView({ portal = "lecturer" }: ModerationQueueView
                             <span className="font-semibold mr-1.5 uppercase tracking-wide text-[10px]">
                               [{chk.code}]
                             </span>
+                            {!chk.passed && (
+                              <span
+                                className={cn(
+                                  "mr-1.5 rounded px-1 py-px text-[9px] font-bold uppercase",
+                                  chk.severity === "BLOCKING"
+                                    ? "bg-rose-500/15 text-rose-700 dark:text-rose-300"
+                                    : "bg-amber-500/15 text-amber-700 dark:text-amber-300",
+                                )}
+                              >
+                                {chk.severity === "BLOCKING" ? "Required" : "Advisory"}
+                              </span>
+                            )}
                             {chk.message}
                           </div>
                         </div>
@@ -464,7 +570,11 @@ export function ModerationQueueView({ portal = "lecturer" }: ModerationQueueView
                     </h4>
                   </div>
 
-                  {questions.length === 0 ? (
+                  {questionsError ? (
+                    <div className="p-4 rounded-xl border border-rose-500/30 bg-rose-500/5 text-xs text-rose-700 dark:text-rose-300">
+                      Could not load the questions: {questionsError}
+                    </div>
+                  ) : questions.length === 0 ? (
                     <div className="p-4 rounded-xl border border-border/60 bg-muted/20 text-xs text-muted-foreground text-center">
                       No questions attached to this assessment.
                     </div>
@@ -518,10 +628,16 @@ export function ModerationQueueView({ portal = "lecturer" }: ModerationQueueView
                         >
                           <div className="flex items-center justify-between">
                             <Badge variant="secondary" className="text-[9px] uppercase tracking-wider">
-                              {c.category.replace("_", " ")}
+                              {COMMENT_CATEGORY_LABELS[c.category] ?? c.category}
                             </Badge>
-                            <span className="text-[10px] text-muted-foreground">
-                              {format(new Date(c.created_at), "p")}
+                            {/* The API does not send a timestamp; show resolution instead */}
+                            <span
+                              className={cn(
+                                "text-[10px]",
+                                c.resolved ? "text-emerald-600" : "text-muted-foreground",
+                              )}
+                            >
+                              {c.resolved ? "Resolved by author" : "Open"}
                             </span>
                           </div>
                           <p className="text-foreground">{c.comment}</p>
@@ -530,22 +646,42 @@ export function ModerationQueueView({ portal = "lecturer" }: ModerationQueueView
                     )}
                   </div>
 
-                  {/* Add comment box */}
-                  <div className="space-y-2 pt-2 border-t">
+                  {canActOnSelected && (
+                    <p className="rounded-lg border border-primary/20 bg-primary/5 p-2.5 text-xs text-foreground">
+                      Claiming only reserves this paper. <span className="font-semibold">The lecturer is told
+                      nothing until you decide</span>: use <span className="font-semibold">Request Changes</span>{" "}
+                      (with a note saying what to fix) or <span className="font-semibold">Approve Assessment</span>{" "}
+                      at the bottom of this panel.
+                    </p>
+                  )}
+
+                  {/* Add comment box — only for the moderator who claimed the round */}
+                  {!canActOnSelected && (
+                    <p className="text-xs text-muted-foreground border-t pt-2">
+                      {selectedState === "UNCLAIMED"
+                        ? "Claim this review to comment on it or make a decision."
+                        : selectedState === "CLAIMED"
+                          ? "This review is claimed by another moderator."
+                          : "This review round is closed."}
+                    </p>
+                  )}
+                  <div className={cn("space-y-2 pt-2 border-t", !canActOnSelected && "hidden")}>
                     <div className="flex items-center gap-2">
                       <Select
                         value={newCommentCategory}
-                        onValueChange={(val: any) => setNewCommentCategory(val)}
+                        onValueChange={(val) => setNewCommentCategory(val as ModerationCommentCategory)}
                       >
                         <SelectTrigger className="h-8 text-xs w-44">
                           <SelectValue placeholder="Category" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="GENERAL">General Feedback</SelectItem>
-                          <SelectItem value="SYLLABUS_ALIGNMENT">Syllabus Alignment</SelectItem>
-                          <SelectItem value="DIFFICULTY">Difficulty Level</SelectItem>
-                          <SelectItem value="CLARITY">Question Clarity</SelectItem>
-                          <SelectItem value="MARKING_SCHEME">Marking Scheme</SelectItem>
+                          {(Object.keys(COMMENT_CATEGORY_LABELS) as ModerationCommentCategory[]).map(
+                            (cat) => (
+                              <SelectItem key={cat} value={cat}>
+                                {COMMENT_CATEGORY_LABELS[cat]}
+                              </SelectItem>
+                            ),
+                          )}
                         </SelectContent>
                       </Select>
                       <Button
@@ -559,7 +695,7 @@ export function ModerationQueueView({ portal = "lecturer" }: ModerationQueueView
                       </Button>
                     </div>
                     <Textarea
-                      placeholder="Add specific comments or concerns for the author..."
+                      placeholder="Add specific comments or concerns for the lecturer..."
                       value={newCommentText}
                       onChange={(e) => setNewCommentText(e.target.value)}
                       className="text-xs min-h-[60px]"
@@ -570,109 +706,163 @@ export function ModerationQueueView({ portal = "lecturer" }: ModerationQueueView
             </ScrollArea>
           )}
 
-          {/* Footer Action Buttons */}
-          <div className="p-4 border-t bg-muted/10 flex items-center justify-between gap-3 shrink-0">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setInspectionOpen(false)}
-              className="h-9 text-xs"
-            >
-              Close
-            </Button>
+          {/* Decision area: pinned to the bottom of the sheet so it can never scroll out of reach */}
+          <div className="shrink-0 border-t bg-muted/10">
+            {actionType ? (
+              <div className="max-h-[60vh] space-y-3 overflow-y-auto p-4" role="region" aria-label="Your decision">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h4 className="text-sm font-semibold">
+                      {actionType === "APPROVE" ? "Approve this paper" : "Request changes from the lecturer"}
+                    </h4>
+                    <p className="text-xs text-muted-foreground">
+                      {actionType === "APPROVE"
+                        ? "The paper moves to the Exam Office for sealing and printing."
+                        : "The paper goes back to the lecturer, who is notified and can edit it straight away."}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    aria-label="Cancel"
+                    onClick={closeDecision}
+                    className="text-muted-foreground hover:text-foreground"
+                  >
+                    <XCircle className="size-4" />
+                  </button>
+                </div>
 
-            {selectedItem?.review_status !== "APPROVED" && (
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    setActionType("REQUEST_CHANGES");
-                    setDecisionNote("");
-                  }}
-                  className="h-9 text-xs text-orange-600 border-orange-500/30 hover:bg-orange-50 dark:hover:bg-orange-950/20"
-                >
-                  <RotateCcw className="size-3.5 mr-1" />
-                  Request Changes
+                {actionType === "APPROVE" && failedRequired.length > 0 && (
+                  <div className="space-y-2 rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 text-xs">
+                    <p className="font-semibold text-amber-800 dark:text-amber-300">
+                      {failedRequired.length} required check{failedRequired.length === 1 ? "" : "s"} did not
+                      pass. You can still approve.
+                    </p>
+                    <ul className="list-disc space-y-0.5 pl-4 text-muted-foreground">
+                      {failedRequired.map((c) => (
+                        <li key={c.code}>
+                          <span className="font-medium text-foreground">{c.code}</span>: {c.message}
+                        </li>
+                      ))}
+                    </ul>
+                    <Label htmlFor="waive-reason" className="text-xs font-medium">
+                      Why are you approving anyway? * <span className="font-normal text-muted-foreground">(recorded, and shown to the lecturer and exam office)</span>
+                    </Label>
+                    <Textarea
+                      id="waive-reason"
+                      value={waiveReason}
+                      onChange={(e) => setWaiveReason(e.target.value)}
+                      placeholder="e.g. This module is examined out of 70 by agreement with the exam board."
+                      className="min-h-[64px] text-xs"
+                    />
+                  </div>
+                )}
+                {actionType === "APPROVE" && failedRequired.length === 0 && failedAdvisory.length > 0 && (
+                  <p className="rounded-lg bg-muted/50 p-2.5 text-xs text-muted-foreground">
+                    {failedAdvisory.length} advisory check{failedAdvisory.length === 1 ? "" : "s"} did not pass (
+                    {failedAdvisory.map((c) => c.code).join(", ")}). They are only advice, so you can approve
+                    without giving a reason.
+                  </p>
+                )}
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="decision-note" className="text-xs font-medium">
+                    {actionType === "APPROVE" ? "Sign-off note (optional)" : "What must change? *"}
+                  </Label>
+                  {actionType === "REQUEST_CHANGES" && (
+                    <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                      <span>
+                        {failedChecks(checklistItems).length > 0
+                          ? `Filled from ${failedChecks(checklistItems).length} automated check${failedChecks(checklistItems).length === 1 ? "" : "s"} not met. Edit it or add your own words.`
+                          : "All automated checks passed. Write what you want changed."}
+                      </span>
+                      {failedChecks(checklistItems).length > 0 && (
+                        <button
+                          type="button"
+                          className="shrink-0 font-medium text-primary hover:underline"
+                          onClick={() => setDecisionNote((cur) => mergeFeedback(cur, checklistItems))}
+                        >
+                          Add unmet checks
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  <Textarea
+                    id="decision-note"
+                    placeholder={
+                      actionType === "APPROVE"
+                        ? "e.g. Content checked against the syllabus; marking scheme verified."
+                        : "Say which questions or settings must change, e.g. “Question 4 has two correct answers.”"
+                    }
+                    value={decisionNote}
+                    onChange={(e) => setDecisionNote(e.target.value)}
+                    className="min-h-[80px] text-xs"
+                  />
+                </div>
+
+                {decisionError && (
+                  <p role="alert" className="rounded-lg border border-rose-500/30 bg-rose-500/5 p-2.5 text-xs text-rose-700 dark:text-rose-300">
+                    {decisionError}
+                  </p>
+                )}
+
+                <div className="flex justify-end gap-2">
+                  <Button variant="outline" size="sm" onClick={closeDecision} className="h-9 text-xs">
+                    Cancel
+                  </Button>
+                  <Button
+                    size="sm"
+                    disabled={submittingAction}
+                    onClick={handleExecuteDecision}
+                    className={cn(
+                      "h-9 text-xs",
+                      actionType === "APPROVE"
+                        ? "bg-emerald-600 text-white hover:bg-emerald-700"
+                        : "bg-orange-600 text-white hover:bg-orange-700",
+                    )}
+                  >
+                    {submittingAction ? (
+                      <Loader2 className="size-3.5 animate-spin" />
+                    ) : actionType === "APPROVE" ? (
+                      failedRequired.length > 0 ? "Approve anyway" : "Confirm approval"
+                    ) : (
+                      "Send to lecturer"
+                    )}
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center justify-between gap-3 p-4">
+                <Button variant="outline" size="sm" onClick={() => setInspectionOpen(false)} className="h-9 text-xs">
+                  Close
                 </Button>
-                <Button
-                  size="sm"
-                  onClick={() => {
-                    setActionType("APPROVE");
-                    setDecisionNote("");
-                  }}
-                  className="h-9 text-xs bg-emerald-600 hover:bg-emerald-700 text-white"
-                >
-                  <ThumbsUp className="size-3.5 mr-1" />
-                  Approve Assessment
-                </Button>
+
+                {canActOnSelected && (
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => openDecision("REQUEST_CHANGES")}
+                      className="h-9 text-xs text-orange-600 border-orange-500/30 hover:bg-orange-50 dark:hover:bg-orange-950/20"
+                    >
+                      <RotateCcw className="size-3.5 mr-1" />
+                      Request Changes
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={() => openDecision("APPROVE")}
+                      className="h-9 text-xs bg-emerald-600 hover:bg-emerald-700 text-white"
+                    >
+                      <ThumbsUp className="size-3.5 mr-1" />
+                      Approve Assessment
+                    </Button>
+                  </div>
+                )}
               </div>
             )}
           </div>
         </SheetContent>
       </Sheet>
 
-      {/* Decision Confirmation Dialog */}
-      <Dialog open={actionType !== null} onOpenChange={(open) => !open && setActionType(null)}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="text-lg">
-              {actionType === "APPROVE" ? "Approve Summative Assessment" : "Request Changes from Author"}
-            </DialogTitle>
-            <DialogDescription className="text-xs">
-              {actionType === "APPROVE"
-                ? "Approving this assessment marks moderation complete and moves the assessment to the Exam Office queue for cryptographic sealing and print job generation."
-                : "The assessment will be returned to the course lecturer with your feedback for revision before resubmission."}
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-3 py-2">
-            <Label className="text-xs font-medium">
-              {actionType === "APPROVE" ? "Sign-off Note (Optional)" : "Reason / Changes Requested *"}
-            </Label>
-            <Textarea
-              placeholder={
-                actionType === "APPROVE"
-                  ? "e.g., Content vetted against semester syllabus; marking scheme verified."
-                  : "Detail what questions or parameters must be altered before approval..."
-              }
-              value={decisionNote}
-              onChange={(e) => setDecisionNote(e.target.value)}
-              className="text-xs min-h-[90px]"
-            />
-          </div>
-
-          <DialogFooter className="gap-2 sm:gap-0">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setActionType(null)}
-              className="h-9 text-xs"
-            >
-              Cancel
-            </Button>
-            <Button
-              size="sm"
-              disabled={submittingAction || (actionType === "REQUEST_CHANGES" && !decisionNote.trim())}
-              onClick={handleExecuteDecision}
-              className={cn(
-                "h-9 text-xs",
-                actionType === "APPROVE"
-                  ? "bg-emerald-600 hover:bg-emerald-700 text-white"
-                  : "bg-orange-600 hover:bg-orange-700 text-white"
-              )}
-            >
-              {submittingAction ? (
-                <Loader2 className="size-3.5 animate-spin" />
-              ) : actionType === "APPROVE" ? (
-                "Confirm Approval"
-              ) : (
-                "Send Changes Request"
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

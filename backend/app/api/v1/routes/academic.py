@@ -7,6 +7,7 @@ Cascading hierarchy routes for academic onboarding and assignments.
 import uuid
 from typing import List
 
+from app.dependencies.auth import get_current_user
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,7 +26,11 @@ from app.db.schemas.academic import (
 )
 from app.db.session import get_db
 
-router = APIRouter(prefix="/academic-hierarchy", tags=["Academic Hierarchy"])
+router = APIRouter(
+    prefix="/academic-hierarchy",
+    tags=["Academic Hierarchy"],
+    dependencies=[Depends(get_current_user)],
+)
 
 
 @router.get("/levels", response_model=List[int])

@@ -19,6 +19,8 @@ class QuestionOptionCreate(BaseModel):
     is_correct: bool = False
     order_index: int = Field(default=0, ge=0)
     explanation: str | None = None
+    # Case study: marks of this sub-question (as text). Matching: unused.
+    match_key: str | None = Field(default=None, max_length=500)
 
 
 class QuestionOptionResponse(BaseModel):
@@ -67,6 +69,8 @@ class QuestionCreateRequest(BaseModel):
     explanation: str | None = None
     hint: str | None = None
     question_type: str = Field(...)
+    # The scenario of a case study; sub-questions are sent as `options`.
+    case_study_context: str | None = Field(default=None, max_length=10000)
     difficulty: str = Field(default="medium")
     grading_mode: str | None = None
     subject: str | None = Field(default=None, max_length=200)

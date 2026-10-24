@@ -21,6 +21,7 @@ from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.types import ASGIApp
 
+from app.core.client_ip import get_client_ip
 from app.core.logger import get_logger, set_request_context
 
 logger = get_logger("mindexa.http")
@@ -97,10 +98,4 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
 
 
 def _get_client_ip(request: Request) -> str:
-    """Extract real client IP, honouring X-Forwarded-For from trusted proxies."""
-    forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    if request.client:
-        return request.client.host
-    return ""
+    return get_client_ip(request) or ""

@@ -494,6 +494,10 @@ async def list_approval_policies(
         institution_id=institution_id,
         assessment_type=assessment_type,
     )
+    if institution_id and not policies and assessment_type is None:
+        # Defaults are normally created the first time a paper is moderated. An admin who opens
+        # the settings first should still find something to edit (idempotent).
+        policies = await service.seed_defaults_for_institution(institution_id)
     return [ApprovalPolicyService.build_response(p) for p in policies]
 
 

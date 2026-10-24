@@ -39,6 +39,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
+from app.core import links as frontend_links
 from app.core.exceptions import (AuthorizationError, NotFoundError,
                                  ValidationError)
 from app.agents.integrity_explainer_agent import IntegrityExplainerOutput
@@ -102,6 +103,12 @@ THRESHOLDS: dict[str, list] = {
          "Extended inactivity detected"),
     ],
 }
+
+# Client-side heuristics with known false positives: stored and shown to
+# supervisors, but they never raise a warning, flag or auto-submit.
+ADVISORY_EVENT_TYPES = frozenset(
+    {IntegrityEventType.AI_TOOL_SUSPECTED.value, IntegrityEventType.DEVTOOLS_SUSPECTED.value}
+)
 
 # Warning messages for students
 WARNING_MESSAGES = {
@@ -191,6 +198,12 @@ class IntegrityService:
         Check event count & profile policies and evaluate action required.
         Actions: NONE | LOG_ONLY | WARNING | AUTO_SUBMIT
         """
+        # Heuristic detections are recorded for the supervisor and nothing else.
+        # Without this guard an unknown event type falls through to the default
+        # "Non-Tolerated / WARNING_LOG" rule below and could end in auto-submission.
+        if event_type in ADVISORY_EVENT_TYPES:
+            return None, "LOG_ONLY", None
+
         from app.db.models.assessment import Assessment
         assessment = await self.db.get(Assessment, assessment_id)
 
@@ -423,7 +436,7 @@ class IntegrityService:
                     body=f"A student attempt for '{attempt.assessment.title}' has been flagged: {description}.",
                     reference_id=flag.id,
                     reference_type="integrity_flag",
-                    action_url=f"/lecturer/assessments/{attempt.assessment_id}/supervision"
+                    action_url=frontend_links.lecturer_supervision(attempt.assessment_id)
                 )
         except Exception as e:
             print(f"FAILED to send integrity notification: {e}")

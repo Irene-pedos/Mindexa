@@ -1,7 +1,7 @@
 // app/lecturer/grading/page.tsx
 "use client";
 
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import Image from "next/image";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import {
@@ -588,6 +588,37 @@ function LecturerGradingQueueContent() {
       loadReleaseQueue(selectedAssessment.id, cls.class_id);
     }
   };
+
+  // Deep link: /lecturer/grading?assessment=<id> (notifications, emails, the
+  // assessments list) opens that assessment directly instead of the workspace picker.
+  const deepLinkAssessmentId = searchParams?.get("assessment");
+  const deepLinkHandledRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!deepLinkAssessmentId || workspaces.length === 0) return;
+    if (deepLinkHandledRef.current === deepLinkAssessmentId) return;
+    deepLinkHandledRef.current = deepLinkAssessmentId;
+
+    (async () => {
+      try {
+        const detail = await assessmentApi.getAssessmentById(deepLinkAssessmentId);
+        const ws = workspaces.find((w) => w.id === detail.teaching_workspace_id);
+        if (!ws) {
+          toast.info("Pick the workspace this assessment belongs to.");
+          return;
+        }
+        const res: any = await assessmentApi.getAssessments({ workspace_id: ws.id });
+        const items: AssessmentSummary[] = res?.items || res || [];
+        const target = items.find((a) => a.id === deepLinkAssessmentId);
+        setSelectedWorkspace(ws);
+        setAssessments(items);
+        if (target) handleSelectAssessment(target);
+      } catch {
+        toast.error("Could not open that assessment for grading.");
+      }
+    })();
+    // handleSelectAssessment only calls stable setters / loaders
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deepLinkAssessmentId, workspaces]);
 
   const handleBackToWorkspaces = () => {
     setSelectedWorkspace(null);

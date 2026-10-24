@@ -483,6 +483,10 @@ class IntegrityEventType(str, Enum):
     UNAUTHORIZED_SHARING = "UNAUTHORIZED_SHARING"
     TIME_EXPIRED = "TIME_EXPIRED"
     IDLE_LONG_PERIOD = "IDLE_LONG_PERIOD"
+    # Heuristic client-side detections. They are recorded for the supervisor's
+    # feed only — never a warning, flag or auto-submit (see ADVISORY_EVENT_TYPES).
+    AI_TOOL_SUSPECTED = "AI_TOOL_SUSPECTED"
+    DEVTOOLS_SUSPECTED = "DEVTOOLS_SUSPECTED"
 
 
 class IntegrityRuleCategory(str, Enum):
@@ -587,6 +591,7 @@ class NotificationType(str, Enum):
     TEACHING_ASSIGNMENT_CREATED = "TEACHING_ASSIGNMENT_CREATED"
     # Phase 3: Moderation and exam office workflow
     MODERATION_SUBMITTED = "MODERATION_SUBMITTED"
+    MODERATION_STARTED = "MODERATION_STARTED"
     MODERATION_CHANGES_REQUESTED = "MODERATION_CHANGES_REQUESTED"
     MODERATION_APPROVED = "MODERATION_APPROVED"
     ASSESSMENT_SEALED = "ASSESSMENT_SEALED"

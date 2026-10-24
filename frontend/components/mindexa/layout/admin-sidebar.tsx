@@ -10,6 +10,7 @@ import {
   LayoutDashboard,
   Users,
   UserCog,
+  UserCheck,
   BookOpen,
   Shield,
   Lock,
@@ -18,6 +19,7 @@ import {
   GraduationCap,
   Building2,
   Calendar,
+  ShieldCheck,
 } from "lucide-react";
 
 import {
@@ -40,6 +42,8 @@ const mainNav = [
   { title: "Dashboard", url: "/admin/dashboard", icon: LayoutDashboard, tourId: "admin-dashboard" },
   { title: "Users & Roles", url: "/admin/users", icon: Users, tourId: "admin-users" },
   { title: "Staff Duties", url: "/admin/duties", icon: UserCog },
+  { title: "Assessment Rules", url: "/admin/approval-policies", icon: ShieldCheck },
+  { title: "Exam Entry Rules", url: "/admin/eligibility", icon: UserCheck },
   { title: "Institutions", url: "/admin/institutions", icon: Building2 },
   { title: "Academic Structure", url: "/admin/academic/structure", icon: GraduationCap },
   { title: "Academic Periods", url: "/admin/academic/periods", icon: Calendar },

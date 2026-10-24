@@ -7,12 +7,14 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
-from app.core.exceptions import ConflictError
+from app.core import links as frontend_links
+from app.core.exceptions import AuthorizationError, ConflictError
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
-from app.db.enums import NotificationChannel, NotificationType
+from app.db.enums import (AssessmentStatus, NotificationChannel,
+                          NotificationType)
 from app.db.models.academic import Course, TeachingWorkspace
 from app.db.models.assessment import Assessment
 from app.db.models.learning_unit import LearningUnit, StudentLearningUnitProgress
@@ -21,6 +23,7 @@ from app.db.models.resource import LecturerMaterial
 from app.db.models.study_plan import (DEFAULT_INITIAL_READINESS_SCORE,
                                       StudyPlan, StudySession)
 from app.db.repositories.study_planner_repo import StudyPlannerRepository
+from app.db.repositories.workspace_repo import WorkspaceRepository
 from app.schemas.study_planner import (CreateStudyPlanRequest,
                                        GeneratePlanFromAssessmentRequest,
                                        LearningUnitResponse,
@@ -62,6 +65,17 @@ class StudyPlannerService:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
         self.repo = StudyPlannerRepository(db)
+        self.workspace_repo = WorkspaceRepository(db)
+
+    async def _assert_workspace_access(self, student_id: uuid.UUID, workspace_id: uuid.UUID) -> None:
+        """Reject workspaces the student is not enrolled in (their units, materials and RAG chunks are private)."""
+        if not await self.workspace_repo.is_student_enrolled(student_id, workspace_id):
+            logger.warning(
+                "study_planner_workspace_access_denied",
+                student_id=str(student_id),
+                workspace_id=str(workspace_id),
+            )
+            raise AuthorizationError("You are not enrolled in this course workspace")
 
     @staticmethod
     def _sanitize_mermaid(code: Optional[str]) -> Optional[str]:
@@ -138,6 +152,8 @@ class StudyPlannerService:
                 tw_id = c_ws.id
                 ws = c_ws
 
+        await self._assert_workspace_access(student_id, tw_id)
+
         # 2. Query persisted LearningUnit records
         lu_stmt = (
             select(LearningUnit)
@@ -186,6 +202,7 @@ class StudyPlannerService:
             select(LecturerMaterial)
             .where(
                 LecturerMaterial.teaching_workspace_id == tw_id,
+                LecturerMaterial.is_student_visible == True,
                 LecturerMaterial.is_deleted == False,
             )
             .order_by(LecturerMaterial.created_at.asc())
@@ -288,6 +305,46 @@ class StudyPlannerService:
             ),
         ]
 
+    async def _get_accessible_assessment(
+        self, student_id: uuid.UUID, assessment_id: uuid.UUID
+    ) -> Optional[Assessment]:
+        """Assessment the student may prepare for: released to students and inside an enrolled workspace.
+
+        Returns None when it does not exist or is not released (drafts must not leak topics);
+        raises AuthorizationError when it belongs to a workspace the student is not part of.
+        """
+        stmt = select(Assessment).where(
+            Assessment.id == assessment_id,
+            Assessment.is_deleted == False,
+            Assessment.status.in_(
+                [AssessmentStatus.PUBLISHED, AssessmentStatus.ACTIVE, AssessmentStatus.CLOSED]
+            ),
+        )
+        assessment = (await self.db.execute(stmt)).scalar_one_or_none()
+        if assessment is None:
+            return None
+        if assessment.teaching_workspace_id:
+            await self._assert_workspace_access(student_id, assessment.teaching_workspace_id)
+        return assessment
+
+    async def _resolve_target(
+        self,
+        target_mode: str,
+        target_learning_unit_id: Optional[uuid.UUID],
+        teaching_workspace_id: Optional[uuid.UUID],
+    ) -> Tuple[str, Optional[uuid.UUID]]:
+        """Persistable (mode, unit) pair; a unit outside the plan's workspace is ignored."""
+        if target_mode != "up_to_learning_unit" or not target_learning_unit_id or not teaching_workspace_id:
+            return "full_assessment_coverage", None
+        unit_stmt = select(LearningUnit.id).where(
+            LearningUnit.id == target_learning_unit_id,
+            LearningUnit.teaching_workspace_id == teaching_workspace_id,
+            LearningUnit.is_deleted == False,
+        )
+        if (await self.db.execute(unit_stmt)).scalar_one_or_none() is None:
+            return "full_assessment_coverage", None
+        return "up_to_learning_unit", target_learning_unit_id
+
     async def create_manual_plan(
         self, student_id: uuid.UUID, data: CreateStudyPlanRequest
     ) -> StudyPlanResponse:
@@ -320,15 +377,17 @@ class StudyPlannerService:
             else:
                 teaching_workspace_id = None
 
+        if teaching_workspace_id:
+            await self._assert_workspace_access(student_id, teaching_workspace_id)
+
+        assessment_id: Optional[uuid.UUID] = None
         if data.assessment_id:
-            ass_stmt = select(Assessment.id).where(Assessment.id == data.assessment_id, Assessment.is_deleted == False)
-            ass_res = await self.db.execute(ass_stmt)
-            if ass_res.scalar_one_or_none():
-                assessment_id = data.assessment_id
-            else:
-                assessment_id = None
-        else:
-            assessment_id = None
+            accessible = await self._get_accessible_assessment(student_id, data.assessment_id)
+            assessment_id = accessible.id if accessible else None
+
+        target_mode, target_learning_unit_id = await self._resolve_target(
+            data.target_mode, data.target_learning_unit_id, teaching_workspace_id
+        )
 
         plan = StudyPlan(
             student_id=student_id,
@@ -337,6 +396,8 @@ class StudyPlannerService:
             course_id=course_id,
             teaching_workspace_id=teaching_workspace_id,
             assessment_id=assessment_id,
+            target_mode=target_mode,
+            target_learning_unit_id=target_learning_unit_id,
             start_date=start_date,
             end_date=end_date,
             available_days=data.available_days,
@@ -369,7 +430,7 @@ class StudyPlannerService:
             channel=NotificationChannel.IN_APP,
             title=f"Study Plan Created: {plan.title}",
             body=f"Your AI study plan is ready. First session starts at {data.preferred_time_start}.",
-            action_url="/student/study",
+            action_url=frontend_links.student_study(),
             reference_id=plan.id,
             reference_type="study_plan",
         )
@@ -382,12 +443,13 @@ class StudyPlannerService:
         self, student_id: uuid.UUID, data: GeneratePlanFromAssessmentRequest
     ) -> StudyPlanResponse:
         """AI automatic plan creation based on target assessment deadlines, topics, and course materials."""
-        stmt = select(Assessment).where(Assessment.id == data.assessment_id)
-        res = await self.db.execute(stmt)
-        assessment = res.scalar_one_or_none()
-
+        assessment = await self._get_accessible_assessment(student_id, data.assessment_id)
         if not assessment:
             raise ValueError("Assessment not found")
+
+        target_mode, target_learning_unit_id = await self._resolve_target(
+            data.target_mode, data.target_learning_unit_id, assessment.teaching_workspace_id
+        )
 
         now = datetime.now(UTC)
         # Prefer user-supplied dates; fall back to assessment window / now only when omitted.
@@ -420,6 +482,8 @@ class StudyPlannerService:
             course_id=assessment.course_id,
             teaching_workspace_id=assessment.teaching_workspace_id,
             assessment_id=assessment.id,
+            target_mode=target_mode,
+            target_learning_unit_id=target_learning_unit_id,
             start_date=start_date,
             end_date=end_date,
             available_days=data.available_days,
@@ -451,7 +515,7 @@ class StudyPlannerService:
             channel=NotificationChannel.IN_APP,
             title=f"AI Study Plan Ready: {assessment.title}",
             body=f"AI has generated a targeted study plan for '{assessment.title}'. First session starts at {data.preferred_time_start}.",
-            action_url="/student/study",
+            action_url=frontend_links.student_study(),
             reference_id=plan.id,
             reference_type="study_plan",
         )
@@ -740,6 +804,47 @@ class StudyPlannerService:
 
         return warnings
 
+    async def weak_topics_from_results(
+        self,
+        student_id: uuid.UUID,
+        course_id: Optional[uuid.UUID] = None,
+        threshold_pct: float = 60.0,
+        limit: int = 8,
+    ) -> List[str]:
+        """Topics the student scored poorly on in released results, weakest first.
+
+        Closes the improvement loop: what the student got wrong in marked work
+        seeds what the planner schedules. Only released results count, so the
+        planner never reveals marks the student has not been shown.
+        """
+        from app.db.models.question import Question
+        from app.db.models.result import AssessmentResult, ResultBreakdown
+
+        avg_pct = func.avg(ResultBreakdown.score / func.nullif(ResultBreakdown.max_score, 0) * 100)
+        stmt = (
+            select(Question.topic_tag, avg_pct.label("avg_pct"))
+            .join(ResultBreakdown, ResultBreakdown.question_id == Question.id)
+            .join(AssessmentResult, AssessmentResult.id == ResultBreakdown.result_id)
+            .where(
+                AssessmentResult.student_id == student_id,
+                AssessmentResult.is_released == True,  # noqa: E712
+                AssessmentResult.is_deleted == False,  # noqa: E712
+                ResultBreakdown.score.is_not(None),
+                Question.topic_tag.is_not(None),
+                Question.topic_tag != "",
+            )
+            .group_by(Question.topic_tag)
+            .having(avg_pct < threshold_pct)
+            .order_by(avg_pct.asc())
+            .limit(limit)
+        )
+        if course_id is not None:
+            stmt = stmt.join(Assessment, Assessment.id == AssessmentResult.assessment_id).where(
+                Assessment.course_id == course_id
+            )
+        rows = (await self.db.execute(stmt)).all()
+        return [str(row.topic_tag) for row in rows]
+
     async def _generate_ai_session_schedule(
         self, plan: StudyPlan, assessment: Assessment, material_titles: List[str], profile: Optional[Any] = None
     ) -> List[str]:
@@ -792,7 +897,16 @@ class StudyPlannerService:
             step_interval = 2
 
         # Issue M1: Pass student profile weak topics & confidence
-        weak_topics = getattr(profile, "weak_topics", None)
+        profile_weak = list(getattr(profile, "weak_topics", None) or [])
+        try:
+            result_weak = await self.weak_topics_from_results(
+                plan.student_id, getattr(assessment, "course_id", None)
+            )
+        except Exception as exc:
+            logger.warning("weak_topics_from_results_failed", error=str(exc))
+            result_weak = []
+        # Marked-work evidence first, then what the student told us themselves.
+        weak_topics = list(dict.fromkeys(result_weak + profile_weak)) or None
         topic_confidence = getattr(profile, "topic_confidence", None)
 
         course_code = None
@@ -1241,8 +1355,10 @@ class StudyPlannerService:
         if not session:
             raise ValueError("Study session not found")
 
+        # Ratings may be re-submitted, but streak and readiness history only move on the first completion.
+        first_completion = session.status != "COMPLETED"
         session.status = "COMPLETED"
-        session.completed_at = datetime.now(UTC)
+        session.completed_at = session.completed_at if not first_completion and session.completed_at else datetime.now(UTC)
         session.understanding_level = understanding_level
         session.difficulty_rating = difficulty_rating
         session.confidence_rating = confidence_rating
@@ -1254,7 +1370,8 @@ class StudyPlannerService:
 
         plan = await self.repo.get_plan_by_id(session.study_plan_id, student_id)
         if plan:
-            plan.streak_count += 1
+            if first_completion:
+                plan.streak_count += 1
 
             # Recalculate plan readiness score dynamically
             all_sessions = plan.sessions or []
@@ -1270,13 +1387,14 @@ class StudyPlannerService:
                 calculated_score = int((comp_ratio * 40) + (mastery_factor * 60))
                 plan.readiness_score = min(100, max(DEFAULT_INITIAL_READINESS_SCORE, calculated_score))
 
-                history = plan.readiness_history or []
-                history.append({
-                    "date": datetime.now(UTC).isoformat(),
-                    "label": f"Session {len(completed_sessions)}",
-                    "score": plan.readiness_score,
-                })
-                plan.readiness_history = history
+                if first_completion:
+                    history = list(plan.readiness_history or [])
+                    history.append({
+                        "date": datetime.now(UTC).isoformat(),
+                        "label": f"Session {len(completed_sessions)}",
+                        "score": plan.readiness_score,
+                    })
+                    plan.readiness_history = history
 
             await self.repo.update_plan(plan)
 
@@ -2395,6 +2513,10 @@ class StudyPlannerService:
         session = await self.repo.get_session_by_id(session_id, student_id)
         if not session:
             raise ValueError("Study session not found")
+
+        # Idempotent: a repeat call must not re-bill the AI summary or farm streak / profile counters.
+        if session.status == "COMPLETED" and session.lesson_status == "COMPLETED":
+            return self._format_session(session)
 
         session.lesson_status = "COMPLETED"
         session.status = "COMPLETED"

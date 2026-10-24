@@ -195,6 +195,13 @@ class ModerationReview(AuditedBaseModel, table=True):
         sa_column=Column(Text, nullable=True),
     )
 
+    # Set when the moderator approved although automatic checks failed:
+    # {"codes": [...], "reason": str, "by_id": str, "at": iso8601, "messages": [...]}
+    compliance_override: Optional[dict] = Field(
+        default=None,
+        sa_column=Column(JSONB, nullable=True),
+    )
+
     started_at: datetime = Field(
         default_factory=utcnow,
         sa_column=Column(DateTime(timezone=True), nullable=False),

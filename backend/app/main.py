@@ -27,6 +27,20 @@ from fastapi.staticfiles import StaticFiles
 
 from contextlib import asynccontextmanager
 
+# Sub-folders of the upload root that are intentionally public (profile pictures, question images).
+PUBLIC_UPLOAD_DIRS = ("avatars", "questions")
+
+
+class PublicUploadFiles(StaticFiles):
+    """Static files that can never run as a page: an uploaded .svg opened directly would execute
+    its scripts on the API origin, so every response is sandboxed and not content-sniffed."""
+
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers["Content-Security-Policy"] = "default-src 'none'; style-src 'unsafe-inline'; sandbox"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        return response
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     from app.db.session import AsyncSessionLocal
@@ -54,9 +68,16 @@ def create_app() -> FastAPI:
     )
 
     # ── STATIC FILES ──────────────────────────────────────────────────────────
-    # Ensure uploads directory exists
-    os.makedirs("uploads", exist_ok=True)
-    app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+    # Only content that is meant to be public is served statically. Lecturer materials, student
+    # resources and exam submissions live under the same upload root but must go through the
+    # authenticated download routes, which check enrolment / ownership.
+    for public_dir in PUBLIC_UPLOAD_DIRS:
+        os.makedirs(os.path.join(settings.UPLOAD_DIR, public_dir), exist_ok=True)
+        app.mount(
+            f"/uploads/{public_dir}",
+            PublicUploadFiles(directory=os.path.join(settings.UPLOAD_DIR, public_dir)),
+            name=f"uploads-{public_dir}",
+        )
 
     from app.api.v1.routes import (academic, admin, admin_academic,
                                    admin_ai_audit, ai_generation, analytics,
@@ -72,9 +93,7 @@ def create_app() -> FastAPI:
     app.include_router(auth.router, prefix=settings.API_V1_STR)
     app.include_router(academic.router, prefix=settings.API_V1_STR)
     app.include_router(admin.router, prefix=settings.API_V1_STR)
-    app.include_router(admin.router)
     app.include_router(me.router, prefix=settings.API_V1_STR)
-    app.include_router(me.router)
     app.include_router(admin_academic.router, prefix=settings.API_V1_STR)
     app.include_router(student.router, prefix=settings.API_V1_STR)
     app.include_router(student_resources.router, prefix=settings.API_V1_STR)
@@ -87,10 +106,8 @@ def create_app() -> FastAPI:
     app.include_router(question.router, prefix=settings.API_V1_STR)
     app.include_router(assessment.router, prefix=settings.API_V1_STR)
     app.include_router(assessment.lecturer_assessment_router, prefix=settings.API_V1_STR)
-    app.include_router(assessment.lecturer_assessment_router)
     app.include_router(attempt.router, prefix=settings.API_V1_STR)
     app.include_router(attempt.student_attempt_router, prefix=settings.API_V1_STR)
-    app.include_router(attempt.student_attempt_router)
     app.include_router(group_work.router, prefix=settings.API_V1_STR)
     app.include_router(notification.router, prefix=settings.API_V1_STR)
     app.include_router(result.router, prefix=settings.API_V1_STR)
@@ -102,21 +119,13 @@ def create_app() -> FastAPI:
     app.include_router(gemini.router, prefix=settings.API_V1_STR)
     app.include_router(health.router, prefix=settings.API_V1_STR)
     app.include_router(moderation.router, prefix=settings.API_V1_STR)
-    app.include_router(moderation.router)
     app.include_router(seal.router, prefix=settings.API_V1_STR)
-    app.include_router(seal.router)
     app.include_router(authoring.router, prefix=settings.API_V1_STR)
-    app.include_router(authoring.router)
     app.include_router(marking.router, prefix=settings.API_V1_STR)
-    app.include_router(marking.router)
     app.include_router(eligibility.router, prefix=settings.API_V1_STR)
-    app.include_router(eligibility.router)
     app.include_router(appeals.router, prefix=settings.API_V1_STR)
-    app.include_router(appeals.router)
     app.include_router(calendar.router, prefix=settings.API_V1_STR)
-    app.include_router(calendar.router)
     app.include_router(export.router, prefix=settings.API_V1_STR)
-    app.include_router(export.router)
 
     # ── EXCEPTION HANDLERS ───────────────────────────────────────────────────
     register_exception_handlers(app)

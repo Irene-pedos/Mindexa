@@ -1,4 +1,3 @@
-// app/lecturer/assessments/new/page.tsx
 "use client";
 
 import React, {
@@ -68,6 +67,7 @@ import {
   RefreshCw,
   Settings2,
   CheckCheck,
+  ListChecks,
 } from "lucide-react";
 import Image from "next/image";
 import { format } from "date-fns";
@@ -114,6 +114,28 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { apiClient } from "@/lib/api/client";
+import { moderationApi, type ModerationOverview } from "@/lib/api/moderation";
+import { AssessmentLifecycleCard } from "@/components/mindexa/moderation/assessment-lifecycle-card";
+import { EDITABLE_STATUSES, type MarksSummary } from "@/lib/api/assessment";
+import type { GenerateQuestionsRequest } from "@/lib/api/ai-generation";
+import {
+  analyzePaper,
+  nextUnfinished,
+  type ReadinessResult,
+} from "@/lib/assessment-readiness";
+import { toSnapshot } from "@/lib/question-ai-mapping";
+import { scrollToElementId } from "@/lib/scroll-to-element";
+import { AiQuestionAssistant } from "@/components/mindexa/assessment/ai-question-assistant";
+import {
+  AiGenerationProgress,
+  type GenerationRun,
+} from "@/components/mindexa/assessment/ai-generation-progress";
+import { QuestionNavigator } from "@/components/mindexa/assessment/question-navigator";
+import { AuthoringStatusBar } from "@/components/mindexa/assessment/authoring-status-bar";
+import {
+  ReadinessPanel,
+  type ChecklistItemView,
+} from "@/components/mindexa/assessment/readiness-panel";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -126,6 +148,14 @@ import {
 } from "@/components/ui/alert-dialog";
 import { questionApi } from "@/lib/api/question";
 import { assessmentApi } from "@/lib/api/assessment";
+import {
+  mapSavedQuestions,
+  mapSavedSections,
+  modeFromSaved,
+  passingPercentOf,
+  questionsToPayload,
+  sectionsToPayload,
+} from "@/lib/assessment-draft";
 import { groupWorkApi } from "@/lib/api/group-work";
 import { authApi } from "@/lib/api/auth";
 import { academicApi } from "@/lib/api/academic";
@@ -143,6 +173,7 @@ import {
   WorkspaceDetail,
 } from "@/lib/api/lecturer";
 import { QuestionBankSelector } from "@/components/mindexa/assessment/question-bank-selector";
+import { bankIdOf } from "@/lib/question-bank-ids";
 import { QuestionBankItem } from "@/lib/api/question";
 import { Skeleton } from "@/components/ui/interfaces-skeleton";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -645,6 +676,7 @@ function QuestionCard({
   onUpdateOption,
   onAddOption,
   onRemoveOption,
+  bare = false,
 }: {
   question: Question;
   index: number;
@@ -655,6 +687,8 @@ function QuestionCard({
   onUpdateOption: (idx: number, updates: Partial<QuestionOption>) => void;
   onAddOption: () => void;
   onRemoveOption: (idx: number) => void;
+  /** Render without its own border/shadow, for use inside a bordered wrapper. */
+  bare?: boolean;
 }) {
   const [showMediaUpload, setShowMediaUpload] = useState(!!question.imageUrl);
   const [isUploading, setIsUploading] = useState(false);
@@ -743,8 +777,15 @@ function QuestionCard({
   };
 
   return (
-    <Card className="shadow-none border hover:border-primary/20 transition-colors">
-      <CardContent className="p-6 space-y-6">
+    <Card
+      className={cn(
+        "shadow-none transition-colors",
+        bare
+          ? "gap-0 rounded-none border-0 py-0"
+          : "border hover:border-primary/20",
+      )}
+    >
+      <CardContent className="p-5 sm:p-6 space-y-6">
         {/* Header Row */}
         <div className="flex items-start justify-between gap-4">
           <div className="flex items-center gap-3">
@@ -836,6 +877,18 @@ function QuestionCard({
                   });
                 }}
               />
+            </div>            <div className="flex items-center gap-2" title="Students must answer this question before they can submit early">
+              <Label
+                htmlFor={`required-${question.id}`}
+                className="text-xs font-semibold text-muted-foreground"
+              >
+                Required
+              </Label>
+              <Switch
+                id={`required-${question.id}`}
+                checked={!!question.is_required}
+                onCheckedChange={(checked) => onUpdate({ is_required: checked })}
+              />
             </div>
             <div className="flex items-center gap-1 border-l pl-4">
               <Button
@@ -861,7 +914,7 @@ function QuestionCard({
                 className={cn(
                   "h-8 w-8 transition-colors",
                   question.savedToBank
-                    ? "text-emerald-500 hover:text-emerald-500 cursor-not-allowed bg-emerald-50"
+                    ? "text-emerald-600 dark:text-emerald-400 hover:text-emerald-600 cursor-not-allowed bg-emerald-50 dark:bg-emerald-950/40"
                     : "text-primary hover:bg-primary/5",
                 )}
                 title={
@@ -1139,10 +1192,26 @@ function QuestionCard({
 
         {/* Specialized Logic Sections */}
         {question.type === "computational" && (
-          <div className="space-y-4 pl-4 border-l-2 border-primary bg-primary/5 p-4 rounded-r-lg">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label className="text-xs font-semibold uppercase text-primary">
+          <div className="space-y-4 rounded-xl border border-primary/25 bg-primary/[0.03] dark:bg-primary/[0.06] p-4 sm:p-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-primary/10">
+              <div className="flex items-center gap-2.5">
+                <div className="size-7 rounded-lg bg-primary/15 dark:bg-primary/25 flex items-center justify-center text-primary shrink-0">
+                  <Sigma className="size-4" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-primary">
+                    Computational Logic & Expected Output
+                  </h4>
+                  <p className="text-[11px] text-muted-foreground">
+                    Define algorithmic classification, target numeric answer, and grading tolerance.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
                   Logic Classification
                 </Label>
                 <Select
@@ -1169,14 +1238,18 @@ function QuestionCard({
                     </SelectItem>
                   </SelectContent>
                 </Select>
+                <p className="text-[10px] text-muted-foreground">
+                  Specifies whether this problem searches, counts, or optimizes.
+                </p>
               </div>
-              <div className="space-y-2">
-                <Label className="text-xs font-semibold uppercase text-primary">
-                  Numerical Answer / Final Output
+
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                  Numerical Answer / Final Output <span className="text-primary font-bold">*</span>
                 </Label>
                 <Input
-                  placeholder="e.g. 42.5"
-                  className="h-9 bg-background text-sm font-semibold"
+                  placeholder="e.g. 42.5 or 3.14159"
+                  className="h-9 bg-background text-sm font-mono font-semibold"
                   value={question.options[0]?.option_text || ""}
                   onChange={(e) =>
                     onUpdate({
@@ -1190,12 +1263,16 @@ function QuestionCard({
                     })
                   }
                 />
+                <p className="text-[10px] text-muted-foreground">
+                  The exact target result expected from correct computation.
+                </p>
               </div>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
-              <div className="space-y-2">
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-1">
+              <div className="space-y-1.5 sm:col-span-2">
                 <div className="flex items-center justify-between">
-                  <Label className="text-xs font-semibold uppercase text-primary">
+                  <Label className="text-xs font-semibold text-foreground">
                     Solution Steps / Grading Guidance
                   </Label>
                   <Button
@@ -1203,27 +1280,28 @@ function QuestionCard({
                     variant="ghost"
                     size="sm"
                     onClick={() => openMathEditor("solutionSteps")}
-                    className="h-6 px-2 text-[10px] text-primary hover:bg-primary/10 gap-1 font-semibold"
+                    className="h-6 px-2 text-[10px] text-primary hover:bg-primary/10 gap-1 font-semibold rounded-md"
                   >
-                    <Sigma className="size-3" /> Math
+                    <Sigma className="size-3" /> Formula / Math
                   </Button>
                 </div>
                 <Textarea
-                  placeholder="Describe the mathematical proof or step-by-step solution steps..."
-                  className="min-h-20 bg-background text-sm"
+                  placeholder="Describe the mathematical proof, formula derivation, or step-by-step solution steps..."
+                  className="min-h-24 bg-background text-xs sm:text-sm leading-relaxed"
                   value={question.solutionSteps || ""}
                   onChange={(e) => onUpdate({ solutionSteps: e.target.value })}
                 />
               </div>
-              <div className="space-y-2">
-                <Label className="text-xs font-semibold uppercase text-primary">
-                  Tolerance (Optional)
+
+              <div className="space-y-1.5 sm:col-span-1">
+                <Label className="text-xs font-semibold text-foreground">
+                  Tolerance (Margin of Error)
                 </Label>
                 <Input
                   type="number"
                   step="any"
                   placeholder="e.g. 0.01"
-                  className="h-9 bg-background text-sm"
+                  className="h-9 bg-background text-sm font-mono"
                   value={question.tolerance || ""}
                   onChange={(e) =>
                     onUpdate({
@@ -1231,123 +1309,65 @@ function QuestionCard({
                     })
                   }
                 />
-                <p className="text-[10px] text-muted-foreground leading-tight">
-                  Allowed deviation margin (+/-) for auto grading validation
-                </p>
+                <div className="rounded-md bg-muted/60 p-2 border border-border/40">
+                  <p className="text-[10px] text-muted-foreground leading-normal">
+                    Allowed deviation margin (<span className="font-mono">±δ</span>) for automated validation. Leave blank for exact match.
+                  </p>
+                </div>
               </div>
             </div>
           </div>
         )}
 
         {question.type === "casestudy" && (
-          <div className="space-y-4 pl-4 border-l-2 border-amber-500 bg-amber-50/50 p-4 rounded-r-lg">
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label className="text-xs font-semibold uppercase text-amber-700">
-                  Case Scenario / Background
-                </Label>
+          <div className="space-y-5 rounded-xl border border-amber-500/25 bg-amber-500/[0.03] dark:bg-amber-500/[0.06] p-4 sm:p-5">
+            {/* Case Background Section */}
+            <div className="space-y-2.5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-amber-500/15">
+                <div className="flex items-center gap-2.5">
+                  <div className="size-7 rounded-lg bg-amber-500/15 text-amber-800 dark:text-amber-300 flex items-center justify-center shrink-0">
+                    <FileText className="size-4" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-amber-900 dark:text-amber-200">
+                      Case Scenario & Background Context
+                    </h4>
+                    <p className="text-[11px] text-muted-foreground">
+                      The core narrative, dataset, or problem statement student sub-questions will evaluate.
+                    </p>
+                  </div>
+                </div>
                 <Button
                   type="button"
                   variant="ghost"
                   size="sm"
                   onClick={() => openMathEditor("caseStudyContext")}
-                  className="h-6 px-2 text-[10px] text-amber-800 hover:bg-amber-100 gap-1 font-semibold"
+                  className="h-7 px-2.5 text-xs text-amber-800 dark:text-amber-300 hover:bg-amber-500/10 gap-1 font-semibold rounded-md self-start sm:self-auto"
                 >
-                  <Sigma className="size-3" /> Math
+                  <Sigma className="size-3.5" /> Formula / Math
                 </Button>
               </div>
               <Textarea
-                placeholder="Paste the scenario, story, or data context here..."
-                className="min-h-30 bg-background text-sm leading-relaxed"
+                placeholder="Paste the scenario, story, institutional background, or data context here..."
+                className="min-h-32 bg-background text-xs sm:text-sm leading-relaxed"
                 value={question.caseStudyContext || ""}
                 onChange={(e) => onUpdate({ caseStudyContext: e.target.value })}
               />
             </div>
-            <div className="space-y-4 pt-4 border-t border-amber-200">
-              <Label className="text-sm font-semibold text-amber-950">
-                Sub-Questions
-              </Label>
-              <div className="space-y-3">
-                {question.options.map((opt, oIdx) => (
-                  <div
-                    key={oIdx}
-                    className="space-y-2 p-3 border rounded-md bg-background"
-                  >
-                    <div className="flex justify-between items-center">
-                      <span className="text-xs font-bold text-muted-foreground">
-                        Sub-Question #{oIdx + 1}
-                      </span>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => onRemoveOption(oIdx)}
-                        className="text-destructive h-8 w-8"
-                      >
-                        <X className="size-4" />
-                      </Button>
-                    </div>
-                    <div className="space-y-2">
-                      <Input
-                        value={opt.option_text || ""}
-                        onChange={(e) =>
-                          onUpdateOption(oIdx, { option_text: e.target.value })
-                        }
-                        placeholder="Sub-question text..."
-                        className="h-8 text-xs"
-                      />
-                      <div className="grid grid-cols-3 gap-2">
-                        <div className="col-span-1">
-                          <Input
-                            type="number"
-                            value={
-                              opt.match_key !== undefined &&
-                              opt.match_key !== null
-                                ? opt.match_key
-                                : "5"
-                            }
-                            onChange={(e) => {
-                              const val = e.target.value;
-                              const nextOptions = question.options.map(
-                                (o, idx) =>
-                                  idx === oIdx ? { ...o, match_key: val } : o,
-                              );
-                              const nextMarks = nextOptions.reduce(
-                                (sum, o) =>
-                                  sum +
-                                  (parseInt(
-                                    o.match_key !== undefined &&
-                                      o.match_key !== null
-                                      ? o.match_key
-                                      : "5",
-                                  ) || 0),
-                                0,
-                              );
-                              onUpdate({
-                                options: nextOptions,
-                                marks: nextMarks,
-                              });
-                            }}
-                            placeholder="Marks"
-                            className="h-8 text-xs text-center"
-                          />
-                        </div>
-                        <div className="col-span-2">
-                          <Input
-                            value={opt.option_text_right || ""}
-                            onChange={(e) =>
-                              onUpdateOption(oIdx, {
-                                option_text_right: e.target.value,
-                              })
-                            }
-                            placeholder="Answer Guidance..."
-                            className="h-8 text-xs"
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ))}
+
+            {/* Sub-Questions Section */}
+            <div className="space-y-3.5 pt-3 border-t border-amber-500/20">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Label className="text-xs font-bold uppercase tracking-wider text-foreground">
+                    Sub-Questions Breakdown
+                  </Label>
+                  <Badge variant="secondary" className="text-[10px] font-semibold">
+                    {question.options.length} {question.options.length === 1 ? "Item" : "Items"} • {question.marks || 0} Total Marks
+                  </Badge>
+                </div>
                 <Button
+                  type="button"
                   variant="outline"
                   size="sm"
                   onClick={() => {
@@ -1372,10 +1392,118 @@ function QuestionCard({
                     );
                     onUpdate({ options: nextOptions, marks: nextMarks });
                   }}
-                  className="h-8 text-[11px] border-amber-300 text-amber-900 hover:bg-amber-50"
+                  className="h-8 text-xs font-semibold border-dashed border-amber-500/40 text-amber-800 dark:text-amber-300 hover:bg-amber-500/10 hover:border-amber-500/60"
                 >
-                  <Plus className="size-3 mr-2" /> Add Sub-Question
+                  <Plus className="size-3.5 mr-1.5" /> Add Sub-Question
                 </Button>
+              </div>
+
+              <div className="space-y-3">
+                {question.options.length === 0 ? (
+                  <div className="p-6 text-center rounded-xl border border-dashed border-amber-500/30 bg-background/50 text-muted-foreground">
+                    <p className="text-xs">No sub-questions added yet. Add at least one sub-question to assess students on this scenario.</p>
+                  </div>
+                ) : (
+                  question.options.map((opt, oIdx) => (
+                    <div
+                      key={oIdx}
+                      className="p-3.5 sm:p-4 border border-border/80 rounded-xl bg-card hover:border-border transition-colors space-y-3 shadow-xs"
+                    >
+                      <div className="flex items-center justify-between gap-2 pb-2 border-b border-border/50">
+                        <div className="flex items-center gap-2">
+                          <span className="size-5 rounded-md bg-amber-500/15 text-amber-800 dark:text-amber-300 text-[11px] font-bold flex items-center justify-center shrink-0">
+                            {oIdx + 1}
+                          </span>
+                          <span className="text-xs font-bold text-foreground">
+                            Sub-Question {oIdx + 1}
+                          </span>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => onRemoveOption(oIdx)}
+                          className="text-muted-foreground hover:text-destructive hover:bg-destructive/10 h-7 w-7 rounded-md transition-colors"
+                          title="Remove Sub-Question"
+                        >
+                          <X className="size-3.5" />
+                        </Button>
+                      </div>
+
+                      <div className="space-y-2.5">
+                        <div className="space-y-1">
+                          <Label className="text-[11px] font-semibold text-muted-foreground">
+                            Sub-Question Prompt
+                          </Label>
+                          <Input
+                            value={opt.option_text || ""}
+                            onChange={(e) =>
+                              onUpdateOption(oIdx, { option_text: e.target.value })
+                            }
+                            placeholder="Enter the specific question prompt for students..."
+                            className="h-9 text-xs sm:text-sm bg-background"
+                          />
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-4 gap-2.5">
+                          <div className="sm:col-span-1 space-y-1">
+                            <Label className="text-[11px] font-semibold text-muted-foreground">
+                              Marks
+                            </Label>
+                            <Input
+                              type="number"
+                              value={
+                                opt.match_key !== undefined &&
+                                opt.match_key !== null
+                                  ? opt.match_key
+                                  : "5"
+                              }
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                const nextOptions = question.options.map(
+                                  (o, idx) =>
+                                    idx === oIdx ? { ...o, match_key: val } : o,
+                                );
+                                const nextMarks = nextOptions.reduce(
+                                  (sum, o) =>
+                                    sum +
+                                    (parseInt(
+                                      o.match_key !== undefined &&
+                                        o.match_key !== null
+                                        ? o.match_key
+                                        : "5",
+                                    ) || 0),
+                                  0,
+                                );
+                                onUpdate({
+                                  options: nextOptions,
+                                  marks: nextMarks,
+                                });
+                              }}
+                              placeholder="Marks"
+                              className="h-9 text-xs sm:text-sm font-semibold text-center bg-background"
+                            />
+                          </div>
+                          <div className="sm:col-span-3 space-y-1">
+                            <Label className="text-[11px] font-semibold text-muted-foreground">
+                              Grading Guidance / Model Answer Key
+                            </Label>
+                            <Input
+                              value={opt.option_text_right || ""}
+                              onChange={(e) =>
+                                onUpdateOption(oIdx, {
+                                  option_text_right: e.target.value,
+                                })
+                              }
+                              placeholder="Guidance or expected key points for grading this sub-question..."
+                              className="h-9 text-xs sm:text-sm bg-background"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
           </div>
@@ -1751,34 +1879,41 @@ function QuestionCard({
         )}
 
         {question.type === "essay" && (
-          <div className="space-y-4 pl-4 border-l-2 border-muted">
-            <div className="p-4 rounded-lg bg-amber-500/5 border border-amber-500/10">
-              <p className="text-xs text-amber-700 font-semibold flex items-center gap-2 mb-1">
-                <Sparkles className="size-4" /> Essay Evaluation
-              </p>
-              <p className="text-xs text-muted-foreground">
-                Students will write an essay response. A grading rubric is
-                required.
-              </p>
+          <div className="space-y-4 rounded-xl border border-indigo-500/25 bg-indigo-500/[0.03] dark:bg-indigo-500/[0.06] p-4 sm:p-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-lg bg-indigo-500/10 dark:bg-indigo-500/15 border border-indigo-500/20">
+              <div className="flex items-center gap-2.5">
+                <div className="size-7 rounded-md bg-indigo-500/20 text-indigo-700 dark:text-indigo-300 flex items-center justify-center shrink-0">
+                  <Sparkles className="size-4" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-indigo-900 dark:text-indigo-200">
+                    Essay Assessment & Rubric Configuration
+                  </h4>
+                  <p className="text-[11px] text-muted-foreground">
+                    Students will write long-form responses evaluated via structured institutional rubrics.
+                  </p>
+                </div>
+              </div>
             </div>
+
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <Label className="text-sm font-semibold">
-                  Grading Guidance / Model Answer
+                <Label className="text-xs font-semibold text-foreground">
+                  Grading Guidance / Model Answer Outline
                 </Label>
                 <Button
                   type="button"
                   variant="ghost"
                   size="sm"
                   onClick={() => openMathEditor("option", 0)}
-                  className="h-7 px-2 text-xs text-amber-800 hover:bg-amber-100 gap-1 font-semibold"
+                  className="h-6 px-2 text-[10px] text-indigo-700 dark:text-indigo-300 hover:bg-indigo-500/10 gap-1 font-semibold rounded-md"
                 >
-                  <Sigma className="size-3.5" /> Insert Math
+                  <Sigma className="size-3" /> Formula / Math
                 </Button>
               </div>
               <Textarea
-                placeholder="Provide grading guidance or key points to look for in the essay..."
-                className="min-h-25 text-sm"
+                placeholder="Provide comprehensive grading guidance, expected analytical points, or model answers..."
+                className="min-h-28 text-xs sm:text-sm bg-background leading-relaxed"
                 value={question.options[0]?.option_text || ""}
                 onChange={(e) =>
                   onUpdate({
@@ -1793,33 +1928,39 @@ function QuestionCard({
                 }
               />
             </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label className="text-sm font-semibold">
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold text-foreground">
                   Word Limit (Optional)
                 </Label>
                 <Input
                   type="number"
                   min={0}
-                  placeholder="e.g. 500 words"
+                  placeholder="e.g. 500 words (leave blank for unlimited)"
                   value={question.wordLimit || ""}
                   onChange={(e) =>
                     onUpdate({
                       wordLimit: parseInt(e.target.value) || undefined,
                     })
                   }
-                  className="h-9"
+                  className="h-9 bg-background text-sm"
                 />
+                <p className="text-[10px] text-muted-foreground">
+                  Recommended or maximum length. Leave empty for no limit.
+                </p>
               </div>
-              <div className="space-y-2">
-                <Label className="text-sm font-semibold">
-                  Rubric Selector <span className="text-red-500">*</span>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold text-foreground flex items-center justify-between">
+                  <span>Grading Rubric</span>
+                  <span className="text-[10px] text-primary font-bold uppercase tracking-wider">Required</span>
                 </Label>
                 <Select
                   value={question.rubric || "general_essay"}
                   onValueChange={(val) => onUpdate({ rubric: val })}
                 >
-                  <SelectTrigger className="h-9">
+                  <SelectTrigger className="h-9 bg-background">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -1834,6 +1975,9 @@ function QuestionCard({
                     </SelectItem>
                   </SelectContent>
                 </Select>
+                <p className="text-[10px] text-muted-foreground">
+                  Defines the multidimensional evaluation criteria used during grading.
+                </p>
               </div>
             </div>
           </div>
@@ -2312,7 +2456,7 @@ const mapCandidateToQuestion = (
       marks: computedMarks || targetMarks,
       options: mappedOptions,
       aiGenerated: true,
-      is_required: true,
+      is_required: false,
       caseStudyContext,
     };
   }
@@ -2325,7 +2469,7 @@ const mapCandidateToQuestion = (
     marks: marksPerQuestion,
     options: mappedOptions,
     aiGenerated: true,
-    is_required: true,
+    is_required: false,
     rubric,
     wordLimit,
     solutionSteps,
@@ -2344,10 +2488,16 @@ const STEPS_DATA = [
   { title: "Review & Publish", icon: CheckCircle2 },
 ];
 
-export default function NewAssessmentBuilder() {
+/**
+ * The one assessment builder. `/lecturer/assessments/new` renders it empty (or with `?draft=`),
+ * `/lecturer/assessments/[id]/edit` renders it with `editId`, so creating and editing a paper
+ * are the same screen with the same tools.
+ */
+export function AssessmentWizard({ editId }: { editId?: string }) {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const draftId = searchParams.get("draft");
+  const isEditMode = Boolean(editId);
+  const draftId = editId ?? searchParams.get("draft");
   const draftIdRef = useRef<string | null>(draftId);
   if (draftId !== draftIdRef.current) {
     draftIdRef.current = draftId;
@@ -2363,6 +2513,9 @@ export default function NewAssessmentBuilder() {
     "idle" | "saving" | "saved" | "error"
   >("idle");
   const [isPublishing, setIsPublishing] = useState(false);
+  const [assessmentStatus, setAssessmentStatus] = useState<string>("DRAFT");
+  const [moderationOverview, setModerationOverview] =
+    useState<ModerationOverview | null>(null);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [isLoadingDraft, setIsLoadingDraft] = useState(false);
   const [workspaces, setWorkspaces] = useState<WorkspaceListItem[]>([]);
@@ -2425,6 +2578,75 @@ export default function NewAssessmentBuilder() {
   const [aiBatchId, setAiBatchId] = useState<string | null>(null);
   const [aiFailedSectionIds, setAiFailedSectionIds] = useState<string[]>([]);
   const [showAcceptAllConfirm, setShowAcceptAllConfirm] = useState(false);
+  // Live state of the current AI generation (progress, failure reason, retry).
+  const [genRun, setGenRun] = useState<GenerationRun | null>(null);
+  const lastGenRequestRef = useRef<{
+    request: GenerateQuestionsRequest;
+    target: string;
+  } | null>(null);
+
+  // Authoring "kitchen": readiness panel, question navigator, AI-draft review tracking
+  const [readinessOpen, setReadinessOpen] = useState(false);
+  const [navigatorOpen, setNavigatorOpen] = useState(false);
+  // Desktop sidebar can shrink to a thin rail; remembered on this device.
+  const [navCollapsed, setNavCollapsed] = useState(false);
+  useEffect(() => {
+    try {
+      setNavCollapsed(localStorage.getItem("mindexa_nav_collapsed") === "1");
+    } catch {
+      /* default: expanded */
+    }
+  }, []);
+  const toggleNavCollapsed = useCallback(() => {
+    setNavCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem("mindexa_nav_collapsed", next ? "1" : "0");
+      } catch {
+        /* storage unavailable: applies for this session only */
+      }
+      return next;
+    });
+  }, []);
+  const [activeQuestionId, setActiveQuestionId] = useState<string | null>(null);
+  const [reviewedIds, setReviewedIds] = useState<ReadonlySet<string>>(
+    () => new Set<string>(),
+  );
+  const [marksSummary, setMarksSummary] = useState<MarksSummary | null>(null);
+  const [precheck, setPrecheck] = useState<ChecklistItemView[] | null>(null);
+  const [precheckLoading, setPrecheckLoading] = useState(false);
+  const [precheckError, setPrecheckError] = useState<string | null>(null);
+  const autoOpenedReadinessRef = useRef(false);
+
+  // "AI draft reviewed" marks are remembered per draft on this device.
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(`mindexa_reviewed_${draftId || "new"}`);
+      setReviewedIds(new Set<string>(raw ? JSON.parse(raw) : []));
+    } catch {
+      setReviewedIds(new Set<string>());
+    }
+  }, [draftId]);
+
+  const markReviewed = useCallback(
+    (id: string) => {
+      setReviewedIds((prev) => {
+        if (prev.has(id)) return prev;
+        const next = new Set(prev);
+        next.add(id);
+        try {
+          localStorage.setItem(
+            `mindexa_reviewed_${draftId || "new"}`,
+            JSON.stringify([...next]),
+          );
+        } catch {
+          /* storage unavailable: the mark only lasts for this session */
+        }
+        return next;
+      });
+    },
+    [draftId],
+  );
 
   // Load and save AI config to/from sessionStorage
   const loadSavedAiConfig = useCallback(
@@ -2706,6 +2928,66 @@ export default function NewAssessmentBuilder() {
     [questions],
   );
 
+  const isSummativeMode = metadata.mode === "Summative";
+
+  // Everything the lecturer may have forgotten, computed instantly from the editor state.
+  const readiness: ReadinessResult = useMemo(
+    () =>
+      analyzePaper({
+        questions,
+        // Per-group papers repeat questions per group, so per-section counts would be misleading.
+        sections:
+          metadata.question_distribution_mode === "PER_GROUP"
+            ? []
+            : blueprint.map((s) => ({
+                id: s.id,
+                section: s.section,
+                marks: parseInt(s.marks as any) || 0,
+                questions: parseInt(s.questions as any) || 0,
+              })),
+        blueprintTotal: totalMarks,
+        policyTotal: marksSummary?.policy_total ?? null,
+        policyTotalMode: marksSummary?.policy_total_mode,
+        isSummative: isSummativeMode,
+        reviewedIds,
+      }),
+    [
+      questions,
+      blueprint,
+      totalMarks,
+      marksSummary,
+      isSummativeMode,
+      reviewedIds,
+      metadata.question_distribution_mode,
+    ],
+  );
+
+  // The institution's required total for summative papers is only known server-side.
+  useEffect(() => {
+    const id = draftIdRef.current;
+    if (activeStep < 4 || !id || !isSummativeMode) return;
+    let cancelled = false;
+    assessmentApi
+      .getMarksSummary(id)
+      .then((summary) => {
+        if (!cancelled) setMarksSummary(summary);
+      })
+      .catch(() => {
+        /* advisory only: the submit call still enforces the rule */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeStep, isSummativeMode, draftId]);
+
+  // Open the readiness panel once on reaching the final step if something blocks submission.
+  useEffect(() => {
+    if (activeStep === 6 && !autoOpenedReadinessRef.current) {
+      autoOpenedReadinessRef.current = true;
+      if (readiness.summary.blocking > 0) setReadinessOpen(true);
+    }
+  }, [activeStep, readiness.summary.blocking]);
+
   const [availableLecturers, setAvailableLecturers] = useState<UserResponse[]>(
     [],
   );
@@ -2818,33 +3100,30 @@ export default function NewAssessmentBuilder() {
           try {
             const data = await assessmentApi.getAssessmentById(draftId);
 
+            // Only a draft, or a paper the moderator sent back, can be rebuilt here.
+            if (
+              isEditMode &&
+              !(EDITABLE_STATUSES as readonly string[]).includes(data.status)
+            ) {
+              toast.info(
+                "This assessment is locked while it is under review, approved or published, so it can't be edited.",
+              );
+              router.replace(`/lecturer/assessments/${draftId}`);
+              return;
+            }
+            if (isEditMode) {
+              void moderationApi
+                .getAssessmentModeration(draftId)
+                .then(setModerationOverview)
+                .catch(() => undefined);
+            }
+
             // Populate metadata
             const parsedInst = parseInstructions(data.instructions);
             setMetadata({
               title: data.title || "",
               description: data.description || "",
-              mode: (() => {
-                const type = data.assessment_type;
-                if (type === "GROUP_WORK") return "Groupwork";
-                if (type === "CAT") return "CAT";
-                if (!type) return "CAT";
-                if (type === "FORMATIVE") {
-                  return data.integrity_monitoring_enabled === false
-                    ? "Practice"
-                    : "Formative";
-                }
-                const normalized =
-                  type.charAt(0).toUpperCase() + type.slice(1).toLowerCase();
-                const validModes = [
-                  "Practice",
-                  "Formative",
-                  "Homework",
-                  "Summative",
-                ];
-                return (
-                  validModes.includes(normalized) ? normalized : type
-                ) as AssessmentMode;
-              })(),
+              mode: modeFromSaved(data) as AssessmentMode,
               instructions: data.instructions || "",
               grading_mode: (data.grading_mode || "AUTO") as
                 | "AUTO"
@@ -2912,13 +3191,9 @@ export default function NewAssessmentBuilder() {
               ),
             });
 
-            const initialTotal = data.total_marks || 0;
-            const initialPassing = data.passing_marks || 70;
-            const initialPct =
-              initialTotal > 0
-                ? Math.round((initialPassing * 100) / initialTotal)
-                : 70;
-            setPassingMarksPercent(initialPct);
+            setPassingMarksPercent(
+              passingPercentOf(data.total_marks, data.passing_marks),
+            );
 
             if (data.teaching_workspace_id) {
               loadWorkspaceDetailRef.current(data.teaching_workspace_id);
@@ -2926,40 +3201,7 @@ export default function NewAssessmentBuilder() {
 
             // Populate blueprint
             if (data.sections?.length > 0) {
-              const sortedSections = [...data.sections].sort(
-                (a: any, b: any) => (a.order_index ?? 0) - (b.order_index ?? 0),
-              );
-              setBlueprint(
-                sortedSections.map((s: any) => ({
-                  id: s.id,
-                  section: s.title,
-                  topics: s.description || "",
-                  marks: s.allocated_marks || 0,
-                  questions: s.question_count_target || 0,
-                  difficulty: (() => {
-                    const diff =
-                      s.allowed_question_types?.difficulty ||
-                      s.difficulty ||
-                      "Medium";
-                    return (
-                      diff.charAt(0).toUpperCase() + diff.slice(1).toLowerCase()
-                    );
-                  })(),
-                  allowedTypes: (
-                    s.allowed_question_types?.types || ["mcq"]
-                  ).map((t: string) => t.toLowerCase().replaceAll("_", "")),
-                  aiPromptHint: s.ai_generation_prompt_hint || "",
-                  difficultyDistribution:
-                    s.difficulty_distribution || undefined,
-                  bloomLevel:
-                    s.allowed_question_types?.bloom_level ||
-                    s.allowed_question_types?.bloomLevel ||
-                    s.bloom_level ||
-                    s.bloomLevel ||
-                    "understand",
-                  per_group: s.allowed_question_types?.per_group || false,
-                })),
-              );
+              setBlueprint(mapSavedSections(data) as BlueprintSection[]);
             }
 
             // Populate rules
@@ -3009,86 +3251,10 @@ export default function NewAssessmentBuilder() {
 
             // Populate questions
             if (data.assessment_questions?.length > 0) {
-              const sortedQuestions = [...data.assessment_questions].sort(
-                (a: any, b: any) => (a.order_index ?? 0) - (b.order_index ?? 0),
-              );
-              setQuestions(
-                sortedQuestions.map((aq: any) => {
-                  const qType = aq.question.question_type
-                    .toLowerCase()
-                    .replaceAll("_", "") as QuestionType;
-                  const rawContent =
-                    aq.question.explanation ||
-                    aq.question.options?.[0]?.option_text ||
-                    aq.question.options?.[0]?.content ||
-                    "";
-                  const parsed = [
-                    "shortanswer",
-                    "essay",
-                    "computational",
-                  ].includes(qType)
-                    ? parseOpenEndedExplanation(qType, rawContent)
-                    : null;
-                  return {
-                    id: aq.question.id,
-                    sectionId: aq.assessment_section_id,
-                    groupId: aq.group_id,
-                    text: aq.question.content,
-                    imageUrl: aq.question.image_url,
-                    type: qType,
-                    marks: aq.marks_override || aq.question.marks,
-                    options: parsed
-                      ? [
-                          {
-                            id: aq.question.options?.[0]?.id,
-                            option_text: parsed.modelAnswer,
-                            option_text_right: "",
-                            is_correct: true,
-                            order_index: 0,
-                          },
-                        ]
-                      : aq.question.options?.map((o: any) => ({
-                          id: o.id,
-                          option_text: o.option_text || o.content || "",
-                          option_text_right:
-                            o.option_text_right || o.match_value || "",
-                          is_correct: o.is_correct,
-                          order_index: o.order_index,
-                          match_key: o.match_key,
-                        })) || [],
-                    rubric: parsed?.rubric,
-                    wordLimit: parsed?.wordLimit,
-                    solutionSteps: parsed?.solutionSteps,
-                    tolerance: parsed?.tolerance,
-                    computationalType: aq.question.computational_type,
-                    caseStudyContext: aq.question.case_study_context,
-                    aiGenerated: aq.added_via === "ai_generated",
-                    is_required: aq.is_required ?? true,
-                    question_table_context:
-                      aq.question.question_table_context ||
-                      aq.question.questionTableContext,
-                    questionTableContext:
-                      aq.question.question_table_context ||
-                      aq.question.questionTableContext,
-                    requires_table_answer: !!(
-                      aq.question.requires_table_answer ||
-                      aq.question.requiresTableAnswer
-                    ),
-                    requiresTableAnswer: !!(
-                      aq.question.requires_table_answer ||
-                      aq.question.requiresTableAnswer
-                    ),
-                    answer_table_template:
-                      aq.question.answer_table_template ||
-                      aq.question.answerTableTemplate,
-                    answerTableTemplate:
-                      aq.question.answer_table_template ||
-                      aq.question.answerTableTemplate,
-                  };
-                }),
-              );
+              setQuestions(mapSavedQuestions(data) as Question[]);
             }
 
+            if (isEditMode) setAssessmentStatus(data.status);
             if (data.draft_step) setActiveStep(data.draft_step);
           } catch (err) {
             toast.error("Failed to load draft assessment.");
@@ -3342,13 +3508,16 @@ export default function NewAssessmentBuilder() {
             : 2,
         options: initialOptions,
         aiGenerated: false,
-        is_required: true,
+        is_required: false,
       },
     ];
     updateQuestionsAndAutosave(nextQuestions);
   };
 
   const updateQuestionsAndAutosave = (nextQuestions: Question[]) => {
+    // Update the ref right away: several additions in a row (importing a batch from the bank)
+    // must each build on the previous result, not on the last render's snapshot.
+    questionsRef.current = nextQuestions;
     setQuestions(nextQuestions);
     triggerDebouncedAutosave(5, undefined, undefined, nextQuestions);
   };
@@ -3490,10 +3659,11 @@ export default function NewAssessmentBuilder() {
 
   const pollBatchStatus = useCallback(
     (batchId: string, currentTick = 0, targetSectionId: string) => {
-      const maxTicks = 60; // 120 seconds max (2s interval)
+      // 5 minutes at a 2 s interval, matching the worker's own 5-minute time limit.
+      const maxTicks = 150;
       if (currentTick >= maxTicks) {
         setAiGenerating(false);
-        toast.error("AI question generation timed out. Please try again.");
+        setGenRun((prev) => (prev ? { ...prev, phase: "timeout" } : prev));
         return;
       }
 
@@ -3501,13 +3671,38 @@ export default function NewAssessmentBuilder() {
         try {
           const batch = await aiGenerationApi.getBatch(batchId);
           const status = batch.status?.toLowerCase();
+          setGenRun((prev) => (prev ? { ...prev, batch, batchId } : prev));
 
           if (status === "completed" || status === "partial_failure") {
-            const generatedQuestions = batch.questions || [];
+            // Candidates the server flagged as unusable (e.g. a case study with no
+            // sub-questions) are dropped here; the reason is shown in a single warning.
+            const flagged = (batch.questions || []).filter(
+              (q) => q.parsed_successfully === false,
+            );
+            const generatedQuestions = (batch.questions || []).filter(
+              (q) => q.parsed_successfully !== false,
+            );
+            if (flagged.length > 0) {
+              toast.warning(
+                `${flagged.length} AI question(s) were incomplete and skipped${
+                  flagged[0]?.parse_error ? `: ${flagged[0].parse_error}` : "."
+                } Use "Try again" to replace them.`,
+                { duration: 8000 },
+              );
+            }
             if (generatedQuestions.length === 0) {
               setAiGenerating(false);
-              toast.error(
-                "AI finished, but zero questions were successfully generated. Please check constraints.",
+              setGenRun((prev) =>
+                prev
+                  ? {
+                      ...prev,
+                      phase: "failed",
+                      error:
+                        flagged[0]?.parse_error ||
+                        batch.error_message ||
+                        "The AI returned no usable questions. Check the topic and question type, then try again.",
+                    }
+                  : prev,
               );
               return;
             }
@@ -3533,45 +3728,61 @@ export default function NewAssessmentBuilder() {
               };
             });
 
-            // Normalize and validate candidates defensively so valid questions are never silently dropped
-            const validCandidatesList = tagged.map((cand: any) => {
-              const bType = cand.question_type || "mcq";
-              const normalizedBackType = bType
+            // A candidate with no usable answer key must never be shown as if the AI produced
+            // one: invented answers would reach students if the lecturer accepts without
+            // noticing. Keep only candidates whose closed-type options are complete.
+            const hasUsableAnswerKey = (cand: any): boolean => {
+              const normalizedBackType = String(cand.question_type || "mcq")
                 .toLowerCase()
                 .replace(/[^a-z0-9]/g, "");
-
-              // Ensure options exist for closed question types
-              let currentOpts = cand._options || [];
-              if (
-                ["true_false", "truefalse"].includes(normalizedBackType) &&
-                currentOpts.length < 2
-              ) {
-                currentOpts = [
-                  { text: "True", is_correct: true, explanation: "Correct" },
-                  { text: "False", is_correct: false, explanation: "Incorrect" },
-                ];
+              const opts: Array<{ text?: string; is_correct?: boolean }> =
+                cand._options || [];
+              const correct = opts.filter((o) => o.is_correct).length;
+              const filled = opts.every((o) => (o.text || "").trim().length > 0);
+              if (normalizedBackType === "truefalse") {
+                return opts.length === 2 && correct === 1 && filled;
               }
-
-              // Ensure open-ended questions always have an explanation/model answer for review
-              let explanationText =
-                cand.parsed_explanation || cand.explanation || "";
-              if (!explanationText.trim()) {
-                explanationText =
-                  "Model Answer: Solution and conceptual reasoning to be reviewed.";
+              if (normalizedBackType === "mcq") {
+                return opts.length >= 2 && correct >= 1 && filled;
               }
+              if (normalizedBackType === "casestudy") {
+                return (
+                  opts.filter((o) => (o.text || "").trim().length > 0).length >= 2
+                );
+              }
+              return true;
+            };
 
-              return {
-                ...cand,
-                _options: currentOpts,
-                parsed_explanation: explanationText,
-                explanation: explanationText,
-              };
-            });
+            const validCandidatesList = tagged
+              .filter(hasUsableAnswerKey)
+              .map((cand: any) => {
+                const explanationText =
+                  cand.parsed_explanation || cand.explanation || "";
+                return {
+                  ...cand,
+                  parsed_explanation: explanationText,
+                  explanation: explanationText,
+                };
+              });
+
+            const rejectedCount = tagged.length - validCandidatesList.length;
+            if (rejectedCount > 0) {
+              toast.warning(
+                `${rejectedCount} AI question(s) were discarded because they had no valid answer key. Generate again to replace them.`,
+              );
+            }
 
             if (validCandidatesList.length === 0) {
               setAiGenerating(false);
-              toast.error(
-                "AI finished, but zero question candidates were returned.",
+              setGenRun((prev) =>
+                prev
+                  ? {
+                      ...prev,
+                      phase: "failed",
+                      error:
+                        "None of the generated questions was complete (missing answers or sub-questions). Try again.",
+                    }
+                  : prev,
               );
               return;
             }
@@ -3610,6 +3821,7 @@ export default function NewAssessmentBuilder() {
               return [...filteredPrev, ...validCandidatesList];
             });
             setAiGenerating(false);
+            setGenRun(null);
             setAiDrawerOpen(false);
             setAiReviewDrawerOpen(true);
 
@@ -3650,8 +3862,16 @@ export default function NewAssessmentBuilder() {
             }
           } else if (status === "failed") {
             setAiGenerating(false);
-            toast.error(
-              batch.error_message || "AI question generation failed on server.",
+            setGenRun((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    phase: "failed",
+                    error:
+                      batch.error_message ||
+                      "The AI service failed while writing the questions.",
+                  }
+                : prev,
             );
           } else {
             // Continue polling
@@ -3662,8 +3882,14 @@ export default function NewAssessmentBuilder() {
           const status = err.status;
           if (status === 401 || status === 403 || status === 404) {
             setAiGenerating(false);
-            toast.error(
-              `AI question generation stopped: ${err.message || "Authentication or resource error"}`,
+            setGenRun((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    phase: "failed",
+                    error: `Generation stopped: ${err.message || "authentication or resource error"}`,
+                  }
+                : prev,
             );
             return;
           }
@@ -3674,6 +3900,54 @@ export default function NewAssessmentBuilder() {
     },
     [blueprint],
   );
+
+  /** Marks each question in a section should carry, from the blueprint (never "unspecified"). */
+  const marksPerQuestionFor = (sec: { marks: number; questions: number }) =>
+    Math.max(
+      1,
+      Math.round((parseInt(sec.marks as any) || 0) / Math.max(1, sec.questions || 1)),
+    );
+
+  /** Submit a generation request, remember it for retry, and start watching its progress. */
+  const launchGeneration = async (
+    request: GenerateQuestionsRequest,
+    target: string,
+  ) => {
+    lastGenRequestRef.current = { request, target };
+    setGenRun({ phase: "running", batchId: null, target, startedAt: Date.now() });
+    const res = await aiGenerationApi.generateQuestions(request);
+    setAiBatchId(res.id);
+    setGenRun((prev) => (prev ? { ...prev, batchId: res.id, batch: res } : prev));
+    pollBatchStatus(res.id, 0, target);
+  };
+
+  const retryGeneration = async () => {
+    const last = lastGenRequestRef.current;
+    if (!last) {
+      setGenRun(null);
+      return;
+    }
+    setAiGenerating(true);
+    try {
+      await launchGeneration(last.request, last.target);
+    } catch (err: any) {
+      setAiGenerating(false);
+      setGenRun({
+        phase: "failed",
+        batchId: null,
+        target: last.target,
+        startedAt: Date.now(),
+        error: err?.message || "Could not reach the AI service. Check your connection and try again.",
+      });
+    }
+  };
+
+  const keepWaitingForGeneration = () => {
+    if (!genRun?.batchId) return;
+    setAiGenerating(true);
+    setGenRun({ ...genRun, phase: "running" });
+    pollBatchStatus(genRun.batchId, 0, genRun.target);
+  };
 
   const handleAIGenerate = async () => {
     setAiGenerating(true);
@@ -3706,6 +3980,7 @@ export default function NewAssessmentBuilder() {
                 difficulty: sec.difficulty.toLowerCase() as any,
                 count: countForType,
                 bloom_level: (sec.bloomLevel || "understand") as any,
+                marks_per_question: marksPerQuestionFor(sec),
               });
             }
           });
@@ -3726,24 +4001,24 @@ export default function NewAssessmentBuilder() {
         toast.info(
           "Submitting AI request to generate questions for all sections...",
         );
-        const res = await aiGenerationApi.generateQuestions({
-          subject: metadata.title || "Subject",
-          topic: "Multiple Topics (Blueprint-aligned)",
-          question_type: topLevelType as any,
-          difficulty: topLevelDifficulty as any,
-          count: totalCount,
-          additional_context: aiGenerationConfig.additional_context,
-          target_assessment_id: activeId || undefined,
-          workspace_id: metadata.teaching_workspace_id || undefined,
-          sections: sectionsPayload,
-          blueprint_constraints: buildBlueprintConstraints(
-            blueprintRef.current,
-            questionsRef.current,
-          ),
-        });
-
-        setAiBatchId(res.id);
-        pollBatchStatus(res.id, 0, "all");
+        await launchGeneration(
+          {
+            subject: metadata.title || "Subject",
+            topic: "Multiple Topics (Blueprint-aligned)",
+            question_type: topLevelType as any,
+            difficulty: topLevelDifficulty as any,
+            count: totalCount,
+            additional_context: aiGenerationConfig.additional_context,
+            target_assessment_id: activeId || undefined,
+            workspace_id: metadata.teaching_workspace_id || undefined,
+            sections: sectionsPayload,
+            blueprint_constraints: buildBlueprintConstraints(
+              blueprintRef.current,
+              questionsRef.current,
+            ),
+          },
+          "all",
+        );
       } else {
         // Synchronize AI drawer config back to the selected blueprint section so it's persisted in the draft
         const nextBlueprint = blueprintRef.current.map((s) =>
@@ -3755,7 +4030,13 @@ export default function NewAssessmentBuilder() {
                   .charAt(0)
                   .toUpperCase() +
                   aiGenerationConfig.difficulty.slice(1)) as any,
-                questions: aiGenerationConfig.count,
+                // Never plan fewer questions than the section already has plus what is
+                // being requested now (asking for "the 2 missing" must not shrink the plan).
+                questions: Math.max(
+                  s.questions,
+                  questionsRef.current.filter((q) => q.sectionId === s.id)
+                    .length + aiGenerationConfig.count,
+                ),
                 bloomLevel: aiGenerationConfig.bloom_level as any,
                 aiPromptHint: aiGenerationConfig.additional_context,
                 allowedTypes: s.allowedTypes,
@@ -3800,40 +4081,52 @@ export default function NewAssessmentBuilder() {
                 difficulty: aiGenerationConfig.difficulty as any,
                 count: countForType,
                 bloom_level: aiGenerationConfig.bloom_level as any,
+                marks_per_question: targetSection
+                  ? marksPerQuestionFor(targetSection)
+                  : undefined,
               });
             }
           });
         }
 
-        const res = await aiGenerationApi.generateQuestions({
-          subject: metadata.title || "Subject",
-          topic: secTopic,
-          question_type:
-            aiGenerationConfig.question_type === "mixed"
-              ? "mcq"
-              : (mapFrontendToBackendType(
-                  aiGenerationConfig.question_type,
-                ) as any),
-          difficulty: aiGenerationConfig.difficulty as any,
-          count: aiGenerationConfig.count,
-          bloom_level: aiGenerationConfig.bloom_level as any,
-          additional_context: aiGenerationConfig.additional_context,
-          target_assessment_id: activeId || undefined,
-          target_section_id: aiTargetSectionId,
-          workspace_id: metadata.teaching_workspace_id || undefined,
-          sections: sectionsPayload,
-          blueprint_constraints: buildBlueprintConstraints(
-            blueprintRef.current,
-            questionsRef.current,
-          ),
-        });
-
-        setAiBatchId(res.id);
-        pollBatchStatus(res.id, 0, aiTargetSectionId);
+        await launchGeneration(
+          {
+            subject: metadata.title || "Subject",
+            topic: secTopic,
+            question_type:
+              aiGenerationConfig.question_type === "mixed"
+                ? "mcq"
+                : (mapFrontendToBackendType(
+                    aiGenerationConfig.question_type,
+                  ) as any),
+            difficulty: aiGenerationConfig.difficulty as any,
+            count: aiGenerationConfig.count,
+            bloom_level: aiGenerationConfig.bloom_level as any,
+            additional_context: aiGenerationConfig.additional_context,
+            target_assessment_id: activeId || undefined,
+            target_section_id: aiTargetSectionId,
+            workspace_id: metadata.teaching_workspace_id || undefined,
+            marks_per_question: targetSection
+              ? marksPerQuestionFor(targetSection)
+              : undefined,
+            sections: sectionsPayload,
+            blueprint_constraints: buildBlueprintConstraints(
+              blueprintRef.current,
+              questionsRef.current,
+            ),
+          },
+          aiTargetSectionId,
+        );
       }
     } catch (err: any) {
-      toast.error(err.message || "Failed to generate questions with AI.");
       setAiGenerating(false);
+      setGenRun({
+        phase: "failed",
+        batchId: null,
+        target: aiTargetSectionId,
+        startedAt: Date.now(),
+        error: err?.message || "Failed to generate questions with AI.",
+      });
     }
   };
 
@@ -3866,6 +4159,7 @@ export default function NewAssessmentBuilder() {
               difficulty: sec.difficulty.toLowerCase() as any,
               count: countForType,
               bloom_level: (sec.bloomLevel || "understand") as any,
+              marks_per_question: marksPerQuestionFor(sec),
             });
           }
         });
@@ -3886,24 +4180,30 @@ export default function NewAssessmentBuilder() {
       toast.info(
         `Retrying question generation for ${failedSections.length} sections...`,
       );
-      const res = await aiGenerationApi.generateQuestions({
-        subject: metadata.title || "Subject",
-        topic: "Multiple Topics (Blueprint-aligned)",
-        question_type: topLevelType as any,
-        difficulty: topLevelDifficulty as any,
-        count: totalCount,
-        additional_context: aiGenerationConfig.additional_context,
-        target_assessment_id: activeId || undefined,
-        workspace_id: metadata.teaching_workspace_id || undefined,
-        sections: sectionsPayload,
-        blueprint_constraints: buildBlueprintConstraints(blueprint, questions),
-      });
-
-      setAiBatchId(res.id);
-      pollBatchStatus(res.id, 0, "all");
+      await launchGeneration(
+        {
+          subject: metadata.title || "Subject",
+          topic: "Multiple Topics (Blueprint-aligned)",
+          question_type: topLevelType as any,
+          difficulty: topLevelDifficulty as any,
+          count: totalCount,
+          additional_context: aiGenerationConfig.additional_context,
+          target_assessment_id: activeId || undefined,
+          workspace_id: metadata.teaching_workspace_id || undefined,
+          sections: sectionsPayload,
+          blueprint_constraints: buildBlueprintConstraints(blueprint, questions),
+        },
+        "all",
+      );
     } catch (err: any) {
-      toast.error(err.message || "Failed to retry generation.");
       setAiGenerating(false);
+      setGenRun({
+        phase: "failed",
+        batchId: null,
+        target: "all",
+        startedAt: Date.now(),
+        error: err?.message || "Failed to retry generation.",
+      });
     }
   };
 
@@ -4381,21 +4681,37 @@ export default function NewAssessmentBuilder() {
       }
     }
 
+    if (q.type === "casestudy") {
+      const parts = q.options.filter((o) => o.option_text?.trim());
+      if (!q.caseStudyContext?.trim() || parts.length < 2) {
+        toast.error(
+          "A case study needs its scenario and at least 2 sub-questions before saving to the bank.",
+        );
+        return;
+      }
+    }
+
     try {
+      const sourceSection = blueprintRef.current.find(
+        (s) => s.id === q.sectionId,
+      );
       await questionApi.createQuestion({
+        // A case study's stem is fixed boilerplate; its content is the scenario below.
         content: q.text,
+        case_study_context:
+          q.type === "casestudy" ? q.caseStudyContext : undefined,
         image_url: q.imageUrl,
         question_type: mapFrontendToBackendType(q.type),
-        difficulty: "medium",
+        difficulty: (sourceSection?.difficulty || "Medium").toLowerCase(),
         suggested_marks: Math.max(1, q.marks),
         options: q.options.map((opt) => ({
           option_text: opt.option_text,
           option_text_right: opt.option_text_right,
           is_correct: opt.is_correct,
           order_index: opt.order_index,
+          match_key: opt.match_key,
         })),
-        topic:
-          blueprintRef.current.find((s) => s.id === q.sectionId)?.topics || "",
+        topic: sourceSection?.topics || "",
       });
 
       // Update question state with savedToBank = true
@@ -4477,6 +4793,11 @@ export default function NewAssessmentBuilder() {
                 is_correct: opt.is_correct,
                 order_index:
                   opt.order_index !== undefined ? opt.order_index : idx,
+                // Case-study sub-question marks; without this every part defaulted to 5.
+                match_key:
+                  mappedType === "casestudy"
+                    ? String(opt.match_key ?? "5")
+                    : undefined,
               })),
           imageUrl: qBank.image_url,
           caseStudyContext:
@@ -4490,7 +4811,7 @@ export default function NewAssessmentBuilder() {
           solutionSteps: parsed?.solutionSteps,
           tolerance: parsed?.tolerance,
           aiGenerated: false,
-          is_required: true,
+          is_required: false,
         },
       ];
       updateQuestionsAndAutosave(nextQuestions);
@@ -4686,77 +5007,8 @@ export default function NewAssessmentBuilder() {
             activeMetadata.individual_weighting_enabled || false,
           academic_year: activeMetadata.academic_year || undefined,
         },
-        blueprint: blueprintRef.current.map((b) => ({
-          id: b.id,
-          section: b.section,
-          topics: b.topics,
-          marks: b.marks,
-          questions: b.questions,
-          difficulty: b.difficulty,
-          allowedTypes: b.allowedTypes.map((t) => mapFrontendToBackendType(t)),
-          aiPromptHint: b.aiPromptHint,
-          difficultyDistribution: b.difficultyDistribution,
-          bloomLevel: b.bloomLevel,
-          per_group: b.per_group || false,
-        })),
-        questions: nextQuestions.map((q) => {
-          let finalOptions: QuestionOption[] = (q.options || []).map((opt) => ({
-            option_text: opt.option_text,
-            option_text_right: opt.option_text_right,
-            is_correct: opt.is_correct,
-            order_index: opt.order_index,
-            match_key: opt.match_key,
-          }));
-
-          if (["shortanswer", "essay", "computational"].includes(q.type)) {
-            let combinedText = q.options?.[0]?.option_text || "";
-            if (q.type === "essay") {
-              combinedText = `Model Answer: ${q.options?.[0]?.option_text || ""}\n\nRubric: ${q.rubric || ""}\n\nWord Limit: ${q.wordLimit || 0} words`;
-            } else if (q.type === "shortanswer") {
-              combinedText = `Model Answer: ${q.options?.[0]?.option_text || ""}\n\nRubric: ${q.rubric || ""}`;
-            } else if (q.type === "computational") {
-              combinedText = `Solution Steps: ${q.solutionSteps || ""}\n\nNumerical Answer: ${q.options?.[0]?.option_text || ""}\n\nTolerance: ${q.tolerance || 0}`;
-            }
-            finalOptions = [
-              {
-                option_text: combinedText,
-                option_text_right: "",
-                is_correct: true,
-                order_index: 0,
-              },
-            ];
-          } else if (q.type === "casestudy" && q.options) {
-            finalOptions = q.options.map((opt) => ({
-              option_text: opt.option_text,
-              option_text_right: opt.option_text_right || "",
-              is_correct: true,
-              order_index: opt.order_index,
-              match_key: opt.match_key,
-            }));
-          }
-
-          return {
-            id: q.id,
-            sectionId: q.sectionId,
-            groupId: q.groupId,
-            text: q.text,
-            type: mapFrontendToBackendType(q.type),
-            marks: q.marks,
-            options: finalOptions,
-            aiGenerated: q.aiGenerated,
-            imageUrl: q.imageUrl,
-            computationalType: q.computationalType,
-            caseStudyContext: q.caseStudyContext,
-            is_required: q.is_required,
-            question_table_context:
-              q.question_table_context || q.questionTableContext,
-            requires_table_answer: !!(
-              q.requires_table_answer || q.requiresTableAnswer
-            ),
-            answer_table_template:
-              q.answer_table_template || q.answerTableTemplate,
-          };
-        }),
+        blueprint: sectionsToPayload(blueprintRef.current),
+        questions: questionsToPayload(nextQuestions),
         rules: {
           ...activeRules,
           requireAllMemberApproval: activeMetadata.require_all_member_approval,
@@ -5012,117 +5264,18 @@ export default function NewAssessmentBuilder() {
   const syncDraftResponse = useCallback((res: any) => {
     if (!res) return;
     if (res.sections?.length > 0) {
-      const sortedSections = [...res.sections].sort(
-        (a: any, b: any) => (a.order_index ?? 0) - (b.order_index ?? 0),
-      );
-      const nextBlueprint = sortedSections.map((s: any) => ({
-        id: s.id,
-        section: s.title,
-        topics: s.description || "",
-        marks: s.allocated_marks || 0,
-        questions: s.question_count_target || 0,
-        difficulty: (() => {
-          const diff =
-            s.allowed_question_types?.difficulty || s.difficulty || "Medium";
-          return diff.charAt(0).toUpperCase() + diff.slice(1).toLowerCase();
-        })(),
-        allowedTypes: (s.allowed_question_types?.types || ["mcq"]).map(
-          (t: string) => t.toLowerCase().replaceAll("_", ""),
-        ),
-        aiPromptHint: s.ai_generation_prompt_hint || "",
-        difficultyDistribution: s.difficulty_distribution || undefined,
-        bloomLevel:
-          s.allowed_question_types?.bloom_level ||
-          s.allowed_question_types?.bloomLevel ||
-          s.bloom_level ||
-          s.bloomLevel ||
-          "understand",
-      }));
+      const nextBlueprint = mapSavedSections(res) as BlueprintSection[];
       setBlueprint(nextBlueprint);
       blueprintRef.current = nextBlueprint;
     }
 
     if (res.assessment_questions?.length > 0) {
-      const sortedQuestions = [...res.assessment_questions].sort(
-        (a: any, b: any) => (a.order_index ?? 0) - (b.order_index ?? 0),
-      );
-      const nextQuestions = sortedQuestions.map((aq: any) => {
-        const type = aq.question.question_type
-          .toLowerCase()
-          .replaceAll("_", "") as QuestionType;
-        const optionsRaw = aq.question.options || [];
-        const unpacked = parseOpenEndedExplanation(
-          type,
-          optionsRaw[0]?.option_text ||
-            optionsRaw[0]?.content ||
-            aq.question.explanation ||
-            "",
-        );
-        return {
-          id: aq.question.id,
-          sectionId: aq.assessment_section_id,
-          groupId: aq.group_id,
-          text: aq.question.content,
-          imageUrl: aq.question.image_url,
-          type: type,
-          marks: aq.marks_override || aq.question.marks,
-          options: ["essay", "shortanswer", "computational"].includes(type)
-            ? [
-                {
-                  id: optionsRaw[0]?.id,
-                  option_text:
-                    unpacked.modelAnswer || aq.question.explanation || "",
-                  option_text_right: "",
-                  is_correct: true,
-                  order_index: 0,
-                },
-              ]
-            : optionsRaw.map((o: any, idx: number) => ({
-                id: o.id,
-                option_text: o.option_text || o.content || "",
-                option_text_right: o.option_text_right || o.match_value || "",
-                is_correct: o.is_correct,
-                order_index: o.order_index,
-                match_key: o.match_key,
-              })),
-          rubric: unpacked.rubric,
-          wordLimit: unpacked.wordLimit,
-          solutionSteps: unpacked.solutionSteps,
-          tolerance: unpacked.tolerance,
-          computationalType: aq.question.computational_type,
-          caseStudyContext: aq.question.case_study_context,
-          aiGenerated:
-            aq.added_via === "ai_generated" || aq.question.ai_generated,
-          is_required: aq.is_required ?? true,
-          question_table_context:
-            aq.question.question_table_context ||
-            aq.question.questionTableContext,
-          questionTableContext:
-            aq.question.question_table_context ||
-            aq.question.questionTableContext,
-          requires_table_answer: !!(
-            aq.question.requires_table_answer || aq.question.requiresTableAnswer
-          ),
-          requiresTableAnswer: !!(
-            aq.question.requires_table_answer || aq.question.requiresTableAnswer
-          ),
-          answer_table_template:
-            aq.question.answer_table_template ||
-            aq.question.answerTableTemplate,
-          answerTableTemplate:
-            aq.question.answer_table_template ||
-            aq.question.answerTableTemplate,
-        };
-      });
+      const nextQuestions = mapSavedQuestions(res) as Question[];
       setQuestions(nextQuestions);
       questionsRef.current = nextQuestions;
     }
 
-    const initialTotal = res.total_marks || 0;
-    const initialPassing = res.passing_marks || 70;
-    const initialPct =
-      initialTotal > 0 ? Math.round((initialPassing * 100) / initialTotal) : 70;
-    setPassingMarksPercent(initialPct);
+    setPassingMarksPercent(passingPercentOf(res.total_marks, res.passing_marks));
   }, []);
 
   const debouncedAutosaveRef = useRef<NodeJS.Timeout | null>(null);
@@ -5170,7 +5323,7 @@ export default function NewAssessmentBuilder() {
             // Update ref immediately so subsequent autosaves update this draft
             draftIdRef.current = returnedId;
             loadedDraftIdRef.current = returnedId;
-            router.replace(`/lecturer/assessments/new?draft=${returnedId}`);
+            if (!isEditMode) router.replace(`/lecturer/assessments/new?draft=${returnedId}`);
           }
         } catch (err: any) {
           setAutosaveStatus("error");
@@ -5185,7 +5338,7 @@ export default function NewAssessmentBuilder() {
         });
       return activeAutosavePromiseRef.current;
     },
-    [router, preparePayload, syncDraftResponse],
+    [router, preparePayload, syncDraftResponse, isEditMode],
   );
 
   const handleNextStep = useCallback(
@@ -5303,7 +5456,7 @@ export default function NewAssessmentBuilder() {
       if (returnedId) {
         draftIdRef.current = returnedId;
         loadedDraftIdRef.current = returnedId;
-        router.replace(`/lecturer/assessments/new?draft=${returnedId}`);
+        if (!isEditMode) router.replace(`/lecturer/assessments/new?draft=${returnedId}`);
       }
       return res;
     } catch (err: any) {
@@ -5351,7 +5504,7 @@ export default function NewAssessmentBuilder() {
       if (returnedId && returnedId !== draftIdRef.current) {
         draftIdRef.current = returnedId;
         loadedDraftIdRef.current = returnedId;
-        router.replace(`/lecturer/assessments/new?draft=${returnedId}`);
+        if (!isEditMode) router.replace(`/lecturer/assessments/new?draft=${returnedId}`);
       }
 
       return {
@@ -5366,6 +5519,59 @@ export default function NewAssessmentBuilder() {
     }
   };
 
+  /**
+   * Opens the AI drawer for one blueprint section. `countOverride` asks for a specific number
+   * of questions (e.g. the ones still missing) instead of the section's planned total.
+   */
+  const openAiDrawerForSection = async (
+    sec: BlueprintSection,
+    countOverride?: number,
+  ) => {
+    if (aiCandidates.length > 0) {
+      toast.warning(
+        "Please review or clear your current candidate questions before generating new ones.",
+      );
+      setAiReviewDrawerOpen(true);
+      return;
+    }
+
+    const sectionIndex = blueprint.findIndex((s) => s.id === sec.id);
+    const activeResult = await ensureDraftId();
+    if (!activeResult) return;
+
+    let realSectionId = sec.id;
+    if (activeResult.sections && activeResult.sections[sectionIndex]) {
+      realSectionId = activeResult.sections[sectionIndex].id;
+    }
+
+    const qType =
+      sec.allowedTypes && sec.allowedTypes.length > 1
+        ? "mixed"
+        : sec.allowedTypes?.[0] || "mcq";
+
+    const defaults = {
+      topic: sec.topics?.trim() || metadata.title || "",
+      question_type: qType,
+      difficulty: (sec.difficulty ? sec.difficulty.toLowerCase() : "medium") as any,
+      count: countOverride ?? (parseInt(sec.questions as any) || 3),
+      bloom_level: (sec.bloomLevel || "understand") as any,
+      additional_context: sec.aiPromptHint?.trim() || "",
+      easyPercent: sec.difficultyDistribution?.easy ?? 30,
+      mediumPercent: sec.difficultyDistribution?.medium ?? 40,
+      hardPercent: sec.difficultyDistribution?.hard ?? 30,
+    };
+    setAiTargetSectionId(realSectionId);
+    setAiGenerationConfig(defaults);
+    setAiDrawerOpen(true);
+  };
+
+  // Editing a saved paper: save it and go back. Resubmitting to the moderator is done from the
+  // feedback card at the top, once each comment is resolved.
+  const handleFinishEditing = async () => {
+    const saved = await handleSaveDraft();
+    if (saved && editId) router.push(`/lecturer/assessments/${editId}`);
+  };
+
   const handlePublish = async () => {
     if (currentMarks !== totalMarks) {
       toast.error(
@@ -5376,6 +5582,30 @@ export default function NewAssessmentBuilder() {
     setIsPublishing(true);
     setFieldErrors({});
     try {
+      // A summative paper is never published directly: it must be moderated and
+      // sealed first, so this step saves it and sends it to the moderators.
+      if (metadata.mode === "Summative") {
+        const currentId = draftIdRef.current;
+        const saved = (await apiClient(
+          currentId ? `/assessments/draft/${currentId}` : "/assessments/draft",
+          {
+            method: currentId ? "PUT" : "POST",
+            body: JSON.stringify(preparePayload(undefined, undefined, activeStep)),
+          },
+        )) as any;
+        const assessmentId: string | undefined = saved.id || saved.assessment_id || currentId || undefined;
+        if (!assessmentId) {
+          toast.error("The paper could not be saved, so it was not submitted.");
+          return;
+        }
+        draftIdRef.current = assessmentId;
+        loadedDraftIdRef.current = assessmentId;
+        await moderationApi.submitForModeration(assessmentId);
+        toast.success("Submitted for moderation. You will be notified of the outcome.");
+        router.push(`/lecturer/assessments/${assessmentId}`);
+        return;
+      }
+
       const result = (await apiClient("/assessments/publish", {
         method: "POST",
         body: JSON.stringify(preparePayload(undefined, undefined, null)),
@@ -5485,6 +5715,217 @@ export default function NewAssessmentBuilder() {
       toast.success("Auto-grouping layout confirmed and applied!");
     }
   };
+
+  // ── Authoring kitchen: navigation, reorder, pre-check, per-question AI ──────
+
+  const scrollToQuestion = (id: string) => {
+    setActiveQuestionId(id);
+    if (activeStep !== 5) {
+      handleNextStep(5);
+    }
+    const q = questions.find((item) => item.id === id);
+    if (q && q.groupId && q.sectionId) {
+      setSelectedGroupFilter((prev) => ({
+        ...prev,
+        [q.sectionId]: q.groupId!,
+      }));
+    }
+
+    const doScroll = (attempts = 15) => {
+      const el = document.getElementById(`q-card-${id}`);
+      if (el) {
+        try {
+          el.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+        } catch {
+          scrollToElementId(`q-card-${id}`);
+        }
+        el.classList.add("ring-2", "ring-primary", "ring-offset-2", "ring-offset-background");
+        setTimeout(() => {
+          el.classList.remove("ring-2", "ring-primary", "ring-offset-2", "ring-offset-background");
+        }, 2200);
+        return;
+      }
+      if (attempts > 0) {
+        setTimeout(() => doScroll(attempts - 1), 70);
+      }
+    };
+
+    doScroll(15);
+    setTimeout(() => doScroll(10), 160);
+    setTimeout(() => doScroll(5), 360);
+  };
+
+  const goToNextUnfinished = () => {
+    const id = nextUnfinished(questions, readiness.status, activeQuestionId);
+    if (id) scrollToQuestion(id);
+    else toast.success("Every question is complete.");
+  };
+
+  /** Reorders a question inside its section and keeps every other section's order. */
+  const handleReorderQuestion = (
+    sectionId: string,
+    fromId: string,
+    toId: string,
+  ) => {
+    const inSection = questions.filter((q) => q.sectionId === sectionId);
+    const from = inSection.findIndex((q) => q.id === fromId);
+    const to = inSection.findIndex((q) => q.id === toId);
+    if (from < 0 || to < 0 || from === to) return;
+    const reordered = arrayMove(inSection, from, to);
+    let cursor = 0;
+    updateQuestionsAndAutosave(
+      questions.map((q) => (q.sectionId === sectionId ? reordered[cursor++] : q)),
+    );
+  };
+
+  const runModerationPrecheck = async () => {
+    const id = draftIdRef.current;
+    if (!id) return;
+    setPrecheckLoading(true);
+    setPrecheckError(null);
+    try {
+      // The check reads the saved draft, so let any pending autosave land first.
+      await activeAutosavePromiseRef.current.catch(() => undefined);
+      const res = (await moderationApi.runChecklist(id)) as {
+        items: ChecklistItemView[];
+      };
+      setPrecheck(res.items);
+    } catch (err: any) {
+      setPrecheckError(err?.message || "The pre-check could not run.");
+    } finally {
+      setPrecheckLoading(false);
+    }
+  };
+
+  const buildPaperReviewRequest = () => ({
+    questions: questions.map((q) => {
+      const sec = blueprint.find((s) => s.id === q.sectionId);
+      return toSnapshot(q, { section: sec?.section, difficulty: sec?.difficulty });
+    }),
+    blueprint: blueprint.map((s) => ({
+      section: s.section,
+      expected_questions: parseInt(s.questions as any) || 0,
+      expected_marks: parseInt(s.marks as any) || 0,
+      topics: s.topics,
+      difficulty: s.difficulty.toLowerCase(),
+    })),
+    assessment_type: isSummativeMode ? "SUMMATIVE" : metadata.mode,
+    policy_total: marksSummary?.policy_total ?? null,
+    subject: metadata.title || undefined,
+    workspace_id: metadata.teaching_workspace_id || undefined,
+  });
+
+  /** A question card with its AI helper (issue chips, fixes, enhancements) underneath. */
+  const renderQuestionCard = (
+    q: Question,
+    qIdx: number,
+    sec: BlueprintSection,
+  ) => {
+    const issues = readiness.perQuestion[q.id] ?? [];
+    const aiDraftPending = q.aiGenerated && !reviewedIds.has(q.id);
+    const status = readiness.status[q.id] ?? "ready";
+    return (
+      <div
+        key={q.id}
+        id={`q-card-${q.id}`}
+        className={cn(
+          "relative overflow-hidden rounded-xl border border-border/80 bg-card shadow-xs transition-all duration-300",
+          activeQuestionId === q.id
+            ? "border-primary/60 shadow-md ring-2 ring-primary/30 ring-offset-1 ring-offset-background"
+            : "hover:border-border",
+        )}
+        onFocusCapture={() => setActiveQuestionId(q.id)}
+      >
+        {aiDraftPending && (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-border/60 bg-muted/30 px-4 sm:px-6 py-2 text-xs">
+            <Sparkles className="size-3.5 text-primary" />
+            <span className="min-w-0 flex-1 text-muted-foreground">
+              AI draft: read it through before it goes to students.
+            </span>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-7 px-2.5 text-[11px]"
+              onClick={() => markReviewed(q.id)}
+            >
+              Mark reviewed
+            </Button>
+          </div>
+        )}
+        <QuestionCard
+          bare
+          question={q}
+          index={qIdx}
+          allowedTypes={sec.allowedTypes}
+          onUpdate={(u) => {
+            markReviewed(q.id);
+            updateQuestion(q.id, u);
+          }}
+          onDelete={() => {
+            removeQuestion(q.id);
+          }}
+          onSaveToBank={() => handleSaveToBank(q)}
+          onUpdateOption={(oi, u) => {
+            markReviewed(q.id);
+            updateOption(q.id, oi, u);
+          }}
+          onAddOption={() => {
+            addOption(q.id);
+          }}
+          onRemoveOption={(oi) => {
+            removeOption(q.id, oi);
+          }}
+        />
+        <div className="border-t bg-muted/30 px-5 py-3 sm:px-6">
+          <AiQuestionAssistant
+            question={q}
+            issues={issues}
+            sectionName={sec.section}
+            subject={metadata.title || undefined}
+            topic={sec.topics || undefined}
+            workspaceId={metadata.teaching_workspace_id || undefined}
+            onApply={(updated) => {
+              markReviewed(q.id);
+              updateQuestionsAndAutosave(
+                questions.map((x) => (x.id === q.id ? updated : x)),
+              );
+            }}
+          />
+        </div>
+      </div>
+    );
+  };
+
+  const renderNavigator = (className?: string, desktop = false) => (
+    <QuestionNavigator
+      className={className}
+      collapsed={desktop ? navCollapsed : false}
+      onToggleCollapsed={desktop ? toggleNavCollapsed : undefined}
+      sections={blueprint.map((s) => ({
+        id: s.id,
+        section: s.section,
+        marks: parseInt(s.marks as any) || 0,
+        questions: parseInt(s.questions as any) || 0,
+      }))}
+      questions={questions}
+      status={readiness.status}
+      issuesByQuestion={readiness.perQuestion}
+      reviewedIds={reviewedIds}
+      activeId={activeQuestionId}
+      typeLabels={QUESTION_TYPE_LABELS}
+      summary={readiness.summary}
+      onSelect={(id) => {
+        setNavigatorOpen(false);
+        scrollToQuestion(id);
+      }}
+      onNextUnfinished={() => {
+        setNavigatorOpen(false);
+        goToNextUnfinished();
+      }}
+      onReorder={handleReorderQuestion}
+    />
+  );
 
   const renderStepContent = (stepNum: number) => {
     switch (stepNum) {
@@ -7202,16 +7643,22 @@ export default function NewAssessmentBuilder() {
       case 4:
         return (
           <div className="space-y-6">
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <h2 className="text-lg font-semibold tracking-tight text-foreground/90">
-                  Assessment Blueprint
-                </h2>
+            {/* Blueprint Header */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3.5 pb-2">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <div className="size-8 rounded-lg bg-primary/10 text-primary dark:bg-primary/20 flex items-center justify-center shrink-0">
+                    <Layout className="size-4" />
+                  </div>
+                  <h2 className="text-lg font-bold tracking-tight text-foreground">
+                    Assessment Blueprint
+                  </h2>
+                </div>
                 <p className="text-xs text-muted-foreground">
-                  Setup target mark nodes and limits per section.
+                  Map sections, curriculum topics, mark allocations, and allowed question formats before authoring questions.
                 </p>
               </div>
-              <div className="flex gap-2">
+              <div className="flex items-center gap-2.5 flex-wrap sm:flex-nowrap">
                 <Button
                   onClick={async () => {
                     if (aiCandidates.length > 0) {
@@ -7262,17 +7709,16 @@ export default function NewAssessmentBuilder() {
                   disabled={aiGenerating}
                   variant="outline"
                   size="sm"
-                  className="h-9"
+                  className="h-9 px-3.5 text-xs font-semibold border-primary/30 hover:border-primary/60 bg-primary/5 hover:bg-primary/10 text-primary transition-colors gap-2 rounded-xl"
                 >
                   {aiGenerating ? (
                     <>
-                      <LoaderCircleIcon className="mr-2 size-4 animate-spin text-primary" />{" "}
-                      Generating...
+                      <LoaderCircleIcon className="size-4 animate-spin text-primary" />
+                      Generating Blueprint Questions...
                     </>
                   ) : (
                     <>
-                      <Sparkles className="mr-2 size-4 text-primary" /> Generate
-                      All with AI
+                      <Sparkles className="size-4 text-primary" /> Generate All with AI
                     </>
                   )}
                 </Button>
@@ -7280,394 +7726,436 @@ export default function NewAssessmentBuilder() {
                   onClick={addSection}
                   variant="outline"
                   size="sm"
-                  className="h-9"
+                  className="h-9 px-3.5 text-xs font-semibold gap-1.5 rounded-xl shadow-none"
                 >
-                  <Plus className="mr-2 size-4" /> Add Section
+                  <Plus className="size-4" /> Add Section
                 </Button>
               </div>
             </div>
 
+            {/* Blueprint Section Cards */}
             <div className="space-y-4">
-              {blueprint.map((sec, idx) => (
-                <Card
-                  key={sec.id}
-                  className="shadow-none border hover:border-primary/10 transition-colors"
-                >
-                  <CardHeader className="bg-muted/10 border-b flex flex-row items-center justify-between p-4 py-2.5">
-                    <div className="flex items-center gap-3">
-                      <Badge
-                        variant="outline"
-                        className="font-bold text-[10px] px-2 h-5 bg-background"
-                      >
-                        Section {idx + 1}
-                      </Badge>
-                      <Input
-                        value={sec.section}
-                        onChange={(e) => {
-                          updateSection(sec.id, "section", e.target.value);
-                          triggerDebouncedAutosave(4);
-                        }}
-                        className="font-bold text-sm p-0 h-auto bg-transparent border-none focus-visible:ring-0 w-48 uppercase shadow-none"
-                      />
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={async () => {
-                          if (aiCandidates.length > 0) {
-                            toast.warning(
-                              "Please review or clear your current candidate questions before generating new ones.",
-                            );
-                            setAiReviewDrawerOpen(true);
-                            return;
-                          }
+              {blueprint.map((sec, idx) => {
+                const secMarks = parseInt(sec.marks as any) || 0;
+                const secQuestions = parseInt(sec.questions as any) || 0;
+                const avgMarksPerQ =
+                  secQuestions > 0
+                    ? (secMarks / secQuestions).toFixed(1).replace(/\.0$/, "")
+                    : "0";
 
-                          const sectionIndex = blueprint.findIndex(
-                            (s) => s.id === sec.id,
-                          );
-                          const activeResult = await ensureDraftId();
-                          if (!activeResult) return;
+                return (
+                  <Card
+                    key={sec.id}
+                    className="shadow-xs border border-border/80 hover:border-primary/30 transition-all rounded-xl overflow-hidden bg-card"
+                  >
+                    {/* Section Header */}
+                    <CardHeader className="bg-muted/30 dark:bg-muted/15 border-b border-border/60 p-3 sm:p-4">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="flex items-center gap-2.5 flex-1 min-w-0">
+                          <Badge
+                            variant="outline"
+                            className="font-bold text-[11px] px-2.5 h-6 bg-background border-border shrink-0"
+                          >
+                            Section {idx + 1}
+                          </Badge>
+                          <div className="relative flex-1 max-w-xs sm:max-w-md">
+                            <Input
+                              value={sec.section}
+                              onChange={(e) => {
+                                updateSection(sec.id, "section", e.target.value);
+                                triggerDebouncedAutosave(4);
+                              }}
+                              placeholder={`e.g. Section ${String.fromCharCode(65 + idx)}`}
+                              className="font-bold text-sm h-8 bg-background/60 hover:bg-background focus:bg-background border-border/50 focus:border-primary px-2.5 rounded-lg transition-colors uppercase tracking-tight"
+                            />
+                          </div>
+                        </div>
 
-                          let realSectionId = sec.id;
-                          if (
-                            activeResult.sections &&
-                            activeResult.sections[sectionIndex]
-                          ) {
-                            realSectionId =
-                              activeResult.sections[sectionIndex].id;
-                          }
+                        <div className="flex items-center justify-between sm:justify-end gap-2.5 shrink-0 border-t sm:border-t-0 pt-2 sm:pt-0 border-border/40">
+                          <div className="flex items-center gap-1.5 text-xs font-mono text-muted-foreground mr-1">
+                            <span className="font-semibold text-foreground">{secMarks}</span> Marks
+                            <span className="text-muted-foreground/40">•</span>
+                            <span className="font-semibold text-foreground">{secQuestions}</span> Qs
+                            <span className="text-muted-foreground/40 hidden sm:inline">•</span>
+                            <span className="text-[11px] text-muted-foreground hidden sm:inline">
+                              (~{avgMarksPerQ} M/Q)
+                            </span>
+                          </div>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => openAiDrawerForSection(sec)}
+                            disabled={aiGenerating}
+                            className="h-7 px-2.5 text-xs font-semibold text-primary border-primary/20 hover:bg-primary/5 hover:border-primary/40 gap-1.5 rounded-lg"
+                          >
+                            {aiGenerating && aiTargetSectionId === sec.id ? (
+                              <>
+                                <LoaderCircleIcon className="size-3 animate-spin" />
+                                <span className="hidden sm:inline">Generating...</span>
+                              </>
+                            ) : (
+                              <>
+                                <Sparkles className="size-3" />
+                                <span>Draft with AI</span>
+                              </>
+                            )}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => removeSection(sec.id)}
+                            disabled={blueprint.length === 1}
+                            className="h-7 w-7 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg transition-colors"
+                            title={blueprint.length === 1 ? "At least one section is required" : "Remove Section"}
+                          >
+                            <Trash2 className="size-3.5" />
+                          </Button>
+                        </div>
+                      </div>
+                    </CardHeader>
 
-                          const qType =
-                            sec.allowedTypes && sec.allowedTypes.length > 1
-                              ? "mixed"
-                              : sec.allowedTypes?.[0] || "mcq";
+                    {/* Section Body */}
+                    <CardContent className="p-4 sm:p-5 grid grid-cols-1 lg:grid-cols-12 gap-5">
+                      {/* Left: Scope & Allocation */}
+                      <div className="lg:col-span-6 space-y-4">
+                        <div className="space-y-1.5">
+                          <Label
+                            htmlFor={`topics-${sec.id}`}
+                            className="text-xs font-semibold text-foreground flex items-center justify-between"
+                          >
+                            <span className="flex items-center gap-1.5">
+                              <BookOpen className="size-3.5 text-primary" /> Topic Domain Coverage
+                            </span>
+                            <span className="text-[10px] text-muted-foreground font-normal">Syllabus themes</span>
+                          </Label>
+                          <Input
+                            id={`topics-${sec.id}`}
+                            placeholder="e.g. Relational schemas, SQL queries, Indexing strategies"
+                            value={sec.topics}
+                            onChange={(e) => {
+                              updateSection(sec.id, "topics", e.target.value);
+                              triggerDebouncedAutosave(4);
+                            }}
+                            className="h-9 text-xs sm:text-sm bg-background border-border/70"
+                          />
+                          <p className="text-[10px] text-muted-foreground leading-normal">
+                            Key curriculum themes and syllabus outcomes to be assessed in this section.
+                          </p>
+                        </div>
 
-                          const defaults = {
-                            topic: sec.topics?.trim() || metadata.title || "",
-                            question_type: qType,
-                            difficulty: (sec.difficulty
-                              ? sec.difficulty.toLowerCase()
-                              : "medium") as any,
-                            count: parseInt(sec.questions as any) || 3,
-                            bloom_level: (sec.bloomLevel ||
-                              "understand") as any,
-                            additional_context: sec.aiPromptHint?.trim() || "",
-                            easyPercent: sec.difficultyDistribution?.easy ?? 30,
-                            mediumPercent:
-                              sec.difficultyDistribution?.medium ?? 40,
-                            hardPercent: sec.difficultyDistribution?.hard ?? 30,
-                          };
-                          setAiTargetSectionId(realSectionId);
-                          setAiGenerationConfig(defaults);
-                          setAiDrawerOpen(true);
-                        }}
-                        disabled={aiGenerating}
-                        className="h-7 text-xs"
-                      >
-                        {aiGenerating && aiTargetSectionId === sec.id ? (
-                          <>
-                            <LoaderCircleIcon className="mr-1.5 size-3.5 animate-spin" />{" "}
-                            Generating...
-                          </>
-                        ) : (
-                          <>
-                            <Sparkles className="mr-1.5 size-3.5" /> Generate
-                            with AI
-                          </>
+                        <div className="grid grid-cols-2 gap-3.5">
+                          <div className="space-y-1.5">
+                            <Label
+                              htmlFor={`marks-${sec.id}`}
+                              className="text-xs font-semibold text-foreground"
+                            >
+                              Allocated Marks
+                            </Label>
+                            <Input
+                              type="number"
+                              id={`marks-${sec.id}`}
+                              min={1}
+                              placeholder="e.g. 25"
+                              value={sec.marks === 0 ? "" : sec.marks}
+                              onChange={(e) => {
+                                updateSection(
+                                  sec.id,
+                                  "marks",
+                                  e.target.value === ""
+                                    ? ("" as any)
+                                    : parseInt(e.target.value) || 0,
+                                );
+                                triggerDebouncedAutosave(4);
+                              }}
+                              className="font-bold text-center h-9 text-sm bg-background border-border/70"
+                            />
+                          </div>
+                          <div className="space-y-1.5">
+                            <Label
+                              htmlFor={`questions-${sec.id}`}
+                              className="text-xs font-semibold text-foreground"
+                            >
+                              Question Count
+                            </Label>
+                            <Input
+                              type="number"
+                              id={`questions-${sec.id}`}
+                              min={1}
+                              placeholder="e.g. 5"
+                              value={sec.questions === 0 ? "" : sec.questions}
+                              onChange={(e) => {
+                                updateSection(
+                                  sec.id,
+                                  "questions",
+                                  e.target.value === ""
+                                    ? ("" as any)
+                                    : parseInt(e.target.value) || 0,
+                                );
+                                triggerDebouncedAutosave(4);
+                              }}
+                              className="font-bold text-center h-9 text-sm bg-background border-border/70"
+                            />
+                          </div>
+                        </div>
+
+                        {metadata.question_distribution_mode === "PER_GROUP" && (
+                          <div className="flex items-center space-x-2.5 p-2.5 rounded-lg border border-border/60 bg-muted/20 animate-in fade-in duration-200">
+                            <Checkbox
+                              id={`per-group-${sec.id}`}
+                              checked={sec.per_group || false}
+                              onCheckedChange={(checked) => {
+                                updateSection(sec.id, "per_group", !!checked);
+                                triggerDebouncedAutosave(4);
+                              }}
+                            />
+                            <Label
+                              htmlFor={`per-group-${sec.id}`}
+                              className="cursor-pointer font-semibold text-xs flex items-center gap-1.5 text-foreground"
+                            >
+                              <Users className="size-3.5 text-primary" /> Per-Group Question Set
+                              <span className="text-[10px] text-muted-foreground font-normal">
+                                (different questions per cohort)
+                              </span>
+                            </Label>
+                          </div>
                         )}
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => removeSection(sec.id)}
-                        disabled={blueprint.length === 1}
-                        className="h-7 w-7 text-muted-foreground hover:text-destructive hover:bg-destructive/5 rounded-md"
-                      >
-                        <Trash2 className="size-4" />
-                      </Button>
-                    </div>
-                  </CardHeader>
-                  <CardContent className="p-5 grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div className="space-y-4">
-                      <div className="space-y-2">
-                        <Label htmlFor={`topics-${sec.id}`}>
-                          Topic Domain Coverage
-                        </Label>
-                        <Input
-                          id={`topics-${sec.id}`}
-                          placeholder="e.g. SQL joins, transactions, query indexes"
-                          value={sec.topics}
-                          onChange={(e) => {
-                            updateSection(sec.id, "topics", e.target.value);
-                            triggerDebouncedAutosave(4);
-                          }}
-                        />
-                      </div>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                          <Label htmlFor={`marks-${sec.id}`}>
-                            Allocated Marks
-                          </Label>
-                          <Input
-                            type="number"
-                            id={`marks-${sec.id}`}
-                            placeholder="e.g. 20"
-                            value={sec.marks === 0 ? "" : sec.marks}
-                            onChange={(e) => {
-                              updateSection(
-                                sec.id,
-                                "marks",
-                                e.target.value === ""
-                                  ? ("" as any)
-                                  : parseInt(e.target.value) || 0,
-                              );
-                              triggerDebouncedAutosave(4);
-                            }}
-                            className="font-bold text-center"
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label htmlFor={`questions-${sec.id}`}>
-                            Question Node Count
-                          </Label>
-                          <Input
-                            type="number"
-                            id={`questions-${sec.id}`}
-                            placeholder="e.g. 5"
-                            value={sec.questions === 0 ? "" : sec.questions}
-                            onChange={(e) => {
-                              updateSection(
-                                sec.id,
-                                "questions",
-                                e.target.value === ""
-                                  ? ("" as any)
-                                  : parseInt(e.target.value) || 0,
-                              );
-                              triggerDebouncedAutosave(4);
-                            }}
-                            className="font-bold text-center"
-                          />
-                        </div>
-                      </div>
-                    </div>
-                    <div className="space-y-4">
-                      <div className="space-y-2">
-                        <Label>Allowed Question Formats</Label>
-                        <ToggleGroup
-                          type="multiple"
-                          value={sec.allowedTypes}
-                          onValueChange={(v: any) => {
-                            if (v.length > 0) {
-                              updateSection(sec.id, "allowedTypes", v);
-                            } else {
-                              updateSection(sec.id, "allowedTypes", [
-                                ...sec.allowedTypes,
-                              ]);
-                            }
-                          }}
-                          className="flex flex-wrap gap-1.5 justify-start"
-                        >
-                          {[
-                            "mcq",
-                            "truefalse",
-                            "shortanswer",
-                            "essay",
-                            "matching",
-                            "fillblank",
-                            "ordering",
-                            "computational",
-                            "casestudy",
-                          ].map((type) => (
-                            <ToggleGroupItem
-                              key={type}
-                              value={type}
-                              className="h-8 px-2 text-[10px] font-bold uppercase border hover:bg-muted data-[state=on]:bg-primary data-[state=on]:text-white transition-all rounded-md"
-                            >
-                              {type}
-                            </ToggleGroupItem>
-                          ))}
-                        </ToggleGroup>
                       </div>
 
-                      {metadata.question_distribution_mode === "PER_GROUP" && (
-                        <div className="flex items-center space-x-2 pt-2 pb-2 animate-in fade-in duration-200">
-                          <Checkbox
-                            id={`per-group-${sec.id}`}
-                            checked={sec.per_group || false}
-                            onCheckedChange={(checked) => {
-                              updateSection(sec.id, "per_group", !!checked);
-                              triggerDebouncedAutosave(4);
-                            }}
-                          />
-                          <Label
-                            htmlFor={`per-group-${sec.id}`}
-                            className="cursor-pointer font-bold text-xs flex items-center gap-1.5"
-                          >
-                            <Users className="size-3.5 text-primary" />{" "}
-                            Per-Group Question Set (different questions per
-                            group)
+                      {/* Right: Taxonomy & Question Types */}
+                      <div className="lg:col-span-6 space-y-4">
+                        <div className="space-y-2">
+                          <Label className="text-xs font-semibold text-foreground flex items-center justify-between">
+                            <span>Allowed Question Formats</span>
+                            <span className="text-[10px] text-muted-foreground font-normal">
+                              {sec.allowedTypes?.length || 0} selected
+                            </span>
                           </Label>
+                          <ToggleGroup
+                            type="multiple"
+                            value={sec.allowedTypes}
+                            onValueChange={(v: any) => {
+                              if (v.length > 0) {
+                                updateSection(sec.id, "allowedTypes", v);
+                              } else {
+                                updateSection(sec.id, "allowedTypes", [
+                                  ...sec.allowedTypes,
+                                ]);
+                              }
+                            }}
+                            className="flex flex-wrap gap-1.5 justify-start"
+                          >
+                            {[
+                              "mcq",
+                              "truefalse",
+                              "shortanswer",
+                              "essay",
+                              "matching",
+                              "fillblank",
+                              "ordering",
+                              "computational",
+                              "casestudy",
+                            ].map((type) => (
+                              <ToggleGroupItem
+                                key={type}
+                                value={type}
+                                className="h-7 px-2.5 text-[11px] font-semibold border border-border/70 hover:bg-muted data-[state=on]:bg-primary data-[state=on]:text-primary-foreground data-[state=on]:border-primary transition-all rounded-lg cursor-pointer"
+                              >
+                                {QUESTION_TYPE_LABELS[type] || type}
+                              </ToggleGroupItem>
+                            ))}
+                          </ToggleGroup>
                         </div>
-                      )}
 
-                      <div className="grid grid-cols-2 gap-4 pt-2">
-                        <div className="space-y-1.5">
-                          <Label
-                            htmlFor={`difficulty-${sec.id}`}
-                            className="text-xs font-semibold"
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 pt-1">
+                          <div className="space-y-1.5">
+                            <Label
+                              htmlFor={`difficulty-${sec.id}`}
+                              className="text-xs font-semibold text-foreground"
+                            >
+                              Section Difficulty
+                            </Label>
+                            <Select
+                              value={sec.difficulty}
+                              onValueChange={(val) => {
+                                updateSection(sec.id, "difficulty", val as any);
+                                triggerDebouncedAutosave(4);
+                              }}
+                            >
+                              <SelectTrigger
+                                id={`difficulty-${sec.id}`}
+                                className="w-full h-9 text-xs bg-background border-border/70"
+                              >
+                                <SelectValue placeholder="Select difficulty" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="Easy">Easy (Recall)</SelectItem>
+                                <SelectItem value="Medium">Medium (Application)</SelectItem>
+                                <SelectItem value="Hard">Hard (Analysis)</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          <div className="space-y-1.5">
+                            <Label
+                              htmlFor={`bloom-${sec.id}`}
+                              className="text-xs font-semibold text-foreground"
+                            >
+                              Target Bloom&apos;s Level
+                            </Label>
+                            <Select
+                              value={sec.bloomLevel || "understand"}
+                              onValueChange={(val) => {
+                                updateSection(sec.id, "bloomLevel", val as any);
+                                triggerDebouncedAutosave(4);
+                              }}
+                            >
+                              <SelectTrigger
+                                id={`bloom-${sec.id}`}
+                                className="w-full h-9 text-xs bg-background border-border/70"
+                              >
+                                <SelectValue placeholder="Select Bloom's Level" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="remember">1 - Remembering</SelectItem>
+                                <SelectItem value="understand">2 - Understanding</SelectItem>
+                                <SelectItem value="apply">3 - Applying</SelectItem>
+                                <SelectItem value="analyze">4 - Analyzing</SelectItem>
+                                <SelectItem value="evaluate">5 - Evaluating</SelectItem>
+                                <SelectItem value="create">6 - Creating</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+
+            {/* Blueprint Totals & Verification Deck */}
+            {(() => {
+              const targetMarks = parseInt(metadata.total_marks as any) || 0;
+              const isAligned = targetMarks > 0 && totalMarks === targetMarks;
+              const markDiff = targetMarks - totalMarks;
+
+              return (
+                <Card className="shadow-none border border-border/80 bg-muted/30 dark:bg-muted/10 rounded-xl overflow-hidden">
+                  <CardContent className="p-4 sm:p-5 space-y-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+                      {/* Stat 1: Mark Alignment */}
+                      <div className="p-3.5 rounded-xl bg-card border border-border/70 space-y-1.5 shadow-2xs">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block">
+                          Blueprint Marks Balance
+                        </span>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-lg font-bold font-mono text-foreground">
+                            {totalMarks}{" "}
+                            <span className="text-xs font-normal text-muted-foreground">
+                              / {targetMarks || "?"} Marks
+                            </span>
+                          </span>
+                          {isAligned ? (
+                            <Badge className="bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/30 text-[10px] font-bold">
+                              ✓ Aligned
+                            </Badge>
+                          ) : targetMarks > 0 ? (
+                            <Badge
+                              variant="outline"
+                              className="text-amber-700 dark:text-amber-300 border-amber-500/40 bg-amber-500/10 text-[10px] font-bold"
+                            >
+                              {markDiff > 0
+                                ? `-${markDiff} Marks`
+                                : `+${Math.abs(markDiff)} Marks`}
+                            </Badge>
+                          ) : null}
+                        </div>
+                        <p className="text-[10px] text-muted-foreground leading-tight">
+                          {isAligned
+                            ? "Blueprint allocations perfectly match assessment target marks."
+                            : markDiff > 0
+                            ? `Allocate ${markDiff} more marks across sections to match target.`
+                            : targetMarks > 0
+                            ? `Allocated marks exceed assessment target by ${Math.abs(markDiff)}.`
+                            : "Specify target total marks in Step 1 to verify allocation balance."}
+                        </p>
+                      </div>
+
+                      {/* Stat 2: Total Questions */}
+                      <div className="p-3.5 rounded-xl bg-card border border-border/70 space-y-1.5 shadow-2xs">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block">
+                          Total Assessment Scope
+                        </span>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-lg font-bold font-mono text-foreground">
+                            {totalQuestions}{" "}
+                            <span className="text-xs font-normal text-muted-foreground">
+                              Questions
+                            </span>
+                          </span>
+                          <Badge variant="secondary" className="text-[10px] font-semibold">
+                            {blueprint.length}{" "}
+                            {blueprint.length === 1 ? "Section" : "Sections"}
+                          </Badge>
+                        </div>
+                        <p className="text-[10px] text-muted-foreground leading-tight">
+                          Across {blueprint.length} configured sections with an average of{" "}
+                          {totalQuestions > 0
+                            ? (totalMarks / totalQuestions).toFixed(1).replace(/\.0$/, "")
+                            : 0}{" "}
+                          marks per item.
+                        </p>
+                      </div>
+
+                      {/* Stat 3: Passing Threshold */}
+                      <div className="p-3.5 rounded-xl bg-card border border-border/70 space-y-1.5 shadow-2xs">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                            Passing Score
+                          </span>
+                          <Badge
+                            variant={metadata.passing_marks > 0 ? "default" : "secondary"}
+                            className="text-xs font-bold px-2 py-0.5"
                           >
-                            Section Difficulty
-                          </Label>
-                          <Select
-                            value={sec.difficulty}
-                            onValueChange={(val) => {
-                              updateSection(sec.id, "difficulty", val as any);
+                            {metadata.passing_marks || 0} Marks
+                          </Badge>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Input
+                            type="number"
+                            id="passingMarksPercent"
+                            min={1}
+                            max={100}
+                            value={passingMarksPercent}
+                            onChange={(e) => {
+                              setPassingMarksPercent(parseInt(e.target.value) || 0);
                               triggerDebouncedAutosave(4);
                             }}
-                          >
-                            <SelectTrigger
-                              id={`difficulty-${sec.id}`}
-                              className="w-full h-9 text-xs"
-                            >
-                              <SelectValue placeholder="Select difficulty" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="Easy">Easy</SelectItem>
-                              <SelectItem value="Medium">Medium</SelectItem>
-                              <SelectItem value="Hard">Hard</SelectItem>
-                            </SelectContent>
-                          </Select>
+                            className="h-8 w-20 text-center font-bold text-xs bg-background"
+                          />
+                          <span className="text-xs text-muted-foreground font-medium">
+                            % passing threshold
+                          </span>
                         </div>
-                        <div className="space-y-1.5">
-                          <Label
-                            htmlFor={`bloom-${sec.id}`}
-                            className="text-xs font-semibold"
-                          >
-                            Target Bloom&apos;s Level
-                          </Label>
-                          <Select
-                            value={sec.bloomLevel || "understand"}
-                            onValueChange={(val) => {
-                              updateSection(sec.id, "bloomLevel", val as any);
-                              triggerDebouncedAutosave(4);
-                            }}
-                          >
-                            <SelectTrigger
-                              id={`bloom-${sec.id}`}
-                              className="w-full h-9 text-xs"
-                            >
-                              <SelectValue placeholder="Select Bloom's Level" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="remember">
-                                Remembering
-                              </SelectItem>
-                              <SelectItem value="understand">
-                                Understanding
-                              </SelectItem>
-                              <SelectItem value="apply">Applying</SelectItem>
-                              <SelectItem value="analyze">Analyzing</SelectItem>
-                              <SelectItem value="evaluate">
-                                Evaluating
-                              </SelectItem>
-                              <SelectItem value="create">Creating</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
+                        <p className="text-[10px] text-muted-foreground leading-tight">
+                          Computes minimum score required for passing validation.
+                        </p>
                       </div>
                     </div>
                   </CardContent>
                 </Card>
-              ))}
-            </div>
+              );
+            })()}
 
-            <Card className="shadow-none border bg-muted/20">
-              <CardContent className="p-4 space-y-4">
-                <div className="flex flex-col md:flex-row justify-between gap-4 text-sm font-semibold uppercase tracking-wider text-muted-foreground/80">
-                  <div className="flex items-center gap-2">
-                    <span>Blueprint Total:</span>
-                    <Badge
-                      variant="outline"
-                      className={cn(
-                        "text-sm font-bold bg-background",
-                        totalMarks ===
-                          parseInt((metadata.total_marks as any) || "0") &&
-                          parseInt((metadata.total_marks as any) || "0") > 0
-                          ? "text-emerald-600 border-emerald-400"
-                          : "text-foreground",
-                      )}
-                    >
-                      {totalMarks} /{" "}
-                      {parseInt(metadata.total_marks as any) || "?"} Marks
-                    </Badge>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span>Total Questions:</span>
-                    <Badge
-                      variant="outline"
-                      className="text-sm font-bold bg-background text-foreground"
-                    >
-                      {totalQuestions} Questions
-                    </Badge>
-                  </div>
-                </div>
-                <div className="border-t pt-4 grid grid-cols-2 gap-4 items-end">
-                  <div className="space-y-1.5">
-                    <Label
-                      htmlFor="passingMarksPercent"
-                      className="text-xs font-semibold"
-                    >
-                      Passing Threshold (%)
-                    </Label>
-                    <div className="flex items-center gap-2">
-                      <Input
-                        type="number"
-                        id="passingMarksPercent"
-                        min={1}
-                        max={100}
-                        value={passingMarksPercent}
-                        onChange={(e) => {
-                          setPassingMarksPercent(parseInt(e.target.value) || 0);
-                          triggerDebouncedAutosave(4);
-                        }}
-                        className="h-9 w-24 text-center font-bold"
-                      />
-                      <span className="text-xs text-muted-foreground">
-                        % of total marks
-                      </span>
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-[10px] font-bold uppercase text-muted-foreground tracking-wider">
-                      Passing Mark
-                    </p>
-                    <Badge
-                      variant={
-                        metadata.passing_marks > 0 ? "default" : "secondary"
-                      }
-                      className="text-base px-4 py-1.5 font-bold"
-                    >
-                      {metadata.passing_marks || 0} / {totalMarks || "?"} marks
-                    </Badge>
-                    {totalMarks === 0 && (
-                      <p className="text-[10px] text-amber-600">
-                        Add section marks above to compute passing mark
-                      </p>
-                    )}
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <div className="flex justify-between mt-8 pt-6 border-t">
-              <Button variant="ghost" onClick={() => handleNextStep(3)}>
+            {/* Stepper Navigation */}
+            <div className="flex justify-between mt-8 pt-6 border-t border-border/60">
+              <Button variant="ghost" onClick={() => handleNextStep(3)} className="rounded-xl">
                 Back
               </Button>
               <Button
                 size="lg"
                 onClick={() => handleNextStep(5)}
-                className="h-11 px-8 rounded-md font-semibold"
+                className="h-11 px-8 rounded-xl font-semibold"
               >
                 Structure & Questions <ChevronRight className="ml-2 size-4" />
               </Button>
@@ -7677,88 +8165,17 @@ export default function NewAssessmentBuilder() {
       case 5:
         return (
           <div className="space-y-6">
-            <div className="flex items-center justify-between sticky top-14 z-30 bg-background/95 backdrop-blur-md py-3 border-b border-dashed">
-              <div className="flex items-center gap-6">
-                <div className="space-y-0.5">
-                  <p className="text-[10px] font-bold uppercase text-muted-foreground tracking-tight">
-                    Progress
-                  </p>
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-lg font-bold text-primary">
-                      {questions.length}
-                    </span>
-                    <span className="text-xs font-medium text-muted-foreground">
-                      / {totalQuestions} questions
-                    </span>
-                  </div>
-                </div>
-                <div className="w-px h-8 bg-muted" />
-                <div className="space-y-0.5">
-                  <p className="text-[10px] font-bold uppercase text-muted-foreground tracking-tight">
-                    Marks Matrix
-                  </p>
-                  <div className="flex items-center gap-1.5">
-                    <span
-                      className={cn(
-                        "text-lg font-bold",
-                        currentMarks === totalMarks
-                          ? "text-emerald-600"
-                          : "text-destructive",
-                      )}
-                    >
-                      {currentMarks}
-                    </span>
-                    <span className="text-xs font-medium text-muted-foreground">
-                      / {totalMarks} allocated
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-8 text-[10px] font-bold uppercase tracking-wider rounded-lg border-primary/20 text-primary hover:bg-primary/5 shadow-none"
-                  >
-                    <Info className="mr-2 size-3.5" /> Grading Logic
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent
-                  align="end"
-                  className="w-125 p-0 overflow-hidden rounded-xl border shadow-xl"
-                >
-                  <div className="bg-muted/30 border-b p-4">
-                    <h4 className="text-xs font-bold uppercase tracking-widest text-foreground">
-                      Grading Architecture
-                    </h4>
-                    <p className="text-[10px] text-muted-foreground mt-1 leading-relaxed">
-                      Mindexa auto-grades closed questions and schedules open
-                      questions for review.
-                    </p>
-                  </div>
-                  <div className="p-4 grid grid-cols-2 gap-3">
-                    <div className="p-3 rounded border bg-muted/5 space-y-1">
-                      <div className="text-[8px] uppercase font-bold text-muted-foreground">
-                        Closed
-                      </div>
-                      <div className="text-lg font-bold text-emerald-600">
-                        {gradingArchitecture.closedQuestions}
-                      </div>
-                    </div>
-                    <div className="p-3 rounded border bg-muted/5 space-y-1">
-                      <div className="text-[8px] uppercase font-bold text-muted-foreground">
-                        Open
-                      </div>
-                      <div className="text-lg font-bold text-amber-600">
-                        {gradingArchitecture.openQuestions}
-                      </div>
-                    </div>
-                  </div>
-                </PopoverContent>
-              </Popover>
-            </div>
+            <AuthoringStatusBar
+              questionCount={questions.length}
+              plannedQuestions={totalQuestions}
+              marks={currentMarks}
+              plannedMarks={totalMarks}
+              closedCount={gradingArchitecture.closedQuestions}
+              openCount={gradingArchitecture.openQuestions}
+              readiness={readiness}
+              onOpenReadiness={() => setReadinessOpen(true)}
+              onOpenNavigator={() => setNavigatorOpen(true)}
+            />
 
             {metadata.question_distribution_mode === "PER_GROUP" && (
               <div className="flex justify-center border-b pb-4">
@@ -7819,7 +8236,7 @@ export default function NewAssessmentBuilder() {
                           key={sec.id}
                           className="space-y-4 border p-4 rounded-xl bg-muted/5"
                         >
-                          <div className="flex justify-between items-center bg-muted/10 p-3 rounded-lg border">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-muted/20 p-3 rounded-xl border border-border/80">
                             <div className="flex items-center gap-3">
                               <Badge className="bg-muted text-foreground uppercase border font-semibold">
                                 Section {idx + 1}
@@ -7845,56 +8262,61 @@ export default function NewAssessmentBuilder() {
                           </div>
 
                           <div className="space-y-4">
-                            {groupQuestions.map((q, qIdx) => (
-                              <QuestionCard
-                                key={q.id}
-                                question={q}
-                                index={qIdx}
-                                allowedTypes={sec.allowedTypes}
-                                onUpdate={(u) => {
-                                  updateQuestion(q.id, u);
-                                }}
-                                onDelete={() => {
-                                  removeQuestion(q.id);
-                                }}
-                                onSaveToBank={() => handleSaveToBank(q)}
-                                onUpdateOption={(oi, u) => {
-                                  updateOption(q.id, oi, u);
-                                }}
-                                onAddOption={() => {
-                                  addOption(q.id);
-                                }}
-                                onRemoveOption={(oi) => {
-                                  removeOption(q.id, oi);
-                                }}
-                              />
-                            ))}
+                            {groupQuestions.map((q, qIdx) =>
+                              renderQuestionCard(q, qIdx, sec),
+                            )}
 
-                            <div className="flex gap-4">
-                              <Button
-                                variant="outline"
-                                className="flex-1 h-14 border border-dashed flex flex-col gap-0.5 justify-center"
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+                              <button
+                                type="button"
                                 onClick={() => {
                                   addQuestion(
                                     sec.id,
                                     isPerGroupSection ? groupId : undefined,
                                   );
                                 }}
+                                className="group relative flex items-center gap-3.5 p-3.5 sm:p-4 rounded-xl border border-dashed border-border/80 hover:border-primary/60 bg-card hover:bg-primary/[0.03] dark:hover:bg-primary/[0.08] transition-all duration-200 text-left cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/20 shadow-xs"
                               >
-                                <Plus className="size-4 text-primary" />
-                                <span className="font-bold uppercase text-[9px] tracking-wider text-muted-foreground">
-                                  Add Manually
-                                </span>
-                              </Button>
+                                <div className="size-10 rounded-lg bg-primary/10 text-primary dark:bg-primary/20 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform duration-200">
+                                  <Plus className="size-5" />
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <span className="text-xs sm:text-sm font-bold text-foreground group-hover:text-primary transition-colors block">
+                                    Add Manual Question
+                                  </span>
+                                  <p className="text-[11px] text-muted-foreground truncate">
+                                    Create MCQ, Essay, Computational, or Case Study
+                                  </p>
+                                </div>
+                              </button>
                               <QuestionBankSelector
-                                selectedIds={questions.map((q) => q.id)}
-                                onSelect={(q) => {
+                                selectedIds={questions.map((q) => bankIdOf(q.id))}
+                                targetLabel={sec.section}
+                                onSelect={(q) =>
                                   handleBankSelect(
                                     q,
                                     sec.id,
                                     isPerGroupSection ? groupId : undefined,
-                                  );
-                                }}
+                                  )
+                                }
+                                trigger={
+                                  <button
+                                    type="button"
+                                    className="group relative flex items-center gap-3.5 p-3.5 sm:p-4 rounded-xl border border-dashed border-border/80 hover:border-indigo-500/60 bg-card hover:bg-indigo-500/[0.03] dark:hover:bg-indigo-500/[0.08] transition-all duration-200 text-left cursor-pointer focus:outline-none focus:ring-2 focus:ring-indigo-500/20 shadow-xs w-full"
+                                  >
+                                    <div className="size-10 rounded-lg bg-indigo-500/10 text-indigo-600 dark:bg-indigo-500/20 dark:text-indigo-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform duration-200">
+                                      <Database className="size-5" />
+                                    </div>
+                                    <div className="min-w-0 flex-1">
+                                      <span className="text-xs sm:text-sm font-bold text-foreground group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors block">
+                                        Import from Question Bank
+                                      </span>
+                                      <p className="text-[11px] text-muted-foreground truncate">
+                                        Browse and reuse pre-approved repository items
+                                      </p>
+                                    </div>
+                                  </button>
+                                }
                               />
                             </div>
                           </div>
@@ -7905,6 +8327,19 @@ export default function NewAssessmentBuilder() {
                 )}
               />
             ) : (
+              <div
+                className={cn(
+                  "grid gap-6 transition-[grid-template-columns] duration-300",
+                  navCollapsed
+                    ? "lg:grid-cols-[3.5rem_minmax(0,1fr)]"
+                    : "lg:grid-cols-[17rem_minmax(0,1fr)]",
+                )}
+              >
+              <aside className="hidden lg:block">
+                <div className="sticky top-40 h-[calc(100vh-11rem)]">
+                  {renderNavigator("h-full", true)}
+                </div>
+              </aside>
               <div className="space-y-8">
                 {blueprint.map((sec, idx) => {
                   const isPerGroupSection =
@@ -7915,7 +8350,7 @@ export default function NewAssessmentBuilder() {
 
                   return (
                     <div key={sec.id} className="space-y-4">
-                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-muted/20 p-3 rounded-lg border">
+                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-muted/20 p-3 rounded-xl border border-border/80">
                         <div className="flex items-center gap-3">
                           <Badge className="px-2.5 h-6 text-xs bg-muted text-foreground hover:bg-muted shadow-none uppercase border font-semibold">
                             Section {idx + 1}
@@ -7930,7 +8365,7 @@ export default function NewAssessmentBuilder() {
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-4">
+                        <div className="flex flex-wrap items-center justify-between sm:justify-end gap-3 w-full md:w-auto">
                           {isPerGroupSection && groups.length > 0 && (
                             <div className="flex items-center gap-2 bg-background p-1.5 px-3 rounded-md border shadow-sm">
                               <Label
@@ -7995,37 +8430,13 @@ export default function NewAssessmentBuilder() {
                                 (!isPerGroupSection ||
                                   q.groupId === currentGroupId),
                             )
-                            .map((q, qIdx) => (
-                              <QuestionCard
-                                key={q.id}
-                                question={q}
-                                index={qIdx}
-                                allowedTypes={sec.allowedTypes}
-                                onUpdate={(u) => {
-                                  updateQuestion(q.id, u);
-                                }}
-                                onDelete={() => {
-                                  removeQuestion(q.id);
-                                }}
-                                onSaveToBank={() => handleSaveToBank(q)}
-                                onUpdateOption={(oi, u) => {
-                                  updateOption(q.id, oi, u);
-                                }}
-                                onAddOption={() => {
-                                  addOption(q.id);
-                                }}
-                                onRemoveOption={(oi) => {
-                                  removeOption(q.id, oi);
-                                }}
-                              />
-                            ))
+                            .map((q, qIdx) => renderQuestionCard(q, qIdx, sec))
                         )}
 
                         {(!isPerGroupSection || groups.length > 0) && (
-                          <div className="flex gap-4">
-                            <Button
-                              variant="outline"
-                              className="flex-1 h-14 border border-dashed hover:border-primary/50 hover:bg-primary/5 transition-all flex flex-col gap-0.5 justify-center"
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+                            <button
+                              type="button"
                               onClick={() => {
                                 addQuestion(
                                   sec.id,
@@ -8034,23 +8445,50 @@ export default function NewAssessmentBuilder() {
                                     : undefined,
                                 );
                               }}
+                              className="group relative flex items-center gap-3.5 p-3.5 sm:p-4 rounded-xl border border-dashed border-border/80 hover:border-primary/60 bg-card hover:bg-primary/[0.03] dark:hover:bg-primary/[0.08] transition-all duration-200 text-left cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/20 shadow-xs"
                             >
-                              <Plus className="size-4 text-primary" />
-                              <span className="font-bold uppercase text-[9px] tracking-wider text-muted-foreground">
-                                Add Manually
-                              </span>
-                            </Button>
+                              <div className="size-10 rounded-lg bg-primary/10 text-primary dark:bg-primary/20 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform duration-200">
+                                <Plus className="size-5" />
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <span className="text-xs sm:text-sm font-bold text-foreground group-hover:text-primary transition-colors block">
+                                  Add Manual Question
+                                </span>
+                                <p className="text-[11px] text-muted-foreground truncate">
+                                  Create MCQ, Essay, Computational, or Case Study
+                                </p>
+                              </div>
+                            </button>
                             <QuestionBankSelector
-                              selectedIds={questions.map((q) => q.id)}
-                              onSelect={(q) => {
-                                handleBankSelect(
+                              selectedIds={questions.map((q) => bankIdOf(q.id))}
+                              targetLabel={sec.section}
+                                onSelect={(q) =>
+                                  handleBankSelect(
                                   q,
                                   sec.id,
                                   isPerGroupSection
                                     ? currentGroupId
                                     : undefined,
-                                );
-                              }}
+                                )
+                                }
+                              trigger={
+                                <button
+                                  type="button"
+                                  className="group relative flex items-center gap-3.5 p-3.5 sm:p-4 rounded-xl border border-dashed border-border/80 hover:border-indigo-500/60 bg-card hover:bg-indigo-500/[0.03] dark:hover:bg-indigo-500/[0.08] transition-all duration-200 text-left cursor-pointer focus:outline-none focus:ring-2 focus:ring-indigo-500/20 shadow-xs w-full"
+                                >
+                                  <div className="size-10 rounded-lg bg-indigo-500/10 text-indigo-600 dark:bg-indigo-500/20 dark:text-indigo-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform duration-200">
+                                    <Database className="size-5" />
+                                  </div>
+                                  <div className="min-w-0 flex-1">
+                                    <span className="text-xs sm:text-sm font-bold text-foreground group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors block">
+                                      Import from Question Bank
+                                    </span>
+                                    <p className="text-[11px] text-muted-foreground truncate">
+                                      Browse and reuse pre-approved repository items
+                                    </p>
+                                  </div>
+                                </button>
+                              }
                             />
                           </div>
                         )}
@@ -8058,6 +8496,7 @@ export default function NewAssessmentBuilder() {
                     </div>
                   );
                 })}
+              </div>
               </div>
             )}
 
@@ -8635,6 +9074,34 @@ export default function NewAssessmentBuilder() {
                           )}
                           <span>Marks sum matches total ({totalMarks})</span>
                         </div>
+                        {isSummativeMode &&
+                          marksSummary?.policy_total != null &&
+                          marksSummary.policy_total_mode !== "OFF" && (
+                          <div className="flex items-center gap-2">
+                            {currentMarks === marksSummary.policy_total ? (
+                              <Check className="size-3.5 text-emerald-500" />
+                            ) : (
+                              <X className="size-3.5 text-destructive" />
+                            )}
+                            <span>
+                              Matches institution policy total (
+                              {marksSummary.policy_total})
+                            </span>
+                          </div>
+                        )}
+                        <div className="flex items-center gap-2">
+                          {readiness.summary.needsWork === 0 ? (
+                            <Check className="size-3.5 text-emerald-500" />
+                          ) : (
+                            <X className="size-3.5 text-destructive" />
+                          )}
+                          <span>
+                            Every question is complete
+                            {readiness.summary.needsWork > 0
+                              ? ` (${readiness.summary.needsWork} unfinished)`
+                              : ""}
+                          </span>
+                        </div>
                         <div className="flex items-center gap-2">
                           {metadata.teaching_workspace_id ? (
                             <Check className="size-3.5 text-emerald-500" />
@@ -8715,12 +9182,45 @@ export default function NewAssessmentBuilder() {
                         </label>
                       </div>
 
+                      {readiness.summary.blocking > 0 && (
+                        <div className="flex items-start gap-2 rounded-lg border border-red-500/30 bg-red-500/5 p-2.5 text-xs">
+                          <AlertTriangle className="mt-px size-3.5 shrink-0 text-red-600" />
+                          <span className="flex-1">
+                            {readiness.summary.blocking} thing
+                            {readiness.summary.blocking === 1 ? "" : "s"} must be
+                            fixed before this can be submitted.
+                          </span>
+                          <button
+                            type="button"
+                            className="font-semibold underline"
+                            onClick={() => setReadinessOpen(true)}
+                          >
+                            Show me
+                          </button>
+                        </div>
+                      )}
                       <Button
-                        onClick={handlePublish}
-                        disabled={isPublishButtonDisabled || !lecturerConfirmed}
+                        onClick={isEditMode ? handleFinishEditing : handlePublish}
+                        disabled={
+                          isEditMode
+                            ? isSavingDraft
+                            : isPublishButtonDisabled ||
+                              !lecturerConfirmed ||
+                              readiness.summary.blocking > 0
+                        }
                         className="w-full h-10 text-xs font-semibold"
                       >
-                        {isPublishing ? "Publishing..." : "Publish Assessment"}
+                        {isEditMode
+                          ? isSavingDraft
+                            ? "Saving..."
+                            : "Save changes"
+                          : metadata.mode === "Summative"
+                          ? isPublishing
+                            ? "Submitting..."
+                            : "Submit for Moderation"
+                          : isPublishing
+                            ? "Publishing..."
+                            : "Publish Assessment"}
                       </Button>
                     </div>
                   </CardContent>
@@ -8750,10 +9250,12 @@ export default function NewAssessmentBuilder() {
       <div className="flex items-center justify-between border-b pb-2">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-foreground">
-            Assessment Builder
+            {isEditMode ? "Edit Assessment" : "Assessment Builder"}
           </h1>
           <p className="text-sm text-muted-foreground mt-1 font-medium">
-            Design secure academic assessments with ease.
+            {isEditMode
+              ? "Make the changes the moderator asked for. Everything you saved is loaded below."
+              : "Design secure academic assessments with ease."}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -8780,8 +9282,22 @@ export default function NewAssessmentBuilder() {
             className="h-8 text-[10px] font-bold uppercase tracking-wider rounded-lg border-border/60 bg-card hover:bg-muted/50 text-foreground"
           >
             <Save className="mr-1.5 size-3.5" />
-            {isSavingDraft ? "Saving..." : "Save Draft"}
+            {isSavingDraft
+              ? "Saving..."
+              : isEditMode
+                ? "Save changes"
+                : "Save Draft"}
           </Button>
+          {isEditMode && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => router.push(`/lecturer/assessments/${editId}`)}
+              className="h-8 text-[10px] font-bold uppercase tracking-wider"
+            >
+              Back to assessment
+            </Button>
+          )}
           <Badge
             variant="outline"
             className="h-8 px-2.5 font-bold text-[10px] uppercase rounded-lg bg-muted border-border/60 text-muted-foreground"
@@ -8790,6 +9306,39 @@ export default function NewAssessmentBuilder() {
           </Badge>
         </div>
       </div>
+
+      {isEditMode && editId && (
+        <AssessmentLifecycleCard
+          assessment={{
+            id: editId,
+            status: assessmentStatus,
+            title: metadata.title,
+            duration_minutes: Number(metadata.durationMinutes) || null,
+          }}
+          overview={moderationOverview}
+          // Save what is still pending before the paper goes back to the moderator.
+          beforeSubmit={async () => {
+            await runAutosaveRef.current(activeStepRef.current);
+          }}
+          onChanged={() => {
+            void (async () => {
+              try {
+                const fresh = await assessmentApi.getAssessmentById(editId);
+                setAssessmentStatus(fresh.status);
+                setModerationOverview(
+                  await moderationApi.getAssessmentModeration(editId),
+                );
+                // Resubmitted: the paper is locked again, so go back to its page.
+                if (!(EDITABLE_STATUSES as readonly string[]).includes(fresh.status)) {
+                  router.push(`/lecturer/assessments/${editId}`);
+                }
+              } catch {
+                /* the page keeps what it has */
+              }
+            })();
+          }}
+        />
+      )}
 
       {selectedWorkspaceDetail && (
         <Card className="border border-border/50 bg-muted/10">
@@ -9012,7 +9561,7 @@ export default function NewAssessmentBuilder() {
           className="w-full sm:max-w-xl md:max-w-2xl lg:max-w-3xl xl:max-w-4xl p-0 flex flex-col h-full bg-background border-l shadow-2xl overflow-hidden"
         >
           {/* Header */}
-          <SheetHeader className="p-4 sm:p-5 border-b shrink-0 bg-muted/20">
+          <SheetHeader className="p-4 sm:p-5 border-b shrink-0 bg-muted/20 dark:bg-muted/10">
             <div className="flex items-start justify-between gap-3">
               <div className="flex items-center gap-3">
                 <div className="p-2 sm:p-2.5 rounded-xl bg-primary/10 border border-primary/20 text-primary shrink-0">
@@ -9025,7 +9574,7 @@ export default function NewAssessmentBuilder() {
                     </SheetTitle>
                     <Badge
                       variant="outline"
-                      className="text-[10px] font-semibold border-primary/30 text-primary bg-primary/5"
+                      className="text-[10px] font-semibold border-primary/30 text-primary bg-primary/5 dark:bg-primary/10"
                     >
                       {aiTargetSectionId === "all"
                         ? "Full Assessment Mode"
@@ -9033,13 +9582,12 @@ export default function NewAssessmentBuilder() {
                     </Badge>
                   </div>
                   <SheetDescription className="text-xs text-muted-foreground line-clamp-1 sm:line-clamp-none">
-                    Configure curriculum grounding, taxonomy targets, and
-                    question parameters for AI generation.
+                    Configure curriculum grounding, taxonomy targets, and question parameters for AI generation.
                   </SheetDescription>
                 </div>
               </div>
 
-              {/* Single Clean Close Button */}
+              {/* Close Button */}
               <Button
                 variant="ghost"
                 size="sm"
@@ -9053,9 +9601,9 @@ export default function NewAssessmentBuilder() {
             </div>
 
             {/* Target Mode Selector Tabs */}
-            <div className="flex items-center gap-2 pt-3 border-t border-border/40 mt-3 overflow-x-auto pb-1">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground shrink-0 mr-1">
-                Target Scope:
+            <div className="flex items-center gap-1.5 pt-3 border-t border-border/40 mt-3 overflow-x-auto pb-1 no-scrollbar">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground shrink-0 mr-1 flex items-center gap-1">
+                <Target className="size-3 text-primary" /> Scope:
               </span>
               <button
                 type="button"
@@ -9093,7 +9641,7 @@ export default function NewAssessmentBuilder() {
                   "text-xs px-3 py-1.5 rounded-lg font-semibold transition-all shrink-0 border cursor-pointer",
                   aiTargetSectionId === "all"
                     ? "bg-primary text-primary-foreground border-primary shadow-xs"
-                    : "bg-muted/40 text-muted-foreground hover:text-foreground border-border/60",
+                    : "bg-muted/40 text-muted-foreground hover:text-foreground border-border/60 hover:bg-muted",
                 )}
               >
                 All Sections ({blueprint.length})
@@ -9121,10 +9669,10 @@ export default function NewAssessmentBuilder() {
                     }));
                   }}
                   className={cn(
-                    "text-xs px-3 py-1.5 rounded-lg font-semibold transition-all shrink-0 border truncate max-w-[180px] cursor-pointer",
+                    "text-xs px-3 py-1.5 rounded-lg font-semibold transition-all shrink-0 border truncate max-w-48 cursor-pointer",
                     aiTargetSectionId === sec.id
                       ? "bg-primary text-primary-foreground border-primary shadow-xs"
-                      : "bg-muted/40 text-muted-foreground hover:text-foreground border-border/60",
+                      : "bg-muted/40 text-muted-foreground hover:text-foreground border-border/60 hover:bg-muted",
                   )}
                 >
                   Sec {idx + 1}: {sec.section || `Section ${idx + 1}`}
@@ -9135,14 +9683,18 @@ export default function NewAssessmentBuilder() {
 
           {/* Unified Scrollable Content Body */}
           <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6">
-            {/* Context Card */}
-            <div className="rounded-xl border border-border/70 bg-card p-4 space-y-3 shadow-xs">
-              <div className="flex items-center gap-2 text-xs font-bold text-foreground">
-                <Sparkles className="size-3.5 text-primary" /> Assessment
-                Context & Blueprint Overview
+            {/* Assessment Context Overview */}
+            <div className="rounded-xl border border-border/70 bg-card p-3.5 sm:p-4 space-y-2.5 shadow-2xs">
+              <div className="flex items-center justify-between text-xs font-bold text-foreground">
+                <span className="flex items-center gap-1.5">
+                  <Sparkles className="size-3.5 text-primary" /> Assessment Context Overview
+                </span>
+                <Badge variant="outline" className="text-[10px] font-normal">
+                  {blueprint.length} Sections Configured
+                </Badge>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
-                <div className="p-3 rounded-lg bg-muted/20 border border-border/50">
+                <div className="p-2.5 rounded-lg bg-muted/30 dark:bg-muted/15 border border-border/50">
                   <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider block">
                     Workspace / Course
                   </span>
@@ -9153,7 +9705,7 @@ export default function NewAssessmentBuilder() {
                     {selectedWorkspaceDetail?.title || "Active Workspace"}
                   </span>
                 </div>
-                <div className="p-3 rounded-lg bg-muted/20 border border-border/50">
+                <div className="p-2.5 rounded-lg bg-muted/30 dark:bg-muted/15 border border-border/50">
                   <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider block">
                     Assessment Title
                   </span>
@@ -9164,7 +9716,7 @@ export default function NewAssessmentBuilder() {
                     {metadata.title || "Untitled Assessment"}
                   </span>
                 </div>
-                <div className="p-3 rounded-lg bg-muted/20 border border-border/50">
+                <div className="p-2.5 rounded-lg bg-muted/30 dark:bg-muted/15 border border-border/50">
                   <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider block">
                     Assessment Format
                   </span>
@@ -9178,13 +9730,12 @@ export default function NewAssessmentBuilder() {
             </div>
 
             {aiTargetSectionId === "all" ? (
-              <div className="space-y-5">
+              <div className="space-y-4">
                 {/* Blueprint Distribution Plan */}
                 <div className="space-y-2.5">
                   <div className="flex items-center justify-between">
                     <Label className="text-xs font-bold text-foreground flex items-center gap-1.5">
-                      <Layers className="size-3.5 text-primary" /> Section
-                      Distribution Plan
+                      <Layers className="size-3.5 text-primary" /> Full Assessment Distribution Plan
                     </Label>
                     <Badge variant="outline" className="text-[10px] font-mono">
                       {blueprint.reduce(
@@ -9199,21 +9750,21 @@ export default function NewAssessmentBuilder() {
                     {blueprint.map((sec, idx) => (
                       <div
                         key={sec.id}
-                        className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-xl bg-card border border-border/70 hover:border-primary/40 transition-all"
+                        className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-xl bg-card border border-border/70 hover:border-primary/40 transition-all shadow-2xs"
                       >
-                        <div className="space-y-1">
+                        <div className="space-y-1 min-w-0 flex-1">
                           <div className="flex items-center gap-2">
-                            <span className="font-bold text-xs text-foreground">
+                            <span className="font-bold text-xs text-foreground truncate">
                               Section {idx + 1}:{" "}
                               {sec.section || `Section ${idx + 1}`}
                             </span>
                           </div>
-                          <p className="text-xs text-muted-foreground truncate max-w-md">
+                          <p className="text-xs text-muted-foreground truncate">
                             {sec.topics ||
                               "Topics derived from syllabus & uploaded materials"}
                           </p>
                         </div>
-                        <div className="flex sm:flex-col items-center sm:items-end justify-between sm:justify-center gap-1.5 text-xs font-medium border-t sm:border-t-0 pt-2 sm:pt-0">
+                        <div className="flex sm:flex-col items-center sm:items-end justify-between sm:justify-center gap-1.5 text-xs font-medium border-t sm:border-t-0 pt-2 sm:pt-0 shrink-0">
                           <div className="text-foreground font-mono font-semibold">
                             {sec.questions || 0} Qs • {sec.marks || 0} Marks
                           </div>
@@ -9251,7 +9802,7 @@ export default function NewAssessmentBuilder() {
                         Math.max(1, parseInt(activeSec.questions as any) || 1),
                     ) || 1;
                   return (
-                    <div className="p-4 rounded-xl bg-muted/20 border border-border/70 space-y-2.5 text-xs">
+                    <div className="p-4 rounded-xl bg-muted/20 dark:bg-muted/10 border border-border/70 space-y-2.5 text-xs shadow-2xs">
                       <div className="flex items-center justify-between gap-3">
                         <div className="flex items-center gap-2.5">
                           <Target className="size-4 text-primary" />
@@ -9307,8 +9858,8 @@ export default function NewAssessmentBuilder() {
                           >
                             {activeSec.allowedTypes &&
                             activeSec.allowedTypes.length > 0
-                              ? activeSec.allowedTypes.join(", ")
-                              : "MCQ"}
+                              ? activeSec.allowedTypes.map((t) => QUESTION_TYPE_LABELS[t] || t).join(", ")
+                              : "Multiple Choice"}
                           </Badge>
                         </div>
                       </div>
@@ -9337,10 +9888,9 @@ export default function NewAssessmentBuilder() {
                             }));
                             toast.success("Synced topic from Blueprint!");
                           }}
-                          className="text-[10px] text-primary hover:underline cursor-pointer flex items-center gap-1"
+                          className="text-[11px] text-primary hover:underline cursor-pointer flex items-center gap-1 font-semibold"
                         >
-                          <RotateCcw className="size-2.5" /> Reset to Blueprint
-                          Topic
+                          <RotateCcw className="size-2.5" /> Reset to Blueprint Topic
                         </button>
                       ) : (
                         <span className="text-[10px] text-muted-foreground">
@@ -9361,9 +9911,7 @@ export default function NewAssessmentBuilder() {
                     className="h-10 text-xs bg-background rounded-xl border-border/70 font-medium"
                   />
                   <p className="text-[10px] text-muted-foreground">
-                    Automatically populated from your blueprint section&apos;s
-                    Topic Domain Coverage. You can refine or expand it if
-                    needed.
+                    Automatically populated from your blueprint section&apos;s Topic Domain Coverage. Refine or expand as needed.
                   </p>
                 </div>
 
@@ -9371,8 +9919,7 @@ export default function NewAssessmentBuilder() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                   <div className="space-y-2">
                     <Label className="text-xs font-semibold flex items-center gap-1.5">
-                      <Sliders className="size-3.5 text-primary" /> Question
-                      Format
+                      <Sliders className="size-3.5 text-primary" /> Question Format
                     </Label>
                     <Select
                       value={aiGenerationConfig.question_type}
@@ -9446,7 +9993,7 @@ export default function NewAssessmentBuilder() {
                       type="number"
                       min={1}
                       max={20}
-                      className="h-10 text-xs bg-background rounded-xl border-border/70"
+                      className="h-10 text-xs bg-background rounded-xl border-border/70 font-semibold"
                       value={aiGenerationConfig.count}
                       onChange={(e) =>
                         setAiGenerationConfig({
@@ -9492,7 +10039,7 @@ export default function NewAssessmentBuilder() {
 
                   <div className="space-y-2">
                     <Label className="text-xs font-semibold">
-                      {"Bloom's Taxonomy Level"}
+                      Bloom&apos;s Taxonomy Level
                     </Label>
                     <Select
                       value={aiGenerationConfig.bloom_level}
@@ -9508,22 +10055,22 @@ export default function NewAssessmentBuilder() {
                       </SelectTrigger>
                       <SelectContent className="rounded-xl text-xs">
                         <SelectItem value="remember" className="text-xs">
-                          Remember (Knowledge recall)
+                          1 - Remember (Knowledge recall)
                         </SelectItem>
                         <SelectItem value="understand" className="text-xs">
-                          Understand (Comprehension)
+                          2 - Understand (Comprehension)
                         </SelectItem>
                         <SelectItem value="apply" className="text-xs">
-                          Apply (Execution & practice)
+                          3 - Apply (Execution & practice)
                         </SelectItem>
                         <SelectItem value="analyze" className="text-xs">
-                          Analyze (Deconstruction & logic)
+                          4 - Analyze (Deconstruction & logic)
                         </SelectItem>
                         <SelectItem value="evaluate" className="text-xs">
-                          Evaluate (Critique & judgment)
+                          5 - Evaluate (Critique & judgment)
                         </SelectItem>
                         <SelectItem value="create" className="text-xs">
-                          Create (Formulate & synthesize)
+                          6 - Create (Formulate & synthesize)
                         </SelectItem>
                       </SelectContent>
                     </Select>
@@ -9532,14 +10079,14 @@ export default function NewAssessmentBuilder() {
               </div>
             )}
 
-            {/* Additional Context / Custom Prompt Section */}
+            {/* Additional Guidance & Custom Prompt Section */}
             <div className="space-y-3 pt-3 border-t border-border/40">
               <div className="flex items-center justify-between">
                 <Label className="text-xs font-semibold flex items-center gap-1.5">
                   <Wand2 className="size-3.5 text-primary" /> Additional
                   Guidance & Custom Prompt
                 </Label>
-                <span className="text-[10px] text-muted-foreground">
+                <span className="text-[10px] text-muted-foreground font-normal">
                   Optional
                 </span>
               </div>
@@ -9584,7 +10131,7 @@ export default function NewAssessmentBuilder() {
                           });
                         }
                       }}
-                      className="text-[10px] font-medium px-2.5 py-1 rounded-lg bg-muted/40 border border-border/60 hover:bg-primary/10 hover:border-primary/30 transition-colors text-muted-foreground hover:text-primary cursor-pointer"
+                      className="text-[10px] font-medium px-2.5 py-1 rounded-lg bg-muted/40 dark:bg-muted/20 border border-border/60 hover:bg-primary/10 hover:border-primary/30 dark:hover:bg-primary/20 transition-colors text-muted-foreground hover:text-primary cursor-pointer"
                     >
                       + {chip}
                     </button>
@@ -9594,15 +10141,13 @@ export default function NewAssessmentBuilder() {
             </div>
 
             {/* Information Card */}
-            <div className="p-3.5 sm:p-4 rounded-xl bg-muted/20 border border-border/70 text-xs flex gap-3 items-start">
+            <div className="p-3.5 sm:p-4 rounded-xl bg-muted/20 dark:bg-muted/10 border border-border/70 text-xs flex gap-3 items-start">
               <Info className="size-4 text-primary shrink-0 mt-0.5" />
               <div className="leading-relaxed text-xs text-muted-foreground">
                 <strong className="font-semibold text-foreground">
                   Curriculum Balancing:
                 </strong>{" "}
-                The AI question generation agent will draft questions matching
-                each section&apos;s specified format, difficulty levels, and
-                Bloom&apos;s Taxonomy targets with source citations.
+                The AI question generation agent will draft questions matching each section&apos;s specified format, difficulty levels, and Bloom&apos;s Taxonomy targets with source citations.
               </div>
             </div>
           </div>
@@ -9808,7 +10353,7 @@ export default function NewAssessmentBuilder() {
                 {/* Wide sheet: 2-column list + inspector */}
                 <div className="hidden h-full flex-1 overflow-hidden @min-[680px]:grid @min-[680px]:grid-cols-12">
                   {/* Left Column: Candidate Questions List */}
-                  <div className="md:col-span-5 border-r border-border/40 overflow-y-auto p-4 sm:p-5 space-y-4">
+                  <div className="col-span-12 @min-[680px]:col-span-5 border-r border-border/40 overflow-y-auto p-4 sm:p-5 space-y-4">
                     {(() => {
                       const groups: { [key: string]: any[] } = {};
                       aiCandidates.forEach((c) => {
@@ -9883,7 +10428,7 @@ export default function NewAssessmentBuilder() {
                                             e.stopPropagation();
                                             handleAcceptCandidate(cand.id);
                                           }}
-                                          className="size-7 p-0 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 rounded-lg"
+                                          className="size-7 p-0 text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300 hover:bg-emerald-500/15 rounded-lg transition-colors"
                                           title="Accept Question"
                                         >
                                           <Check className="size-3.5" />
@@ -9922,7 +10467,7 @@ export default function NewAssessmentBuilder() {
                   </div>
 
                   {/* Right Column: Detailed Candidate Inspector & Editing Form */}
-                  <div className="md:col-span-7 overflow-y-auto p-4 sm:p-6 bg-muted/5 space-y-4">
+                  <div className="col-span-12 @min-[680px]:col-span-7 overflow-y-auto p-4 sm:p-6 bg-muted/5 space-y-4">
                     {(() => {
                       const activeSelectedId =
                         selectedCandidateId || aiCandidates[0]?.id;
@@ -9998,7 +10543,7 @@ export default function NewAssessmentBuilder() {
                                   handleAcceptCandidate(activeCand.id)
                                 }
                                 disabled={isReviewApplying}
-                                className="h-8 text-xs font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 border-emerald-300 dark:border-emerald-800 gap-1.5 px-3 rounded-xl"
+                                className="h-8 text-xs font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-500/10 dark:bg-emerald-500/20 hover:bg-emerald-500/20 dark:hover:bg-emerald-500/30 border-emerald-500/30 gap-1.5 px-3 rounded-xl transition-colors"
                               >
                                 <Check className="size-3.5" /> Accept
                               </Button>
@@ -10231,7 +10776,7 @@ export default function NewAssessmentBuilder() {
                                             className={cn(
                                               "flex items-center justify-between text-xs p-3 rounded-xl border transition-all",
                                               opt.is_correct
-                                                ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-950 dark:text-emerald-200 font-semibold"
+                                                ? "bg-emerald-500/10 dark:bg-emerald-500/20 border-emerald-500/30 text-emerald-900 dark:text-emerald-200 font-semibold"
                                                 : "bg-background border-border/60 text-muted-foreground",
                                             )}
                                           >
@@ -10453,15 +10998,55 @@ export default function NewAssessmentBuilder() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {aiGenerating && (
-        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-3 bg-card text-card-foreground p-4 rounded-xl shadow-2xl border border-border/60 animate-in slide-in-from-bottom-5 duration-300">
-          <LoaderCircleIcon className="size-5 animate-spin text-primary" />
-          <div className="text-xs">
-            <p className="font-semibold text-foreground">AI Question Generator</p>
-            <p className="text-muted-foreground">Generating candidates...</p>
-          </div>
-        </div>
-      )}
+      <Sheet open={navigatorOpen} onOpenChange={setNavigatorOpen}>
+        <SheetContent side="left" className="w-80 max-w-[90vw] p-3 lg:hidden">
+          <SheetHeader className="sr-only">
+            <SheetTitle>Questions</SheetTitle>
+            <SheetDescription>Jump between questions</SheetDescription>
+          </SheetHeader>
+          {renderNavigator("h-full")}
+        </SheetContent>
+      </Sheet>
+
+      <ReadinessPanel
+        open={readinessOpen}
+        onOpenChange={setReadinessOpen}
+        result={readiness}
+        sections={blueprint.map((s) => ({
+          id: s.id,
+          section: s.section,
+          marks: parseInt(s.marks as any) || 0,
+          questions: parseInt(s.questions as any) || 0,
+        }))}
+        questions={questions}
+        isSummative={isSummativeMode}
+        hasDraft={!!draftIdRef.current}
+        onGoToQuestion={(id) => {
+          if (activeStepRef.current !== 5) setActiveStep(5);
+          scrollToQuestion(id);
+        }}
+        onGenerateForSection={(sectionId, count) => {
+          const sec = blueprint.find((s) => s.id === sectionId);
+          if (!sec) return;
+          setReadinessOpen(false);
+          void openAiDrawerForSection(sec, count);
+        }}
+        buildReviewRequest={buildPaperReviewRequest}
+        checklist={precheck}
+        checklistLoading={precheckLoading}
+        checklistError={precheckError}
+        onRunChecklist={runModerationPrecheck}
+      />
+
+      <AiGenerationProgress
+        run={genRun}
+        sectionNames={Object.fromEntries(
+          blueprint.map((s) => [s.id, s.section]),
+        )}
+        onRetry={retryGeneration}
+        onKeepWaiting={keepWaitingForGeneration}
+        onDismiss={() => setGenRun(null)}
+      />
     </div>
   );
 }

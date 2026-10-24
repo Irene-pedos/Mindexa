@@ -25,7 +25,10 @@ from app.services.resource_service import ResourceService
 from app.services.student_service import StudentService
 from app.db.enums import ResourceCategory, UserRole
 from app.core.config import settings
-from app.core.exceptions import NotFoundError, AuthorizationError, RoleRequiredError
+from app.core.exceptions import NotFoundError, AuthorizationError, RoleRequiredError, ValidationError
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/resources", tags=["Resources"])
 
@@ -134,10 +137,12 @@ async def download_material(
         if not workspace:
             raise AuthorizationError("You are not enrolled in this teaching workspace")
     elif current_user.role == UserRole.LECTURER:
-        from app.db.models.academic import TeachingWorkspace
-        ws = await db.get(TeachingWorkspace, material.teaching_workspace_id)
-        if ws and ws.institution_id != current_user.institution_id:
-            raise AuthorizationError("You do not have permission to access materials outside your institution")
+        ws = await WorkspaceRepository(db).get_by_id(material.teaching_workspace_id)
+        teaches_workspace = bool(
+            ws and ws.teaching_assignment and ws.teaching_assignment.lecturer_id == current_user.id
+        )
+        if material.lecturer_id != current_user.id and not teaches_workspace:
+            raise AuthorizationError("You do not have permission to access this material")
 
     # In a real app, we'd use a cloud storage URL, but for local we return the file from disk
     absolute_path = os.path.join(settings.UPLOAD_DIR, material.file_path)
@@ -275,8 +280,12 @@ async def extract_document_text(
     """
     Synchronously extracts clean human-readable text from PDF, DOCX, or text files.
     """
-    ext = os.path.splitext(file.filename)[1].lower()
-    content = await file.read()
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    content = await file.read(settings.max_upload_size_bytes + 1)
+    if len(content) > settings.max_upload_size_bytes:
+        raise ValidationError(
+            f"File size exceeds the {settings.MAX_UPLOAD_SIZE_MB}MB limit.", code="FILE_TOO_LARGE"
+        )
     
     extracted_text = ""
     page_count = 1
@@ -303,8 +312,9 @@ async def extract_document_text(
             extracted_text = content.decode("utf-8", errors="ignore")
         else:
             extracted_text = f"Attached file: {file.filename} (Binary format {ext})"
-    except Exception as e:
-        extracted_text = f"Extraction note: Could not parse document text: {str(e)}"
+    except Exception:
+        logger.warning("document_text_extraction_failed", extension=ext)
+        extracted_text = "Extraction note: this document could not be read."
 
     return {
         "filename": file.filename,

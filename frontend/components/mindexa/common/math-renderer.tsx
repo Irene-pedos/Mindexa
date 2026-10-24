@@ -11,6 +11,15 @@ interface MathRendererProps {
   className?: string;
 }
 
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 /**
  * Safe KaTeX Math Renderer component.
  * Renders LaTeX formulas with safe error fallback if LaTeX syntax is malformed.
@@ -25,7 +34,7 @@ export function MathRenderer({ math, block = false, className }: MathRendererPro
       });
     } catch (err) {
       console.warn("KaTeX render error:", err);
-      return `<span class="text-destructive font-mono text-xs font-semibold">[Math Error: ${math}]</span>`;
+      return `<span class="text-destructive font-mono text-xs font-semibold">[Math Error: ${escapeHtml(math)}]</span>`;
     }
   }, [math, block]);
 

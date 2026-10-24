@@ -8,6 +8,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.agents.lecturer_support_agent import LecturerSupportAgent
+from app.agents.question_enhancer_agent import QuestionEnhancerAgent
+from app.schemas.question_ai import (
+    EnhanceQuestionRequest,
+    EnhanceQuestionResponse,
+    ReviewPaperRequest,
+    ReviewPaperResponse,
+)
 from app.agents.rubric_agent import RubricAgent
 from app.agents.slide_deck_agent import SlideDeckAgent
 from app.core.ai.gateway import AIGateway
@@ -43,6 +50,46 @@ class LecturerAIService:
 
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
+
+    async def _workspace_language(self, workspace_id: uuid.UUID | None) -> str | None:
+        if not workspace_id:
+            return None
+        workspace = await self.db.get(TeachingWorkspace, workspace_id)
+        return getattr(workspace, "language", None) if workspace else None
+
+    async def enhance_question(self, body: EnhanceQuestionRequest, current_user: User) -> EnhanceQuestionResponse:
+        """Propose an improved/completed version of one draft question (never saved here)."""
+        assert_ai_allowed(
+            await self._workspace_language(body.workspace_id),
+            action="enhance_question",
+            context={"action": body.action},
+        )
+        agent = QuestionEnhancerAgent(self._get_gateway())
+        return await agent.enhance(
+            lecturer_id=current_user.id,
+            question=body.question,
+            action=body.action,
+            instructions=body.instructions,
+            subject=body.subject,
+            topic=body.topic,
+        )
+
+    async def review_paper(self, body: ReviewPaperRequest, current_user: User) -> ReviewPaperResponse:
+        """Find gaps in a draft paper (coverage, difficulty balance, duplicates, ambiguity)."""
+        assert_ai_allowed(
+            await self._workspace_language(body.workspace_id),
+            action="review_paper",
+            context={"questions": len(body.questions)},
+        )
+        agent = QuestionEnhancerAgent(self._get_gateway())
+        return await agent.review_paper(
+            lecturer_id=current_user.id,
+            questions=body.questions,
+            blueprint=body.blueprint,
+            assessment_type=body.assessment_type,
+            policy_total=body.policy_total,
+            subject=body.subject,
+        )
 
     def _get_gateway(self) -> AIGateway:
         chat_provider = get_ai_provider()

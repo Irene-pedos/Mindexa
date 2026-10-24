@@ -15,6 +15,7 @@ import {
   Brain,
   Upload,
   Lightbulb,
+  ClipboardList,
 } from "lucide-react";
 
 import {
@@ -48,6 +49,7 @@ const mainNav = [
 
 const toolsNav = [
   { title: "Results & Feedback", url: "/student/results", icon: Trophy, tourId: "student-results" },
+  { title: "Eligibility & Requests", url: "/student/requests", icon: ClipboardList },
   { title: "Study Support", url: "/student/study", icon: Brain, tourId: "student-study" },
   { title: "Upload Resources", url: "/student/resources", icon: Upload },
 ];

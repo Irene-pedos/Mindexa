@@ -59,6 +59,19 @@ def _service(db: AsyncSession) -> AssessmentService:
     return AssessmentService(db)
 
 
+async def _detail(db: AsyncSession, assessment) -> AssessmentDetailResponse:
+    """Detail response plus the integrity profile's code, which the ORM row only holds as an id."""
+    from app.db.models.integrity import IntegrityProfile
+
+    detail = AssessmentDetailResponse.model_validate(assessment)
+    profile_id = getattr(assessment, "integrity_profile_id", None)
+    if profile_id:
+        profile = await db.get(IntegrityProfile, profile_id)
+        if profile:
+            detail.integrity_profile_code = profile.code
+    return detail
+
+
 # ---------------------------------------------------------------------------
 # ASSESSMENT CRUD
 # ---------------------------------------------------------------------------
@@ -95,6 +108,7 @@ async def create_assessment(
 async def list_assessments(
     status_filter: str | None = Query(default=None, alias="status"),
     assessment_type: str | None = Query(default=None),
+    grading_mode: str | None = Query(default=None),
     workspace_id: uuid.UUID | None = Query(default=None),
     search: str | None = Query(default=None),
     sort: str = Query(default="newest"),
@@ -108,6 +122,7 @@ async def list_assessments(
         current_user=current_user,
         status=status_filter,
         assessment_type=assessment_type,
+        grading_mode=grading_mode,
         workspace_id=workspace_id,
         search=search,
         sort=sort,
@@ -128,7 +143,7 @@ async def get_assessment(
 ) -> AssessmentDetailResponse:
     svc = _service(db)
     assessment = await svc.get_assessment(assessment_id, current_user)
-    detail = AssessmentDetailResponse.model_validate(assessment)
+    detail = await _detail(db, assessment)
     if current_user.role == UserRole.STUDENT.value:
         return redact_assessment_for_student(detail)
     return detail
@@ -248,7 +263,7 @@ async def save_draft_bulk(
     svc = _service(db)
     result = await svc.bulk_save_draft_assessment(body, current_user)
     await db.commit()
-    return AssessmentDetailResponse.model_validate(result)
+    return await _detail(db, result)
 
 
 @router.put(
@@ -266,7 +281,7 @@ async def update_draft_bulk(
     body.id = assessment_id
     result = await svc.bulk_save_draft_assessment(body, current_user)
     await db.commit()
-    return AssessmentDetailResponse.model_validate(result)
+    return await _detail(db, result)
 
 
 

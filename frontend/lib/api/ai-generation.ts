@@ -8,6 +8,8 @@ export interface GenerateQuestionsSectionRequest {
   difficulty?: "easy" | "medium" | "hard";
   bloom_level?: string;
   count?: number;
+  /** Marks for each question in this entry. Case-study sub-question marks are shared out of it. */
+  marks_per_question?: number;
 }
 
 export interface GenerateQuestionsRequest {
@@ -44,6 +46,7 @@ export interface AIGeneratedQuestionResponse {
   difficulty: string;
   review_status: string;
   parsed_successfully: boolean;
+  case_study_context?: string | null;
   parsed_question_text: string | null;
   parsed_options_json: string | null;
   parsed_explanation: string | null;
@@ -52,6 +55,17 @@ export interface AIGeneratedQuestionResponse {
   options?: GeneratedQuestionOptionResponse[];
   // Computed options here for UI convenience
   _options: GeneratedQuestionOptionResponse[];
+}
+
+export interface BatchSectionProgress {
+  section_id?: string | null;
+  topic?: string | null;
+  question_type?: string | null;
+  count?: number | null;
+  status: "PENDING" | "RUNNING" | "DONE" | "PARTIAL" | "FAILED";
+  generated: number;
+  failed: number;
+  error?: string | null;
 }
 
 export interface AIGenerationBatchDetailResponse {
@@ -68,6 +82,9 @@ export interface AIGenerationBatchDetailResponse {
   error_message: string | null;
   created_at: string;
   completed_at: string | null;
+  started_at?: string | null;
+  /** Written by the worker as each section starts/finishes. */
+  sections_progress?: BatchSectionProgress[] | null;
   // Backend sends `generated_questions`; we normalise it to `questions` for the UI
   generated_questions?: AIGeneratedQuestionResponse[];
   questions: AIGeneratedQuestionResponse[];
@@ -94,6 +111,21 @@ export interface ReviewAIQuestionRequest {
 }
 
 
+/** The backend rejects any single count above this (top level or per section entry). */
+export const MAX_QUESTIONS_PER_REQUEST = 20;
+
+/** Splits an oversized section entry into several entries the backend accepts. */
+function splitSectionEntry(entry: GenerateQuestionsSectionRequest): GenerateQuestionsSectionRequest[] {
+  let remaining = entry.count ?? 5;
+  const parts: GenerateQuestionsSectionRequest[] = [];
+  while (remaining > 0) {
+    const count = Math.min(remaining, MAX_QUESTIONS_PER_REQUEST);
+    parts.push({ ...entry, count });
+    remaining -= count;
+  }
+  return parts;
+}
+
 export const aiGenerationApi = {
   async generateQuestions(data: GenerateQuestionsRequest): Promise<AIGenerationBatchDetailResponse> {
     const {
@@ -105,8 +137,25 @@ export const aiGenerationApi = {
       marks_per_question,
       ...rest
     } = data;
+
+    // With `sections`, the backend sums the entries and ignores the top-level count,
+    // but still validates it, so a big multi-section request used to fail with a 422.
+    let sections = rest.sections?.flatMap(splitSectionEntry);
+    if (!sections && rest.count > MAX_QUESTIONS_PER_REQUEST && target_section_id) {
+      sections = splitSectionEntry({
+        section_id: target_section_id,
+        topic: rest.topic,
+        question_type: rest.question_type,
+        difficulty: rest.difficulty,
+        bloom_level: rest.bloom_level,
+        count: rest.count,
+      });
+    }
+
     const payload = {
       ...rest,
+      sections,
+      count: Math.min(rest.count, MAX_QUESTIONS_PER_REQUEST),
       assessment_id: target_assessment_id ?? undefined,
       target_section_id: target_section_id ?? undefined,
       teaching_workspace_id: workspace_id ?? undefined,

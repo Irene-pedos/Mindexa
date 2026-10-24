@@ -190,6 +190,42 @@ async def resume_attempt(
     )
 
 
+@router.post(
+    "/{attempt_id}/reclaim",
+    response_model=AttemptStartResponse,
+    summary="Re-issue the session token for my own active attempt",
+)
+async def reclaim_attempt(
+    attempt_id: uuid.UUID,
+    current_user=Depends(require_student),
+    db: AsyncSession = Depends(get_db),
+) -> AttemptStartResponse:
+    """
+    For a student whose browser lost the attempt's session token (cleared
+    storage, different device). Only the owner can call it; the previous
+    session's token is invalidated. Blocked where resuming is not allowed.
+    """
+    attempt = await AttemptService(db).reclaim_attempt(
+        attempt_id=attempt_id, student_id=current_user.id
+    )
+
+    now = datetime.now(UTC)
+    seconds_remaining = 0
+    if attempt.expires_at:
+        seconds_remaining = max(0, int((attempt.expires_at - now).total_seconds()))
+
+    return AttemptStartResponse(
+        id=attempt.id,
+        assessment_id=attempt.assessment_id,
+        attempt_number=attempt.attempt_number,
+        status=attempt.status,
+        started_at=attempt.started_at or now,
+        expires_at=attempt.expires_at or now,
+        access_token=attempt.access_token or uuid.uuid4(),
+        seconds_remaining=seconds_remaining,
+    )
+
+
 # ── SUBMIT ATTEMPT ────────────────────────────────────────────────────────────
 
 
@@ -364,6 +400,9 @@ async def get_attempt(
     if attempt.assessment and attempt.assessment.assessment_questions:
         # Load sections for title lookup
         section_map = {s.id: s.title for s in attempt.assessment.sections}
+        section_choice_limit = {
+            s.id: getattr(s, "questions_to_answer", None) for s in attempt.assessment.sections
+        }
 
         for aq in attempt.assessment.assessment_questions:
             if aq.question:
@@ -384,6 +423,8 @@ async def get_attempt(
                     "imageUrl": q.image_url,
                     "marks": aq.marks_override or q.marks,
                     "order_index": aq.order_index,
+                    "is_required": bool(aq.is_required),
+                    "section_questions_to_answer": section_choice_limit.get(aq.assessment_section_id),
                     "assessment_section_id": str(aq.assessment_section_id) if aq.assessment_section_id else None,
                     "section_title": section_map.get(aq.assessment_section_id) if aq.assessment_section_id else "General",
                     "grading_mode": q.grading_mode.value if hasattr(q.grading_mode, 'value') else q.grading_mode,
@@ -429,6 +470,10 @@ async def get_attempt(
     response.questions = [
         AttemptQuestionResponse.model_validate(q) if isinstance(q, dict) else q
         for q in questions_data
+    ]
+
+    response.selected_question_ids = [
+        sel.question_id for sel in await repo.list_selections_for_attempt(attempt.id)
     ]
 
     if is_student and response.total_score is not None:

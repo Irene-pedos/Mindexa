@@ -4,27 +4,37 @@ app/middleware/rate_limit.py
 Redis-backed sliding-window rate limiter for Mindexa Platform.
 
 TIERS:
-    STRICT   — login endpoint: 5 req/min per IP
-    MEDIUM   — token refresh:  20 req/min per IP
-    DEFAULT  — all other API:  120 req/min per IP
-    EXEMPT   — health/metrics: unlimited
+    STRICT       — login endpoint: 5 req/min per IP (nobody is authenticated yet)
+    MEDIUM       — token refresh:  20 req/min per IP
+    DEFAULT      — all other API:  120 req/min per USER
+    HIGH_VOLUME  — attempts / integrity / submissions / grading / results: 600 req/min per USER
+                   (exam autosave, integrity events and batch grading must never be throttled)
+    AI           — AI endpoints: 20 req/min per USER
+    EXEMPT       — health/metrics/docs: unlimited
+
+WHO IS COUNTED:
+    Authenticated requests are counted per user id (from the verified access token), never
+    per IP: a whole exam hall or lab shares one campus address, so an IP key would let one
+    class exhaust a single budget. Requests without a valid token (login, public seal check)
+    fall back to the client IP.
 
 ALGORITHM:
     Sliding window using Redis INCR + EXPIRE.
-    Each IP gets a key per minute window.
+    Each caller gets a key per minute window.
     When the counter exceeds the limit, a 429 is returned with
     Retry-After and X-RateLimit-* headers.
 
 KEY FORMAT:
-    rl:{tier}:{ip}:{window_minute}
+    rl:{tier}:{caller}:{window_minute}
 
     Example:
-        rl:login:192.168.1.1:27905640   (minute 27905640 since epoch)
+        rl:login:ip:192.168.1.1:27905640   (minute 27905640 since epoch)
+        rl:default:user:3f2a...:27905640
 
 DESIGN:
     - Redis failures are non-fatal: if Redis is unavailable the request
       is allowed through (fail-open). A warning is logged.
-    - IP extraction honours X-Forwarded-For (for reverse proxy deployments).
+    - IP extraction honours X-Forwarded-For only for TRUSTED_PROXY_COUNT proxies (app.core.client_ip).
     - All limits are read from settings so they can be tuned without code changes.
     - Rate limit headers are always returned (even when not limited) so
       clients can adapt their request rate.
@@ -45,6 +55,7 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.types import ASGIApp
 
+from app.core.client_ip import get_client_ip
 from app.core.config import settings
 from app.core.logger import get_logger
 
@@ -68,38 +79,82 @@ _ROUTE_TIERS: list[tuple[str, str]] = [
     # AI — quota protection & AI grading endpoints (Spec 3.3)
     ("/api/v1/student/ai/support", "student_ai_support"),
     ("/api/v1/ai/generate", "ai_heavy"),
+    ("/api/v1/gemini", "ai_heavy"),
     ("/api/v1/student/ai", "ai_heavy"),
     ("/api/v1/lecturer/ai", "ai_heavy"),
+    # The router is mounted at /lecturers/ai (plural); the singular prefix above never matched it.
+    ("/api/v1/lecturers/ai", "ai_heavy"),
     ("/api/v1/grading/grade-attempt", "ai_heavy"),
     ("/grading/grade-attempt", "ai_heavy"),
     ("/api/v1/grading/confirm-ai", "ai_heavy"),
     ("/grading/confirm-ai", "ai_heavy"),
     ("/api/v1/grading/feedback-ai", "ai_heavy"),
     ("/grading/feedback-ai", "ai_heavy"),
-    # Health / metrics — exempt
+    # High-volume work: answer autosave and integrity events fire constantly during an exam
+    # (a throttled save would lose work), and batch grading saves one request per student.
+    # These get a much higher per-user budget. AI grading routes are matched above, first.
+    ("/api/v1/attempts", "high_volume"),
+    ("/api/v1/integrity/event", "high_volume"),
+    ("/api/v1/integrity/acknowledge-warning", "high_volume"),
+    ("/api/v1/submissions", "high_volume"),
+    ("/api/v1/grading", "high_volume"),
+    ("/api/v1/results", "high_volume"),
+    # Health / metrics / API docs — exempt
     ("/health", "exempt"),
     ("/metrics", "exempt"),
-    ("/", "exempt"),
+    ("/docs", "exempt"),
+    ("/redoc", "exempt"),
+    ("/openapi.json", "exempt"),
 ]
 
 # Any path not matched above falls into the "default" tier.
 _DEFAULT_TIER = "default"
 
 
+# Grading routes that call an AI model. They sit under /grading, which is otherwise a
+# high-volume tier (batch grading), so they are recognised first and kept in the strict tier.
+_AI_PATH_MARKERS = (
+    "/ai-summary",
+    "/draft-feedback",
+    "/suggest-changes",
+    "/process-ai",
+    "/grade-attempt",
+    "/confirm-ai",
+    "/feedback-ai",
+)
+
+
+# Study planner routes that run an LLM: lesson generation, tutor Q&A, exercises, quiz generation
+# and grading, session summary, and plan generation from an assessment.
+_STUDY_PLAN_AI_MARKERS = (
+    "/generate-from-assessment",
+    "/guided/start",
+    "/guided/ask",
+    "/guided/exercise",
+    "/guided/knowledge-check",
+    "/guided/complete",
+)
+
+# Study reader routes that run an LLM (see api/v1/routes/study_reader.py).
+_STUDY_READER_AI_SUFFIXES = ("/skim", "/page-check")
+
+
 def _resolve_tier(path: str) -> str:
+    if path == "/":
+        return "exempt"
+    if any(marker in path for marker in _AI_PATH_MARKERS):
+        return "ai_heavy"
     for prefix, tier in _ROUTE_TIERS:
         if path.startswith(prefix):
             return tier
 
-    # AI guided study sessions & generation under study-plans
-    if "/students/study-plans" in path:
-        if "/guided" in path or "/generate" in path or "/knowledge-check" in path:
-            return "ai_heavy"
-
-    if "/study-reader" in path and ("/generate" in path or "/ai" in path):
+    # Study planner: only routes that call the model are AI-tier. Reads (GET /guided) and notes
+    # stay on the default tier so polling a lesson cannot exhaust the student's AI budget.
+    if "/students/study-plans" in path and any(marker in path for marker in _STUDY_PLAN_AI_MARKERS):
         return "ai_heavy"
 
-    if "/draft-feedback" in path:
+    # Study reader (mounted at /student/reader): skim and page-check call the model.
+    if "/student/reader/" in path and any(path.endswith(suffix) for suffix in _STUDY_READER_AI_SUFFIXES):
         return "ai_heavy"
 
     return _DEFAULT_TIER
@@ -123,6 +178,8 @@ def _limit_for_tier(tier: str) -> int:
         return settings.RATE_LIMIT_VERIFY_SEAL_PER_MINUTE
     if tier == "ai_heavy":
         return settings.RATE_LIMIT_AI_PER_MINUTE
+    if tier == "high_volume":
+        return settings.RATE_LIMIT_HIGH_VOLUME_PER_MINUTE
     return settings.RATE_LIMIT_DEFAULT_PER_MINUTE
 
 
@@ -138,10 +195,31 @@ def _window_for_tier(tier: str) -> int:
 # ---------------------------------------------------------------------------
 
 def _get_client_ip(request: Request) -> str:
-    forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
+    return get_client_ip(request) or "unknown"
+
+
+# Tiers whose callers are not signed in yet, so the only identity available is the address.
+_IP_ONLY_TIERS = {"login", "refresh", "verify_seal"}
+
+
+def _client_identity(request: Request, tier: str) -> str:
+    """Who this request is counted against: the signed-in user, else the client address.
+
+    The user id comes from a cryptographically verified access token, so it cannot be spoofed
+    to dodge or to burn someone else's budget. An invalid or missing token falls back to the IP.
+    """
+    if tier not in _IP_ONLY_TIERS:
+        auth = request.headers.get("Authorization", "")
+        if auth.lower().startswith("bearer "):
+            try:
+                from app.core.security import decode_access_token
+
+                sub = decode_access_token(auth[7:].strip()).sub
+                if sub:
+                    return f"user:{sub}"
+            except Exception:  # expired / malformed: counted by address instead
+                pass
+    return f"ip:{_get_client_ip(request)}"
 
 
 # ---------------------------------------------------------------------------
@@ -174,7 +252,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if tier == "exempt" or limit <= 0:
             return await call_next(request)
 
-        client_ip = _get_client_ip(request)
+        client_ip = _client_identity(request, tier)
 
         try:
             current_count, window_remaining = await _check_rate_limit(
@@ -234,9 +312,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                     "error": {
                         "code": "RATE_LIMIT_EXCEEDED",
                         "message": (
-                            f"Too many requests. Limit: {limit} per minute. "
-                            if window_seconds == 60
-                            else f"Too many requests. Limit: {limit} per hour. "
+                            f"Too many requests. Limit: {limit} per "
+                            f"{'minute' if window_seconds == 60 else 'hour'}. "
                             f"Try again in {window_remaining} seconds."
                         ),
                         "details": {

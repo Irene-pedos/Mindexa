@@ -32,6 +32,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
+from app.core import links as frontend_links
 from app.core.config import settings
 from app.core.exceptions import (
     AuthorizationError,
@@ -526,8 +527,10 @@ class GradingService:
                         "assessment_title": assessment.title if assessment else "Assessment",
                         "student_name": student_name,
                         "ai_confidence": round(ai_output.confidence * 100, 1),
-                        "grading_url": f"{settings.FRONTEND_URL.rstrip('/')}" \
-                            f"/lecturer/grading?assessment_id={item.assessment_id}",
+                        "grading_url": (
+                            f"{settings.FRONTEND_URL.rstrip('/')}"
+                            f"{frontend_links.lecturer_grading(item.assessment_id)}"
+                        ),
                         "notification_type": NotificationType.AI_ASSISTANCE_READY.value
                     }
                 )
@@ -1924,44 +1927,9 @@ class GradingService:
         strong_topics = [t for t, score in topic_scores.items() if score >= 75]
         weak_topics = [t for t, score in topic_scores.items() if score < 65]
 
-        # Robust fallbacks if no topic_tag is defined
-        if not topic_scores:
-            title_lower = (asmt.title or "").lower() if asmt else ""
-            course_lower = course_name.lower()
-
-            if "database" in title_lower or "database" in course_lower or "sql" in title_lower:
-                all_possible = {
-                    "Entity Relationship Diagrams": avg_score + 5,
-                    "SQL Joins": avg_score + 2,
-                    "Database Normalization": avg_score - 8,
-                    "Transaction Isolation Levels": avg_score - 12
-                }
-            elif "python" in title_lower or "python" in course_lower or "programming" in title_lower or "coding" in title_lower:
-                all_possible = {
-                    "Control Flow & Loops": avg_score + 6,
-                    "Basic Syntax": avg_score + 10,
-                    "Object-Oriented Design": avg_score - 7,
-                    "Algorithm Complexity": avg_score - 13
-                }
-            else:
-                all_possible = {
-                    "Core Concepts": avg_score + 5,
-                    "Practical Application": avg_score + 2,
-                    "Critical Analysis": avg_score - 8,
-                    "Advanced Integration": avg_score - 12
-                }
-
-            strong_topics = [t for t, score in all_possible.items() if score >= 65]
-            weak_topics = [t for t, score in all_possible.items() if score < 65]
-
-        if metrics.total_results > 0:
-            if not strong_topics:
-                strong_topics = ["General Comprehension"]
-            if not weak_topics:
-                weak_topics = ["Advanced Concepts"]
-        else:
-            strong_topics = ["No data available"]
-            weak_topics = ["No data available"]
+        # Topics come only from the questions' own topic tags. When none are tagged (or no
+        # one has been graded yet) the lists stay empty: invented topic names with scores
+        # derived from the class average would read as real findings.
 
         # 4. Common mistakes (questions with low average score)
         common_mistakes = []
@@ -2295,7 +2263,7 @@ class GradingService:
                         "reason": revision_reason,
                         "new_score": new_score,
                         "max_score": existing.max_score,
-                        "results_url": f"{settings.FRONTEND_URL}/student/results/{result.id}",
+                        "results_url": f"{settings.FRONTEND_URL}{frontend_links.student_result(result.id)}",
                         "notification_type": NotificationType.RESULT_RELEASED.value
                     }
                 )

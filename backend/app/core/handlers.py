@@ -72,7 +72,10 @@ def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(MindexaError)
     async def handle_mindexa_exception(request: Request, exc: MindexaError) -> JSONResponse:
         request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
-        logger.warning(
+        # Handled 4xx rejections (validation, business rules, permissions) are normal operation
+        # and already reach the user as a message; only server-side faults deserve WARNING+.
+        log = logger.info if exc.status_code < 500 else logger.error
+        log(
             "mindexa_exception",
             error_code=exc.code,
             message=exc.detail,

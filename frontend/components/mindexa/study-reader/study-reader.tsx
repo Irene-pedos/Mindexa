@@ -477,16 +477,13 @@ export function StudyReader({ source, onBack, initialPage }: StudyReaderProps) {
       } else if (e.key === "r" || e.key === "R") {
         e.preventDefault();
         handleRotate();
+      } else if (isSearchShortcut || e.key === "/") {
+        // Must come before the plain "f" (focus mode) shortcut, which Ctrl/Cmd+F would otherwise trigger.
+        e.preventDefault();
+        setActiveSidebarTab("search");
       } else if (e.key === "f" || e.key === "F") {
         e.preventDefault();
         handleToggleFocusMode();
-      } else if (
-        e.key === "/" ||
-        (e.ctrlKey && e.key === "f") ||
-        (e.metaKey && e.key === "f")
-      ) {
-        e.preventDefault();
-        setActiveSidebarTab("search");
       } else if (e.key === "w" || e.key === "W" || e.key === "1") {
         e.preventDefault();
         setActiveSidebarTab("focus");
@@ -694,6 +691,7 @@ export function StudyReader({ source, onBack, initialPage }: StudyReaderProps) {
             {fileUrl ? (
               isPdf ? (
                 <PdfCanvas
+                  key={fileUrl}
                   fileUrl={fileUrl}
                   currentPage={progress.page}
                   numPages={numPages || progress.numPages}

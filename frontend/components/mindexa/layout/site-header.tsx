@@ -91,9 +91,16 @@ export function SiteHeader() {
     }
 
     loadNotifications();
-    // Refresh every 2 minutes
+    // Refresh every 2 minutes, and straight away when the user comes back to the tab
     const interval = setInterval(loadNotifications, 120000);
-    return () => clearInterval(interval);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void loadNotifications();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [user]);
 
   const getIcon = (type: string) => {

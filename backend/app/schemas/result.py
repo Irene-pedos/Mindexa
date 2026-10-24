@@ -83,6 +83,7 @@ class ResultBreakdownItem(BaseModel):
     question_text: str | None = None
     question_type: str | None = None
     section_title: str | None = None
+    topic_tag: str | None = None
     image_url: str | None = Field(None, alias="imageUrl")
     case_study_context: str | None = None
     question_table_context: dict | None = Field(None, alias="questionTableContext")
@@ -113,6 +114,7 @@ class AssessmentResultResponse(BaseModel):
     assessment_id: uuid.UUID
     assessment_title: str | None = None
     academic_year: str | None = None
+    course_id: uuid.UUID | None = None
     course_code: str | None = None
     course_name: str | None = None
     institution_name: str | None = None

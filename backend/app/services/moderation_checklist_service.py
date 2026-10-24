@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.constants import AssessmentType
 from app.db.enums import AIActionType, QuestionType
+from app.services.compliance_rules import ComplianceConfig
 from app.services.assessment_marks import (
     _effective_aq_marks,
     required_marks,
@@ -72,6 +73,21 @@ class ChecklistResult:
         }
 
 
+def _severity_for(mode: str) -> ChecklistSeverity:
+    """BLOCKING rules block; every other active mode only warns."""
+    return ChecklistSeverity.BLOCKING if mode == "BLOCKING" else ChecklistSeverity.WARNING
+
+
+def _off_item(code: str, why: str) -> ChecklistItem:
+    return ChecklistItem(
+        code=code,
+        severity=ChecklistSeverity.INFO,
+        passed=True,
+        message=why,
+        details={"status": "off"},
+    )
+
+
 class ModerationChecklistService:
     """Service to evaluate automated moderation checklist items."""
 
@@ -79,14 +95,20 @@ class ModerationChecklistService:
     async def run(
         cls,
         assessment: Any,
-        policy_total: int = 100,
+        policy_total: int | None = 100,
         db: Optional[AsyncSession] = None,
         run_ai_review: bool = False,
+        config: Optional[ComplianceConfig] = None,
     ) -> ChecklistResult:
         """
         Run all moderation checklist checks on an assessment.
         Returns a ChecklistResult containing all passed and failed items.
+
+        `config` carries the institution's rules (how strict each check is, the fixed total, the
+        section structure). Without it the platform defaults apply and `policy_total` is used.
         """
+        cfg = config or ComplianceConfig(policy_total=policy_total)
+        policy_total = cfg.policy_total
         items: List[ChecklistItem] = []
 
         ass_type = getattr(assessment, "assessment_type", None)
@@ -101,12 +123,22 @@ class ModerationChecklistService:
 
         # ── 1. MARKS_TOTAL ───────────────────────────────────────────────────
         req_marks = required_marks(assessment)
-        if is_summative:
+        total_mode = cfg.mode("MARKS_TOTAL")
+        if is_summative and total_mode == "OFF":
+            items.append(_off_item("MARKS_TOTAL", "A fixed total mark is not required by your institution's policy."))
+        elif is_summative and policy_total is None:
+            items.append(
+                _off_item(
+                    "MARKS_TOTAL",
+                    f"Required marks: {req_marks}. Your institution sets no fixed total for summative papers.",
+                )
+            )
+        elif is_summative:
             if req_marks == policy_total:
                 items.append(
                     ChecklistItem(
                         code="MARKS_TOTAL",
-                        severity=ChecklistSeverity.BLOCKING,
+                        severity=_severity_for(total_mode),
                         passed=True,
                         message=f"Required marks ({req_marks}) match configured policy total ({policy_total}).",
                     )
@@ -115,7 +147,7 @@ class ModerationChecklistService:
                 items.append(
                     ChecklistItem(
                         code="MARKS_TOTAL",
-                        severity=ChecklistSeverity.BLOCKING,
+                        severity=_severity_for(total_mode),
                         passed=False,
                         message=(
                             f"Summative required marks ({req_marks}) do not match "
@@ -151,11 +183,14 @@ class ModerationChecklistService:
         for p_issue in pool_issues:
             dist_errors.append(p_issue.message)
 
-        if not dist_errors:
+        dist_mode = cfg.mode("MARKS_DISTRIBUTION")
+        if dist_mode == "OFF":
+            items.append(_off_item("MARKS_DISTRIBUTION", "Marks distribution is not checked under your institution's policy."))
+        elif not dist_errors:
             items.append(
                 ChecklistItem(
                     code="MARKS_DISTRIBUTION",
-                    severity=ChecklistSeverity.BLOCKING,
+                    severity=_severity_for(dist_mode),
                     passed=True,
                     message="Marks distribution is valid across sections and choice pools.",
                 )
@@ -164,7 +199,7 @@ class ModerationChecklistService:
             items.append(
                 ChecklistItem(
                     code="MARKS_DISTRIBUTION",
-                    severity=ChecklistSeverity.BLOCKING,
+                    severity=_severity_for(dist_mode),
                     passed=False,
                     message="; ".join(dist_errors),
                     details={"errors": dist_errors},
@@ -172,17 +207,22 @@ class ModerationChecklistService:
             )
 
         # ── 3. STRUCTURE (Section 6.4 rules) ─────────────────────────────────
-        if is_summative:
+        structure_mode = cfg.mode("STRUCTURE")
+        if is_summative and structure_mode == "OFF":
+            items.append(_off_item("STRUCTURE", "A fixed section structure is not required by your institution's policy."))
+        elif is_summative:
             struct_result = validate_summative_structure(
-                assessment, policy_total=policy_total
+                assessment,
+                policy_total=policy_total,
+                rules=cfg.rules.get("STRUCTURE"),
             )
-            # Soft warnings
+            # Structure findings: warnings by default; blocking if the institution says so
             if struct_result.soft_warnings:
                 warning_msgs = [w.message for w in struct_result.soft_warnings]
                 items.append(
                     ChecklistItem(
                         code="STRUCTURE",
-                        severity=ChecklistSeverity.WARNING,
+                        severity=_severity_for(structure_mode),
                         passed=False,
                         message="; ".join(warning_msgs),
                         details={"warnings": warning_msgs},
@@ -238,11 +278,14 @@ class ModerationChecklistService:
                     if not has_correct:
                         qc_errors.append(f"Question #{idx} ({q_type}) has no correct option selected.")
 
-        if not qc_errors:
+        qc_mode = cfg.mode("QUESTIONS_COMPLETE")
+        if qc_mode == "OFF":
+            items.append(_off_item("QUESTIONS_COMPLETE", "Question completeness is not checked under your institution's policy."))
+        elif not qc_errors:
             items.append(
                 ChecklistItem(
                     code="QUESTIONS_COMPLETE",
-                    severity=ChecklistSeverity.BLOCKING,
+                    severity=_severity_for(qc_mode),
                     passed=True,
                     message="All questions are complete with stem, marks, and answers.",
                 )
@@ -251,7 +294,7 @@ class ModerationChecklistService:
             items.append(
                 ChecklistItem(
                     code="QUESTIONS_COMPLETE",
-                    severity=ChecklistSeverity.BLOCKING,
+                    severity=_severity_for(qc_mode),
                     passed=False,
                     message="; ".join(qc_errors),
                     details={"errors": qc_errors},

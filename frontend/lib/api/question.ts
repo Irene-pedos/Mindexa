@@ -8,6 +8,8 @@ export interface QuestionOption {
   is_correct: boolean;
   order_index: number;
   explanation?: string;
+  /** Case study: marks of this sub-question, as text. */
+  match_key?: string;
 }
 
 export interface QuestionBankItem {
@@ -17,6 +19,8 @@ export interface QuestionBankItem {
   explanation?: string;
   hint?: string;
   question_type: string;
+  /** Scenario of a case study; its sub-questions are in `options`. */
+  case_study_context?: string | null;
   difficulty: string;
   suggested_marks: number;
   marks: number; // Keep for backward compatibility in UI
@@ -47,6 +51,7 @@ export interface QuestionCreateRequest {
   explanation?: string;
   hint?: string;
   question_type: string;
+  case_study_context?: string;
   difficulty: string;
   subject?: string;
   course_id?: string;

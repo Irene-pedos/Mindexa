@@ -72,6 +72,15 @@ class ModerationDecideRequest(BaseModel):
 class ModerationApproveRequest(BaseModel):
     decision_note: Optional[str] = Field(default=None, max_length=2000, description="Optional sign-off note")
     acknowledge_warnings: bool = Field(default=True, description="Acknowledge any soft structure warnings")
+    override_failed_checks: bool = Field(
+        default=False,
+        description="Approve although required automatic checks failed (the failed checks are waived).",
+    )
+    override_reason: Optional[str] = Field(
+        default=None,
+        max_length=1000,
+        description="Why the failed checks are waived (required, at least 10 characters, when overriding).",
+    )
 
 
 class ModerationReviewResponse(BaseModel):
@@ -94,6 +103,9 @@ class ModerationOverviewResponse(BaseModel):
     status: str
     latest_version_no: int
     rounds: List[dict]
+    # The automatic checks evaluated right now under the institution's current rules
+    # (only while a round is open). The per-round `checklist_result` is the snapshot at submission.
+    current_checklist: Optional[dict] = None
 
 
 class ModeratorQueueItemResponse(BaseModel):

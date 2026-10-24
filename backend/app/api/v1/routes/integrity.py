@@ -25,7 +25,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import NotFoundError
 from app.db.repositories.integrity_repo import IntegrityRepository
 from app.db.session import get_db
-from app.dependencies.auth import require_lecturer_or_admin, require_student
+from app.dependencies.auth import (get_current_user, require_lecturer_or_admin,
+                                   require_student)
 from app.schemas.integrity import (
     AcknowledgeWarningRequest,
     AttemptIntegrityReport,
@@ -534,6 +535,7 @@ async def end_supervision(
 
 @router.get(
     "/profiles",
+    dependencies=[Depends(get_current_user)],
     response_model=dict,
     summary="List all institutional integrity profiles",
 )

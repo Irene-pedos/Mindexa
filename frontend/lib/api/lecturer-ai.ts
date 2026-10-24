@@ -66,7 +66,100 @@ export interface RubricSaveResponse {
   message: string;
 }
 
+// ── Question authoring assistant ────────────────────────────────────────────
+
+export type EnhanceAction =
+  | "improve_wording"
+  | "add_explanation"
+  | "add_distractors"
+  | "complete_missing"
+  | "add_sub_questions"
+  | "make_easier"
+  | "make_harder"
+  | "fix_ambiguity";
+
+export interface SnapshotOption {
+  text: string;
+  /** Right side of a matching pair, or answer guidance for a case-study part */
+  explanation?: string | null;
+  is_correct: boolean;
+  /** Marks of a case-study part, as a string */
+  match_key?: string | null;
+}
+
+export interface QuestionSnapshot {
+  id?: string | null;
+  type: string;
+  text: string;
+  marks?: number | null;
+  options: SnapshotOption[];
+  case_study_context?: string | null;
+  /** Model answer / solution / marking guidance for open-ended questions */
+  explanation?: string | null;
+  difficulty?: string | null;
+  section?: string | null;
+}
+
+export interface EnhanceQuestionResponse {
+  question: QuestionSnapshot;
+  summary: string;
+  changes: string[];
+  /** Still missing after the change; empty when the question is complete */
+  remaining_issues: string[];
+}
+
+export interface BlueprintSectionSummary {
+  section: string;
+  expected_questions: number;
+  expected_marks: number;
+  topics?: string | null;
+  difficulty?: string | null;
+}
+
+export interface PaperFinding {
+  severity: "warning" | "suggestion";
+  code: string;
+  message: string;
+  question_id?: string | null;
+  section?: string | null;
+}
+
+export interface ReviewPaperResponse {
+  summary: string;
+  findings: PaperFinding[];
+}
+
 export const lecturerAiApi = {
+  /** Propose an improved/completed version of one draft question. Nothing is saved. */
+  async enhanceQuestion(body: {
+    question: QuestionSnapshot;
+    action: EnhanceAction;
+    instructions?: string;
+    subject?: string;
+    topic?: string;
+    workspace_id?: string;
+  }): Promise<EnhanceQuestionResponse> {
+    return apiClient("/lecturers/ai/questions/enhance", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
+
+  /** Review a draft paper for coverage gaps, balance, duplicates and ambiguity. */
+  async reviewPaper(body: {
+    questions: QuestionSnapshot[];
+    blueprint?: BlueprintSectionSummary[];
+    assessment_type?: string;
+    policy_total?: number | null;
+    subject?: string;
+    workspace_id?: string;
+  }): Promise<ReviewPaperResponse> {
+    return apiClient("/lecturers/ai/questions/review", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
+
   /**
    * Fetch ordered Learning Units for a workspace (with automatic segmentation fallback)
    */

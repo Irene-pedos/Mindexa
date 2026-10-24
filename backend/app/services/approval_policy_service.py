@@ -25,6 +25,7 @@ from app.db.models.auth import User
 from app.db.models.policy import ApprovalPolicy
 from app.db.repositories.approval_policy_repo import ApprovalPolicyRepository
 from app.schemas.policy import ApprovalPolicyResponse, ApprovalPolicyUpdate
+from app.services.compliance_rules import merge_rules, validate_rules
 
 DEFAULT_POLICY_CONFIGS = {
     AssessmentType.SUMMATIVE: {
@@ -186,6 +187,13 @@ class ApprovalPolicyService:
         if data.sealing_warning_days is not None and data.sealing_warning_days < 0:
             raise BadRequestError("sealing_warning_days cannot be negative.")
 
+        new_rules = None
+        if data.compliance_rules is not None:
+            try:
+                new_rules = validate_rules(data.compliance_rules)
+            except ValueError as exc:
+                raise BadRequestError(str(exc), code="INVALID_COMPLIANCE_RULES") from exc
+
         before_state = {
             "requires_moderation": policy.requires_moderation,
             "enforce_structure_template": policy.enforce_structure_template,
@@ -193,6 +201,7 @@ class ApprovalPolicyService:
             "post_approval_edit_mode": policy.post_approval_edit_mode.value,
             "post_start_edit_mode": policy.post_start_edit_mode.value,
             "sealing_warning_days": policy.sealing_warning_days,
+            "compliance_rules": policy.compliance_rules,
         }
 
         # Apply updates
@@ -200,8 +209,12 @@ class ApprovalPolicyService:
             policy.requires_moderation = data.requires_moderation
         if data.enforce_structure_template is not None:
             policy.enforce_structure_template = data.enforce_structure_template
-        if data.summative_total_marks is not None:
+        # An explicit null means "this institution sets no fixed total marks"; an omitted field
+        # means "leave it alone", so the two are told apart by what the client actually sent.
+        if "summative_total_marks" in data.model_fields_set:
             policy.summative_total_marks = data.summative_total_marks
+        if new_rules is not None:
+            policy.compliance_rules = new_rules
         if data.post_approval_edit_mode is not None:
             policy.post_approval_edit_mode = data.post_approval_edit_mode
         if data.post_start_edit_mode is not None:
@@ -216,6 +229,7 @@ class ApprovalPolicyService:
             "post_approval_edit_mode": policy.post_approval_edit_mode.value,
             "post_start_edit_mode": policy.post_start_edit_mode.value,
             "sealing_warning_days": policy.sealing_warning_days,
+            "compliance_rules": policy.compliance_rules,
         }
 
         audit = AuditLog(
@@ -257,6 +271,7 @@ class ApprovalPolicyService:
             post_approval_edit_mode=policy.post_approval_edit_mode,
             post_start_edit_mode=policy.post_start_edit_mode,
             sealing_warning_days=policy.sealing_warning_days,
+            compliance_rules=merge_rules(policy.compliance_rules),
             is_active=policy.is_active,
             created_at=policy.created_at,
             updated_at=policy.updated_at,

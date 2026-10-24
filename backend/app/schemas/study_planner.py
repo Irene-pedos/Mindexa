@@ -2,11 +2,22 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Annotated, Any, Dict, List, Optional, Self
+from typing import Annotated, Any, Dict, List, Literal, Optional, Self
 
 from app.db.models.study_plan import DEFAULT_INITIAL_READINESS_SCORE
 from pydantic import (AliasChoices, BaseModel, Field, computed_field,
                       model_validator)
+
+
+# Request bounds: free text reaches the LLM prompt and JSON columns, so it must be capped.
+MAX_NOTES_CHARS = 20_000
+MAX_QUESTION_CHARS = 2_000
+MAX_SECTION_CONTEXT_CHARS = 4_000
+MAX_FEEDBACK_CHARS = 2_000
+MAX_QUIZ_ANSWERS = 50
+MAX_CHECKLIST_ITEMS = 50
+MAX_BLACKOUT_DATES = 366
+MAX_SESSION_MINUTES = 480
 
 
 class StudySessionResponse(BaseModel):
@@ -68,20 +79,24 @@ class StudentLearningUnitProgressResponse(BaseModel):
 
 
 class SaveSessionNotesRequest(BaseModel):
-    student_notes: str = Field(default="", description="Personal notes written by the student for this study session")
+    student_notes: str = Field(
+        default="",
+        max_length=MAX_NOTES_CHARS,
+        description="Personal notes written by the student for this study session",
+    )
 
 
 class GuidedSessionAskRequest(BaseModel):
-    question: str = Field(min_length=1)
-    section_context: Optional[str] = Field(default="")
+    question: str = Field(min_length=1, max_length=MAX_QUESTION_CHARS)
+    section_context: Optional[str] = Field(default="", max_length=MAX_SECTION_CONTEXT_CHARS)
 
 
 class GuidedSessionExerciseRequest(BaseModel):
-    section_index: Optional[int] = Field(default=0)
+    section_index: Optional[int] = Field(default=0, ge=0, le=200)
 
 
 class SubmitKnowledgeCheckRequest(BaseModel):
-    answers: Dict[str, Any] = Field(default_factory=dict)
+    answers: Dict[str, Any] = Field(default_factory=dict, max_length=MAX_QUIZ_ANSWERS)
 
 
 class StudyPlanResponse(BaseModel):
@@ -97,7 +112,7 @@ class StudyPlanResponse(BaseModel):
     start_date: datetime
     end_date: datetime
     available_days: List[str] = []
-    blackout_dates: List[str] = []
+    blackout_dates: List[str] = Field(default=[], max_length=MAX_BLACKOUT_DATES)
     preferred_time_start: str
     preferred_time_end: str
     session_duration_minutes: int
@@ -127,15 +142,17 @@ class CreateStudyPlanRequest(BaseModel):
     target_learning_unit_id: Optional[uuid.UUID] = None
     start_date: datetime
     end_date: datetime
-    available_days: List[str] = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
-    blackout_dates: List[str] = []
+    available_days: List[str] = Field(
+        default=["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"], max_length=7
+    )
+    blackout_dates: List[str] = Field(default=[], max_length=MAX_BLACKOUT_DATES)
     preferred_time_start: str = "19:00"
     preferred_time_end: str = "21:00"
-    session_duration_minutes: int = 60
-    daily_goal: str = "Study 1 topic per session"
+    session_duration_minutes: int = Field(default=60, ge=5, le=MAX_SESSION_MINUTES)
+    daily_goal: str = Field(default="Study 1 topic per session", max_length=255)
     preferred_difficulty: str = "Balanced"
-    reminder_preference_minutes: int = 30
-    reminder_channels: List[str] = ["in_app", "browser"]
+    reminder_preference_minutes: int = Field(default=30, ge=0, le=10080)
+    reminder_channels: List[str] = Field(default=["in_app", "browser"], max_length=5)
     priority: str = "Medium"
     auto_generate_sessions: bool = True
 
@@ -163,15 +180,17 @@ class GeneratePlanFromAssessmentRequest(BaseModel):
     end_date: Optional[datetime] = None    # User-selected end; falls back to assessment window when omitted
     target_mode: str = Field(default="full_assessment_coverage")
     target_learning_unit_id: Optional[uuid.UUID] = None
-    available_days: List[str] = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
-    blackout_dates: List[str] = []
+    available_days: List[str] = Field(
+        default=["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"], max_length=7
+    )
+    blackout_dates: List[str] = Field(default=[], max_length=MAX_BLACKOUT_DATES)
     preferred_time_start: str = "19:00"
     preferred_time_end: str = "21:00"
-    session_duration_minutes: int = 60
-    daily_goal: str = "Master 1 assessment topic per session"
+    session_duration_minutes: int = Field(default=60, ge=5, le=MAX_SESSION_MINUTES)
+    daily_goal: str = Field(default="Master 1 assessment topic per session", max_length=255)
     preferred_difficulty: str = "Balanced"
-    reminder_preference_minutes: int = 30
-    reminder_channels: List[str] = ["in_app", "browser"]
+    reminder_preference_minutes: int = Field(default=30, ge=0, le=10080)
+    reminder_channels: List[str] = Field(default=["in_app", "browser"], max_length=5)
     priority: str = "High"
 
     @model_validator(mode="after")
@@ -193,11 +212,11 @@ class GeneratePlanFromAssessmentRequest(BaseModel):
 
 
 class CompleteSessionRequest(BaseModel):
-    understanding_level: str = Field(description="YES, PARTIAL, NO")
-    difficulty_rating: Optional[str] = "Medium"
-    confidence_rating: Optional[int] = 4
-    feedback_notes: Optional[str] = None
-    checklist_items: Optional[List[Dict[str, Any]]] = None
+    understanding_level: Literal["YES", "PARTIAL", "NO"] = Field(description="YES, PARTIAL, NO")
+    difficulty_rating: Optional[Literal["Easy", "Medium", "Hard"]] = "Medium"
+    confidence_rating: Optional[int] = Field(default=4, ge=1, le=5)
+    feedback_notes: Optional[str] = Field(default=None, max_length=MAX_FEEDBACK_CHARS)
+    checklist_items: Optional[List[Dict[str, Any]]] = Field(default=None, max_length=MAX_CHECKLIST_ITEMS)
 
 
 class GenerateQuizRequest(BaseModel):
@@ -210,6 +229,7 @@ class RescheduleSessionRequest(BaseModel):
     new_duration_minutes: Optional[int] = Field(
         default=None,
         ge=1,
+        le=MAX_SESSION_MINUTES,
         validation_alias=AliasChoices("new_duration_minutes", "new_duration"),
     )
     force: bool = False
@@ -220,7 +240,9 @@ class RescheduleSessionRequest(BaseModel):
 
 
 class AdjustPlanRequest(BaseModel):
-    action: str = Field(description="reduce_duration | shift_weekends | rebalance_topics")
+    action: Literal["reduce_duration", "shift_weekends", "rebalance_topics"] = Field(
+        description="reduce_duration | shift_weekends | rebalance_topics"
+    )
 
 
 class ReadinessTimelinePoint(BaseModel):

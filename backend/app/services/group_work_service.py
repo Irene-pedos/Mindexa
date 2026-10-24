@@ -7,6 +7,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any, TYPE_CHECKING
 
+from app.core import links as frontend_links
 from app.core.constants import UserRole
 from app.core.exceptions import (AuthorizationError, ConflictError,
                                  NotFoundError, ValidationError)
@@ -644,7 +645,7 @@ class GroupWorkService:
                 body="A group member has requested your approval to submit the group work.",
                 reference_id=submission_id,
                 reference_type="group_submission",
-                action_url=f"/student/group-work/{assessment_id}",
+                action_url=frontend_links.student_group_work(assessment_id),
             )
 
     async def approve_submission(
@@ -729,7 +730,7 @@ class GroupWorkService:
                 body=f"Group '{group.name}' has submitted their work for '{assessment.title}'.",
                 reference_id=submission_id,
                 reference_type="group_submission",
-                action_url=f"/lecturer/grading",
+                action_url=frontend_links.lecturer_grading(),
             )
 
     async def create_group_appeal(
@@ -777,7 +778,7 @@ class GroupWorkService:
                 body="A group member opened a result appeal and needs your approval.",
                 reference_id=appeal.id,
                 reference_type="group_appeal",
-                action_url=f"/student/group-work/{assessment_id}",
+                action_url=frontend_links.student_group_work(assessment_id),
             )
         return await self._serialize_appeal(await self.appeal_repo.get_by_id(appeal.id, include_approvals=True))
 
@@ -823,7 +824,7 @@ class GroupWorkService:
                     body="A group appeal has been approved by all members and awaits your review.",
                     reference_id=appeal_id,
                     reference_type="group_appeal",
-                    action_url=f"/lecturer/grading",
+                    action_url=frontend_links.lecturer_grading(),
                 )
         return GroupAppealApprovalResponse.model_validate(approval)
 
@@ -860,7 +861,7 @@ class GroupWorkService:
                 body=f"The lecturer has resolved your group's appeal for '{assessment.title}'.",
                 reference_id=appeal_id,
                 reference_type="group_appeal",
-                action_url=f"/student/group-work/{assessment_id}",
+                action_url=frontend_links.student_group_work(assessment_id),
             )
 
     async def assign_group_reassessment(
@@ -948,7 +949,7 @@ class GroupWorkService:
                 body=f"A reassessment has been assigned to your group for '{assessment.title}'.",
                 reference_id=reassessment.id,
                 reference_type="assessment",
-                action_url=f"/student/group-work/{reassessment.id}",
+                action_url=frontend_links.student_group_work(reassessment.id),
             )
 
         return reassessment.id
@@ -1316,7 +1317,7 @@ class GroupWorkService:
                     body=f"Results for '{assessment.title}' have been released to your group.",
                     reference_id=submission_id,
                     reference_type="group_submission",
-                    action_url=f"/student/group-work/{assessment_id}",
+                    action_url=frontend_links.student_group_work(assessment_id),
                 )
 
     async def _all_submission_approvals_approved(self, submission_id: uuid.UUID, group_id: uuid.UUID) -> bool:

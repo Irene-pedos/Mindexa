@@ -10,7 +10,7 @@ from app.db.schemas.academic import (AcademicPeriodResponse,
 from app.db.schemas.auth import UserResponse
 from app.db.schemas.teaching_assignment import TeachingAssignmentDetailResponse
 from app.db.session import get_db
-from app.dependencies.auth import require_lecturer
+from app.dependencies.auth import get_current_user, require_lecturer
 from app.schemas.admin import AdminCourseListResponse
 from app.schemas.lecturer import (AddStudentRequest, LecturerCourseDetail,
                                   LecturerDashboardResponse,
@@ -364,6 +364,7 @@ async def list_option_classes(
 
 @router.get(
     "/institutions",
+    dependencies=[Depends(get_current_user)],
     response_model=list[InstitutionResponse],
     summary="List all institutions",
 )
@@ -380,6 +381,7 @@ async def list_institutions(
 
 @router.get(
     "/departments",
+    dependencies=[Depends(get_current_user)],
     response_model=list[DepartmentResponse],
     summary="List departments for an institution",
 )
@@ -400,6 +402,7 @@ async def list_departments(
 
 @router.get(
     "/options",
+    dependencies=[Depends(get_current_user)],
     response_model=list[OptionResponse],
     summary="List options for a department",
 )
@@ -420,6 +423,7 @@ async def list_options(
 
 @router.get(
     "/classes",
+    dependencies=[Depends(get_current_user)],
     response_model=list[ClassGroupResponse],
     summary="List class groups for an option",
 )
@@ -440,6 +444,7 @@ async def list_classes(
 
 @router.get(
     "/academic-periods",
+    dependencies=[Depends(get_current_user)],
     response_model=list[AcademicPeriodResponse],
     summary="List all academic periods",
 )

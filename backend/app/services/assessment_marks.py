@@ -198,18 +198,29 @@ def validate_choice_pools(assessment: Any) -> list[ChoicePoolIssue]:
 
 def validate_summative_structure(
     assessment: Any,
-    policy_total: int = 100,
+    policy_total: int | None = 100,
+    rules: dict[str, Any] | None = None,
 ) -> SummativeStructureResult:
     """
     Validate summative structure rules (Spec Section 6.4):
-    - Total required marks == policy_total (HARD rule, is_blocking=True).
+    - Total required marks == policy_total (HARD rule, is_blocking=True). Skipped when the
+      institution sets no fixed total (policy_total is None).
     - Exactly 3 sections (A, B, C) (SOFT rule).
     - Section A is CLOSED (SOFT rule).
     - Section C is OPEN (SOFT rule).
     - Sections B and C have pool_size > questions_to_answer (SOFT rule).
 
+    `rules` is the STRUCTURE rule of the institution's compliance settings
+    (expected_sections / section_a_closed / section_c_open / choice_pools); omitted keys keep the
+    original behaviour above.
+
     Non-summative assessments return is_valid=True with no violations or warnings.
     """
+    rules = rules or {}
+    expected_sections = rules.get("expected_sections", 3)
+    check_a_closed = rules.get("section_a_closed", True)
+    check_c_open = rules.get("section_c_open", True)
+    check_pools = rules.get("choice_pools", True)
     if not assessment:
         return SummativeStructureResult(is_valid=True)
 
@@ -232,9 +243,10 @@ def validate_summative_structure(
         if isinstance(custom_total, (int, float)) or (isinstance(custom_total, str) and custom_total.isdigit()):
             policy_total = int(custom_total)
 
-    # 1. HARD RULE: Total required marks == policy total (default 100)
+    # 1. HARD RULE: Total required marks == policy total (default 100). An institution that sets no
+    #    fixed total (policy_total is None) is not checked.
     req = required_marks(assessment)
-    if req != policy_total:
+    if policy_total is not None and req != policy_total:
         hard_violations.append(
             StructureViolation(
                 code="SUMMATIVE_MARKS_TOTAL",
@@ -250,14 +262,17 @@ def validate_summative_structure(
     sections = [s for s in all_secs if not getattr(s, "is_deleted", False)]
     sections.sort(key=lambda s: getattr(s, "order_index", 0))
 
-    # 2. SOFT RULE: Exactly 3 sections
-    if len(sections) != 3:
+    # 2. SOFT RULE: Expected number of sections (3 = A, B, C unless the institution says otherwise)
+    if expected_sections is not None and len(sections) != expected_sections:
         soft_warnings.append(
             StructureViolation(
                 code="SUMMATIVE_SECTION_COUNT",
                 message=(
                     "Summative paper is expected to have exactly 3 sections (A, B, C), "
                     f"found {len(sections)}."
+                    if expected_sections == 3
+                    else f"Summative paper is expected to have exactly {expected_sections} "
+                    f"section(s), found {len(sections)}."
                 ),
                 is_blocking=False,
             )
@@ -269,7 +284,7 @@ def validate_summative_structure(
     sec_c = sections[2] if len(sections) >= 3 else None
 
     # 3. SOFT RULE: Section A is CLOSED
-    if sec_a:
+    if check_a_closed and sec_a:
         sk_a = getattr(sec_a, "section_kind", None)
         sk_a_val = sk_a.value if hasattr(sk_a, "value") else str(sk_a or "")
         if sk_a_val != SectionKind.CLOSED.value:
@@ -282,7 +297,7 @@ def validate_summative_structure(
             )
 
     # 4. SOFT RULE: Section C is OPEN
-    if sec_c:
+    if check_c_open and sec_c:
         sk_c = getattr(sec_c, "section_kind", None)
         sk_c_val = sk_c.value if hasattr(sk_c, "value") else str(sk_c or "")
         if sk_c_val != SectionKind.OPEN.value:
@@ -298,7 +313,7 @@ def validate_summative_structure(
     questions = [aq for aq in all_aqs if not getattr(aq, "is_deleted", False)]
 
     # 5. SOFT RULE: Sections B and C have pool_size > questions_to_answer (choice pools)
-    for sec in (sec_b, sec_c):
+    for sec in (sec_b, sec_c) if check_pools else ():
         if sec:
             sec_aqs = [
                 aq for aq in questions

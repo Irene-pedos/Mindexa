@@ -150,7 +150,9 @@ export function MermaidDiagram({ code }: MermaidDiagramProps) {
             fontFamily: "inherit",
             fontSize: "12px",
           },
-          securityLevel: "loose",
+          // Diagram text is model output derived from lecturer uploads and student input, and the SVG
+          // is injected as HTML below. "strict" sanitises labels and disables click/javascript: links.
+          securityLevel: "strict",
           flowchart: { htmlLabels: true, curve: "basis" },
         });
 

@@ -219,6 +219,13 @@ def test_migration_chain_integrity():
         "20261023_p6c_calendar_export",
         "20261024_sync_class_section",
         "20261024_sync_schema",
+        "20261025_optional_default",
+        "20261025_advisory_events",
+        "20261026_course_department",
+        "20261026_enum_drift_fix",
+        "20261026_enum_drift_fix2",
+        "20261027_compliance_rules",
+        "20261028_option_guidance_text",
     ]
 
 

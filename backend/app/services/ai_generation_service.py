@@ -353,7 +353,10 @@ class AIGenerationService:
                     data.add_to_assessment_id
                 )
                 if assessment and not assessment.draft_is_complete:
-                    marks = data.marks_if_added or 1
+                    marks = data.marks_if_added
+                    if not marks and str(ai_question.question_type).upper() == "CASE_STUDY":
+                        marks = self._sub_question_marks(self._resolve_options_json(ai_question, data))
+                    marks = marks or 1
                     section_id = data.add_to_section_id or ai_question.target_section_id
                     
                     next_index = await self._assessment_repo.get_next_order_index(
@@ -423,14 +426,31 @@ class AIGenerationService:
             if review_data.modified_explanation is not None
             else ai_question.parsed_explanation
         )
-        options_json = (
-            review_data.modified_options_json
-            if review_data.modified_options_json is not None
-            else ai_question.parsed_options_json
-        )
+        options_json = self._resolve_options_json(ai_question, review_data)
 
         q_type_upper = str(ai_question.question_type).upper()
         is_case_study = q_type_upper == "CASE_STUDY"
+
+        # Read the options BEFORE creating the question. A case study with unreadable or
+        # missing sub-questions used to be saved as an empty question with the error
+        # swallowed; now it is refused so the lecturer can regenerate or complete it.
+        options: list[dict] = []
+        if options_json:
+            try:
+                parsed = json.loads(options_json)
+            except (json.JSONDecodeError, TypeError) as exc:
+                raise ValidationError(
+                    "The question's options could not be read. Edit or regenerate the question.",
+                    code="AI_QUESTION_OPTIONS_UNREADABLE",
+                ) from exc
+            options = [o for o in parsed if isinstance(o, dict)] if isinstance(parsed, list) else []
+        if is_case_study and (
+            len([o for o in options if (o.get("text") or o.get("content") or o.get("option_text") or "").strip()]) < 2
+        ):
+            raise ValidationError(
+                "A case study needs at least 2 sub-questions before it can be added.",
+                code="CASE_STUDY_NEEDS_SUB_QUESTIONS",
+            )
 
         content_to_save = (
             "Analyze the following case scenario and answer the sub-questions below."
@@ -451,37 +471,57 @@ class AIGenerationService:
             source_ai_batch_id=getattr(ai_question, "batch_id", None),
         )
 
-        # Create options if available
-        if options_json:
-            try:
-                options = json.loads(options_json)
-                is_matching = q_type_upper == "MATCHING"
-                for i, opt in enumerate(options):
-                    m_key = None
-                    m_val = None
-                    if opt.get("match_key") is not None:
-                        m_key = str(opt.get("match_key"))
-                    elif is_matching or is_case_study:
-                        m_key = opt.get("text") or opt.get("content") or opt.get("option_text") or ""
+        # Create options
+        is_matching = q_type_upper == "MATCHING"
+        for i, opt in enumerate(options):
+            m_key = None
+            m_val = None
+            if opt.get("match_key") is not None:
+                m_key = str(opt.get("match_key"))
+            elif is_case_study:
+                m_key = "5"  # marks for the sub-question; never the question text
+            elif is_matching:
+                m_key = opt.get("text") or opt.get("content") or opt.get("option_text") or ""
 
-                    if is_matching or is_case_study:
-                        m_val = opt.get("explanation") or opt.get("option_text_right") or ""
-                    
-                    # For case study sub-questions, order_index stores the marks value
-                    order_idx = opt.get("order_index") if opt.get("order_index") is not None else i
+            if is_matching or is_case_study:
+                m_val = opt.get("explanation") or opt.get("option_text_right") or ""
 
-                    await self._question_repo.add_option(
-                        question_id=question.id,
-                        content=opt.get("text") or opt.get("content") or opt.get("option_text") or "",
-                        is_correct=bool(opt.get("is_correct", False) if not is_matching else True),
-                        order_index=int(order_idx),
-                        match_key=m_key,
-                        match_value=m_val,
-                    )
-            except (json.JSONDecodeError, TypeError, KeyError):
-                pass  # Proceed without options if parsing fails
+            # Case-study marks live in `match_key`; order_index is just the position.
+            order_idx = opt.get("order_index") if opt.get("order_index") is not None else i
+
+            await self._question_repo.add_option(
+                question_id=question.id,
+                content=opt.get("text") or opt.get("content") or opt.get("option_text") or "",
+                is_correct=bool(opt.get("is_correct", False) if not is_matching else True),
+                order_index=int(order_idx),
+                match_key=m_key,
+                match_value=m_val,
+            )
 
         return question
+
+    @staticmethod
+    def _resolve_options_json(ai_question, review_data: ReviewAIQuestionRequest) -> str | None:
+        """The reviewer's edited options, unless they sent nothing meaningful.
+
+        An empty string or "[]" from the client means "no change", not "delete every option".
+        """
+        edited = review_data.modified_options_json
+        if edited is not None and edited.strip() not in ("", "[]", "null"):
+            return edited
+        return ai_question.parsed_options_json
+
+    @staticmethod
+    def _sub_question_marks(options_json: str | None) -> int | None:
+        """Total marks of a case study's sub-questions (match_key per part), if readable."""
+        if not options_json:
+            return None
+        try:
+            parts = json.loads(options_json)
+            total = sum(int(float(p.get("match_key") or 5)) for p in parts if isinstance(p, dict))
+        except (json.JSONDecodeError, TypeError, ValueError):
+            return None
+        return total or None
 
     # ─── Get / List ───────────────────────────────────────────────────────────
 

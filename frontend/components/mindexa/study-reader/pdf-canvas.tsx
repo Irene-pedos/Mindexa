@@ -2,11 +2,13 @@
 "use client";
 
 import React, {
-  useState,
-  useEffect,
-  useRef,
-  useMemo,
+  memo,
   useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
 } from "react";
 import { Document, Page } from "react-pdf";
 import "react-pdf/dist/Page/AnnotationLayer.css";
@@ -21,9 +23,49 @@ import {
 import { HighlightLayer } from "./highlight-layer";
 import { SelectionToolbar } from "./selection-toolbar";
 import { Skeleton } from "@/components/ui/skeleton";
-import { AlertTriangle, Loader2, Flame, X } from "lucide-react";
+import { AlertTriangle, Flame, Loader2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+
+// ── Layout constants (px) ───────────────────────────────────────────────────
+const PAD_TOP = 16;
+/** Room under the last page so the floating page navigator never covers it. */
+const PAD_BOTTOM = 96;
+const ROW_GAP = 16;
+const COL_GAP = 16;
+const DEFAULT_RATIO = 1.414; // A4 until a page is measured
+const TWO_UP_MIN_WIDTH = 768;
+/** Fraction of the viewport height below its top edge that decides "the page being read". */
+const READING_LINE = 0.35;
+/** Mount pages this many viewport-heights above and below what is visible. */
+const OVERSCAN_VIEWPORTS = 1;
+const MEASURE_CHUNK = 24;
+/** Widest a page grows in fit-width mode. */
+const MAX_PAGE_WIDTH = 1100;
+
+interface Row {
+  index: number;
+  pages: number[];
+  top: number;
+  height: number;
+}
+
+/** Index of the last row whose top is at or above `y`. */
+function findRow(rows: Row[], y: number): number {
+  let lo = 0;
+  let hi = rows.length - 1;
+  let found = 0;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (rows[mid].top <= y) {
+      found = mid;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  return found;
+}
 
 interface PdfCanvasProps {
   fileUrl: string;
@@ -58,6 +100,72 @@ interface PdfCanvasProps {
   onRetry?: () => void;
 }
 
+interface PdfPageViewProps {
+  pageNumber: number;
+  width: number;
+  height: number;
+  rotation: number;
+  annotations: StudentAnnotation[];
+  customTextRenderer?: (item: { str: string }) => string;
+  isSpotlight: boolean;
+  onUpdateAnnotation: PdfCanvasProps["onUpdateAnnotation"];
+  onDeleteAnnotation: PdfCanvasProps["onDeleteAnnotation"];
+  onRatio: (pageNumber: number, ratio: number) => void;
+}
+
+/** One page sheet. Memoised so scrolling only mounts/unmounts sheets and never re-renders the rest. */
+const PdfPageView = memo(function PdfPageView({
+  pageNumber,
+  width,
+  height,
+  rotation,
+  annotations,
+  customTextRenderer,
+  isSpotlight,
+  onUpdateAnnotation,
+  onDeleteAnnotation,
+  onRatio,
+}: PdfPageViewProps) {
+  return (
+    <div
+      data-page-number={pageNumber}
+      className={cn(
+        "paper-sheet relative shrink-0 overflow-hidden rounded-md border border-border/50 bg-card shadow-xl",
+        "ring-1 ring-black/5 dark:ring-white/5",
+        isSpotlight && "ring-4 ring-rose-500/80 shadow-rose-500/20",
+      )}
+      style={{ width, height }}
+    >
+      <HighlightLayer
+        pageNumber={pageNumber}
+        annotations={annotations}
+        pageWidth={width}
+        pageHeight={height}
+        onUpdateAnnotation={onUpdateAnnotation}
+        onDeleteAnnotation={onDeleteAnnotation}
+      />
+      <Page
+        pageNumber={pageNumber}
+        width={width}
+        rotate={rotation}
+        renderTextLayer
+        renderAnnotationLayer
+        customTextRenderer={customTextRenderer}
+        onLoadSuccess={(page: any) => {
+          if (page?.width > 0 && page?.height > 0) {
+            onRatio(pageNumber, page.height / page.width);
+          }
+        }}
+        className="pdf-page-render max-w-full"
+        loading={<Skeleton className="w-full rounded-md" style={{ height }} />}
+      />
+      <span className="pointer-events-none absolute bottom-1.5 right-2 rounded bg-background/70 px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-muted-foreground backdrop-blur-sm">
+        {pageNumber}
+      </span>
+    </div>
+  );
+});
+
 export function PdfCanvas({
   fileUrl,
   currentPage,
@@ -82,329 +190,315 @@ export function PdfCanvas({
   onPageChange,
   onRetry,
 }: PdfCanvasProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const page1WrapperRef = useRef<HTMLDivElement>(null);
-  const page2WrapperRef = useRef<HTMLDivElement>(null);
-  const lastWheelTimeRef = useRef<number>(0);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const frameRef = useRef(0);
+  const suppressEmitRef = useRef(false);
+  const suppressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** The page this component last reported or scrolled to; tells outside navigation from our own scrolling. */
+  const lastPageRef = useRef(currentPage);
+  const initialScrollDoneRef = useRef(false);
+  /** Where the viewport top sits (page + fraction of its row), used to keep the place across relayouts. */
+  const anchorRef = useRef<{ page: number; frac: number }>({ page: currentPage, frac: 0 });
 
-  const [containerWidth, setContainerWidth] = useState<number>(800);
-  const [containerHeight, setContainerHeight] = useState<number>(900);
+  const [size, setSize] = useState({ width: 0, height: 0 });
+  const [scrollTop, setScrollTop] = useState(0);
+  const [pdfDoc, setPdfDoc] = useState<any | null>(null);
+  const [ratios, setRatios] = useState<Record<number, number>>({});
+  const [layoutReady, setLayoutReady] = useState(false);
 
-  // Track page rendered aspect ratios per page number (default standard A4 1.414)
-  const [aspectRatioMap, setAspectRatioMap] = useState<Record<number, number>>(
-    {},
-  );
+  const totalPages = pdfDoc?.numPages ?? numPages ?? 0;
 
-  // Safe clamped current page against numPages
-  const safeCurrentPage = Math.max(1, Math.min(currentPage, numPages || 1));
-  const secondPage =
-    twoPageView && numPages > 1 && safeCurrentPage < numPages
-      ? safeCurrentPage + 1
-      : null;
-
-  // Custom text renderer for instant in-page search term highlighting
-  const customTextRenderer = useMemo(() => {
-    if (!searchQuery || !searchQuery.trim()) return undefined;
-    const trimmed = searchQuery.trim();
-    const escaped = trimmed.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const regex = new RegExp(`(${escaped})`, "gi");
-
-    return ({ str }: { str: string }) => {
-      if (!regex.test(str)) return str;
-      return str.replace(
-        regex,
-        `<mark class="bg-amber-300 dark:bg-amber-400 text-slate-950 font-bold rounded-xs px-0.5 ring-2 ring-amber-500/80 shadow-xs">$&</mark>`,
-      );
-    };
-  }, [searchQuery]);
-
-  // Measure container dimensions for fit-width and fit-page
+  // ── Measure the viewport ─────────────────────────────────────────────────
   useEffect(() => {
-    if (!containerRef.current) return;
-
+    const el = scrollRef.current;
+    if (!el) return;
+    // ResizeObserver reports the initial size as soon as it starts observing.
     const observer = new ResizeObserver((entries) => {
-      const entry = entries[0];
-      if (entry) {
-        setContainerWidth(entry.contentRect.width);
-        setContainerHeight(entry.contentRect.height);
-      }
+      const rect = entries[0]?.contentRect;
+      if (!rect) return;
+      const width = Math.round(rect.width);
+      const height = Math.round(rect.height);
+      setSize((prev) => (prev.width === width && prev.height === height ? prev : { width, height }));
     });
-
-    observer.observe(containerRef.current);
+    observer.observe(el);
     return () => observer.disconnect();
   }, []);
 
-  // Compute calculated scale / width for rendering with true discrete page clamping
-  const {
-    computedPage1Width,
-    computedPage1Height,
-    computedPage2Width,
-    computedPage2Height,
-  } = useMemo(() => {
-    const isRotatedSideways = rotation === 90 || rotation === 270;
-    const rawRatio1 = aspectRatioMap[safeCurrentPage] || 1.414;
-    const ratio1 = isRotatedSideways ? 1 / rawRatio1 : rawRatio1;
+  useEffect(() => {
+    scrollRef.current?.focus({ preventScroll: true });
+  }, []);
 
-    const rawRatio2 = (secondPage && aspectRatioMap[secondPage]) || rawRatio1;
-    const ratio2 = isRotatedSideways ? 1 / rawRatio2 : rawRatio2;
+  // ── Measure every page's shape up front (no rendering) so heights are right before scrolling ──
+  useEffect(() => {
+    if (!pdfDoc) return;
+    let cancelled = false;
 
-    const horizontalPadding = containerWidth < 640 ? 16 : 40;
-    const verticalPadding = containerHeight < 600 ? 16 : 36;
-
-    const maxAvailableWidth = Math.max(280, containerWidth - horizontalPadding);
-    const maxAvailableHeight = Math.max(280, containerHeight - verticalPadding);
-
-    // Two-page spread
-    if (twoPageView && numPages > 1 && secondPage) {
-      const halfWidth = (maxAvailableWidth - 20) / 2;
-      if (zoomMode === "fit-page") {
-        const w1 = Math.min(halfWidth, maxAvailableHeight / ratio1);
-        const w2 = Math.min(halfWidth, maxAvailableHeight / ratio2);
-        return {
-          computedPage1Width: Math.round(w1),
-          computedPage1Height: Math.round(w1 * ratio1),
-          computedPage2Width: Math.round(w2),
-          computedPage2Height: Math.round(w2 * ratio2),
-        };
+    (async () => {
+      const total: number = pdfDoc.numPages;
+      for (let start = 1; start <= total; start += MEASURE_CHUNK) {
+        const end = Math.min(total, start + MEASURE_CHUNK - 1);
+        const chunk: Record<number, number> = {};
+        await Promise.all(
+          Array.from({ length: end - start + 1 }, (_, i) => start + i).map(async (n) => {
+            try {
+              const page = await pdfDoc.getPage(n);
+              const viewport = page.getViewport({ scale: 1 });
+              if (viewport.width > 0) chunk[n] = viewport.height / viewport.width;
+              page.cleanup?.();
+            } catch {
+              // an unreadable page keeps the default shape
+            }
+          }),
+        );
+        if (cancelled) return;
+        setRatios((prev) => ({ ...prev, ...chunk }));
+        if (start === 1) setLayoutReady(true);
       }
-      if (zoomMode === "fit-width") {
-        return {
-          computedPage1Width: Math.round(halfWidth),
-          computedPage1Height: Math.round(halfWidth * ratio1),
-          computedPage2Width: Math.round(halfWidth),
-          computedPage2Height: Math.round(halfWidth * ratio2),
-        };
-      }
-      const baseW1 = Math.min(halfWidth, maxAvailableHeight / ratio1);
-      const baseW2 = Math.min(halfWidth, maxAvailableHeight / ratio2);
-      const w1 = baseW1 * (zoom / 100);
-      const w2 = baseW2 * (zoom / 100);
-      return {
-        computedPage1Width: Math.round(w1),
-        computedPage1Height: Math.round(w1 * ratio1),
-        computedPage2Width: Math.round(w2),
-        computedPage2Height: Math.round(w2 * ratio2),
-      };
-    }
+    })();
 
-    // Single page mode: Fit-Page strictly fits viewport without causing vertical scrollbar
-    if (zoomMode === "fit-page") {
-      const w = Math.min(maxAvailableWidth, maxAvailableHeight / ratio1);
-      return {
-        computedPage1Width: Math.round(w),
-        computedPage1Height: Math.round(w * ratio1),
-        computedPage2Width: Math.round(w),
-        computedPage2Height: Math.round(w * ratio1),
-      };
-    }
-
-    if (zoomMode === "fit-width") {
-      const w = maxAvailableWidth;
-      return {
-        computedPage1Width: Math.round(w),
-        computedPage1Height: Math.round(w * ratio1),
-        computedPage2Width: Math.round(w),
-        computedPage2Height: Math.round(w * ratio1),
-      };
-    }
-
-    // Custom zoom: Scale relative to the ideal fit-page baseline
-    const baselineFitPageWidth = Math.min(
-      maxAvailableWidth,
-      maxAvailableHeight / ratio1,
-    );
-    const w = baselineFitPageWidth * (zoom / 100);
-    return {
-      computedPage1Width: Math.round(w),
-      computedPage1Height: Math.round(w * ratio1),
-      computedPage2Width: Math.round(w),
-      computedPage2Height: Math.round(w * ratio1),
+    return () => {
+      cancelled = true;
     };
-  }, [
-    containerWidth,
-    containerHeight,
-    zoomMode,
-    zoom,
-    rotation,
-    twoPageView,
-    numPages,
-    aspectRatioMap,
-    safeCurrentPage,
-    secondPage,
-  ]);
+  }, [pdfDoc]);
 
-  // Handle PDF Page load success to calibrate aspect ratio per page
-  const handlePage1LoadSuccess = useCallback(
-    (pageData: any) => {
-      const { width, height } = pageData;
-      if (width > 0 && height > 0) {
-        const ratio = height / width;
-        setAspectRatioMap((prev) => {
-          if (prev[safeCurrentPage] === ratio) return prev;
-          return { ...prev, [safeCurrentPage]: ratio };
-        });
-      }
+  const handleLoadSuccess = useCallback(
+    (pdf: any) => {
+      setPdfDoc(pdf);
+      onLoadSuccess(pdf);
     },
-    [safeCurrentPage],
+    [onLoadSuccess],
   );
 
-  const handlePage2LoadSuccess = useCallback(
-    (pageData: any) => {
-      const { width, height } = pageData;
-      if (width > 0 && height > 0 && secondPage) {
-        const ratio = height / width;
-        setAspectRatioMap((prev) => {
-          if (prev[secondPage] === ratio) return prev;
-          return { ...prev, [secondPage]: ratio };
-        });
-      }
+  const handlePageRatio = useCallback((pageNumber: number, ratio: number) => {
+    setRatios((prev) => (Math.abs((prev[pageNumber] ?? 0) - ratio) < 0.005 ? prev : { ...prev, [pageNumber]: ratio }));
+  }, []);
+
+  // ── Geometry ─────────────────────────────────────────────────────────────
+  const columns = twoPageView && size.width >= TWO_UP_MIN_WIDTH ? 2 : 1;
+  const sideways = rotation === 90 || rotation === 270;
+
+  const ratioOf = useCallback(
+    (page: number) => {
+      const raw = ratios[page] ?? ratios[1] ?? DEFAULT_RATIO;
+      return sideways ? 1 / raw : raw;
     },
-    [secondPage],
+    [ratios, sideways],
   );
 
-  // Discrete Page navigation on mouse wheel when page is fully visible
-  const handleWheel = useCallback(
-    (e: React.WheelEvent<HTMLDivElement>) => {
-      const el = containerRef.current;
-      if (!el) return;
+  const pageWidth = useMemo(() => {
+    if (size.width === 0) return 0;
+    const padX = size.width < 640 ? 16 : 48;
+    const available = Math.max(240, size.width - padX);
+    // Past this width a line of text is too long to read comfortably, even on a very wide screen.
+    const fitWidth = Math.min(MAX_PAGE_WIDTH, (available - (columns - 1) * COL_GAP) / columns);
+    if (zoomMode === "fit-width") return Math.round(fitWidth);
+    if (zoomMode === "fit-page") {
+      const availableHeight = Math.max(280, size.height - PAD_TOP * 2);
+      return Math.round(Math.min(fitWidth, availableHeight / ratioOf(1)));
+    }
+    return Math.round(fitWidth * (zoom / 100));
+  }, [size.width, size.height, columns, zoomMode, zoom, ratioOf]);
 
-      const isScrollable = el.scrollHeight > el.clientHeight + 10;
-      if (isScrollable) return;
+  const { rows, totalHeight, rowWidth } = useMemo(() => {
+    const built: Row[] = [];
+    let top = PAD_TOP;
+    for (let first = 1; first <= totalPages; first += columns) {
+      const pages = Array.from({ length: Math.min(columns, totalPages - first + 1) }, (_, i) => first + i);
+      const height = Math.max(...pages.map((p) => Math.round(pageWidth * ratioOf(p))));
+      built.push({ index: built.length, pages, top, height });
+      top += height + ROW_GAP;
+    }
+    return {
+      rows: built,
+      totalHeight: top - ROW_GAP + PAD_BOTTOM,
+      rowWidth: columns * pageWidth + (columns - 1) * COL_GAP,
+    };
+  }, [totalPages, columns, pageWidth, ratioOf]);
 
-      const now = Date.now();
-      if (now - lastWheelTimeRef.current < 400) return;
-
-      if (e.deltaY > 50) {
-        // Scrolling down -> Next page
-        if (twoPageView) {
-          if (safeCurrentPage + 1 < numPages) {
-            onPageChange(Math.min(numPages, safeCurrentPage + 2));
-            lastWheelTimeRef.current = now;
-          }
-        } else {
-          if (safeCurrentPage < numPages) {
-            onPageChange(Math.min(numPages, safeCurrentPage + 1));
-            lastWheelTimeRef.current = now;
-          }
-        }
-      } else if (e.deltaY < -50) {
-        // Scrolling up -> Prev page
-        if (safeCurrentPage > 1) {
-          if (twoPageView) {
-            onPageChange(Math.max(1, safeCurrentPage - 2));
-            lastWheelTimeRef.current = now;
-          } else {
-            onPageChange(Math.max(1, safeCurrentPage - 1));
-            lastWheelTimeRef.current = now;
-          }
-        }
-      }
-    },
-    [twoPageView, safeCurrentPage, numPages, onPageChange],
+  const rowOfPage = useCallback(
+    (page: number) => Math.min(rows.length - 1, Math.max(0, Math.floor((page - 1) / columns))),
+    [rows.length, columns],
   );
 
-  // Text selection handler: extracts text and normalizes coordinates to 0..1
+  // ── Scrolling helpers ────────────────────────────────────────────────────
+  const setScrollSilently = useCallback((top: number) => {
+    const el = scrollRef.current;
+    if (!el) return;
+    suppressEmitRef.current = true;
+    if (suppressTimerRef.current) clearTimeout(suppressTimerRef.current);
+    el.scrollTop = Math.max(0, top);
+    suppressTimerRef.current = setTimeout(() => {
+      suppressEmitRef.current = false;
+    }, 140);
+  }, []);
+
+  const scrollToPage = useCallback(
+    (page: number) => {
+      if (rows.length === 0) return;
+      const row = rows[rowOfPage(page)];
+      anchorRef.current = { page: row.pages[0], frac: 0 };
+      setScrollSilently(row.top - PAD_TOP / 2);
+    },
+    [rows, rowOfPage, setScrollSilently],
+  );
+
+  // Keep the reader's place when the layout changes under them (zoom, resize, rotation, late measurements).
+  useLayoutEffect(() => {
+    if (!layoutReady || rows.length === 0 || pageWidth === 0) return;
+
+    if (!initialScrollDoneRef.current) {
+      initialScrollDoneRef.current = true;
+      lastPageRef.current = currentPage;
+      scrollToPage(currentPage);
+      return;
+    }
+
+    const { page, frac } = anchorRef.current;
+    const row = rows[rowOfPage(page)];
+    setScrollSilently(row.top + frac * row.height);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only a layout change should re-anchor
+  }, [rows, layoutReady]);
+
+  // Navigation that came from outside (outline, search, heat strip, typed page, keyboard).
+  useEffect(() => {
+    if (!layoutReady || !initialScrollDoneRef.current) return;
+    if (currentPage === lastPageRef.current) return;
+    lastPageRef.current = currentPage;
+    scrollToPage(currentPage);
+  }, [currentPage, layoutReady, scrollToPage]);
+
+  // The page being read follows the scroll position.
+  const handleScroll = useCallback(() => {
+    if (frameRef.current) return;
+    frameRef.current = requestAnimationFrame(() => {
+      frameRef.current = 0;
+      const el = scrollRef.current;
+      if (!el || rows.length === 0) return;
+
+      setScrollTop(el.scrollTop);
+      if (selectedRange) onTextSelection(null);
+
+      const topRow = rows[findRow(rows, el.scrollTop)];
+      anchorRef.current = {
+        page: topRow.pages[0],
+        frac: Math.min(1, Math.max(0, (el.scrollTop - topRow.top) / Math.max(1, topRow.height))),
+      };
+
+      if (suppressEmitRef.current) return;
+
+      const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 4;
+      const readingRow = atBottom
+        ? rows[rows.length - 1]
+        : rows[findRow(rows, el.scrollTop + el.clientHeight * READING_LINE)];
+      const page = readingRow.pages[0];
+      if (page !== lastPageRef.current) {
+        lastPageRef.current = page;
+        onPageChange(page);
+      }
+    });
+  }, [rows, selectedRange, onTextSelection, onPageChange]);
+
+  useEffect(
+    () => () => {
+      if (frameRef.current) cancelAnimationFrame(frameRef.current);
+      if (suppressTimerRef.current) clearTimeout(suppressTimerRef.current);
+    },
+    [],
+  );
+
+  // ── Which rows are mounted ───────────────────────────────────────────────
+  const { firstVisible, lastVisible } = useMemo(() => {
+    if (rows.length === 0) return { firstVisible: 0, lastVisible: -1 };
+    const overscan = size.height * OVERSCAN_VIEWPORTS;
+    return {
+      firstVisible: findRow(rows, Math.max(0, scrollTop - overscan)),
+      lastVisible: findRow(rows, scrollTop + size.height + overscan),
+    };
+  }, [rows, scrollTop, size.height]);
+
+  // ── Search highlighting inside mounted pages ─────────────────────────────
+  const customTextRenderer = useMemo(() => {
+    const trimmed = searchQuery?.trim();
+    if (!trimmed) return undefined;
+    const escaped = trimmed.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const regex = new RegExp(`(${escaped})`, "gi");
+    return ({ str }: { str: string }) =>
+      str.replace(
+        regex,
+        `<mark class="bg-amber-300 dark:bg-amber-400 text-slate-950 font-bold rounded-xs px-0.5 ring-2 ring-amber-500/80 shadow-xs">$&</mark>`,
+      );
+  }, [searchQuery]);
+
+  // ── Text selection → normalised rects on the page it started in ──────────
   const handleMouseUp = useCallback(() => {
     const selection = window.getSelection();
-    if (!selection || selection.isCollapsed || !selection.rangeCount) {
-      if (selectedRange) {
-        onTextSelection(null);
-      }
-      return;
-    }
-
-    const selectedText = selection.toString().trim();
-    if (!selectedText || selectedText.length === 0) {
-      if (selectedRange) {
-        onTextSelection(null);
-      }
-      return;
-    }
-
-    const range = selection.getRangeAt(0);
-    const clientRects = Array.from(range.getClientRects());
-    if (clientRects.length === 0) {
-      if (selectedRange) {
-        onTextSelection(null);
-      }
-      return;
-    }
-
-    // Determine which page the selection is on
-    let targetPageNum = safeCurrentPage;
-    let pageWrapper = page1WrapperRef.current;
-
-    const commonAncestor = range.commonAncestorContainer;
-    const commonElement =
-      commonAncestor.nodeType === Node.ELEMENT_NODE
-        ? (commonAncestor as Element)
-        : commonAncestor.parentElement;
-
-    if (
-      page2WrapperRef.current &&
-      secondPage &&
-      commonElement &&
-      page2WrapperRef.current.contains(commonElement)
-    ) {
-      targetPageNum = secondPage;
-      pageWrapper = page2WrapperRef.current;
-    }
-
-    if (!pageWrapper) return;
-
-    const pageRect = pageWrapper.getBoundingClientRect();
-    if (pageRect.width === 0 || pageRect.height === 0) return;
-
-    // Calculate viewport-normalized coordinates for each rect
-    const normalizedRects: NormalizedRect[] = clientRects
-      .map((r) => {
-        const x = (r.left - pageRect.left) / pageRect.width;
-        const y = (r.top - pageRect.top) / pageRect.height;
-        const w = r.width / pageRect.width;
-        const h = r.height / pageRect.height;
-
-        return {
-          x: Math.max(0, Math.min(1, x)),
-          y: Math.max(0, Math.min(1, y)),
-          w: Math.max(0, Math.min(1, w)),
-          h: Math.max(0, Math.min(1, h)),
-          page: targetPageNum,
-        };
-      })
-      .filter((r) => r.w > 0.005 && r.h > 0.005);
-
-    if (normalizedRects.length === 0) {
+    const clear = () => {
       if (selectedRange) onTextSelection(null);
-      return;
+    };
+    if (!selection || selection.isCollapsed || !selection.rangeCount) return clear();
+
+    const toElement = (node: Node | null) =>
+      node instanceof Element ? node : (node?.parentElement ?? null);
+    const fullRange = selection.getRangeAt(0);
+    // The range's start is the top of the selection whichever way the user dragged.
+    const pageEl =
+      toElement(fullRange.startContainer)?.closest<HTMLElement>("[data-page-number]") ??
+      toElement(fullRange.endContainer)?.closest<HTMLElement>("[data-page-number]");
+    if (!pageEl) return clear();
+
+    const pageNumber = Number(pageEl.dataset.pageNumber);
+    const pageRect = pageEl.getBoundingClientRect();
+    if (!pageNumber || pageRect.width === 0 || pageRect.height === 0) return clear();
+
+    // A drag that runs on into the next page is trimmed to the page it started on, so the saved
+    // highlight, key point or AI question never carries text from a different page.
+    const range = fullRange.cloneRange();
+    const textLayer = pageEl.querySelector(".react-pdf__Page__textContent");
+    if (textLayer) {
+      const bounds = document.createRange();
+      bounds.selectNodeContents(textLayer);
+      if (range.compareBoundaryPoints(Range.END_TO_END, bounds) > 0) {
+        range.setEnd(bounds.endContainer, bounds.endOffset);
+      }
     }
 
-    // Trigger parent callback with normalized selection info
-    const boundingRect = range.getBoundingClientRect();
+    const text = range.toString().trim();
+    if (!text) return clear();
+
+    const normalized: NormalizedRect[] = Array.from(range.getClientRects())
+      // a selection that runs on into the next page must not leak its lines into this one
+      .filter((r) => {
+        const cx = r.left + r.width / 2;
+        const cy = r.top + r.height / 2;
+        return cx >= pageRect.left && cx <= pageRect.right && cy >= pageRect.top && cy <= pageRect.bottom;
+      })
+      .map((r) => ({
+        x: Math.max(0, Math.min(1, (r.left - pageRect.left) / pageRect.width)),
+        y: Math.max(0, Math.min(1, (r.top - pageRect.top) / pageRect.height)),
+        w: Math.max(0, Math.min(1, r.width / pageRect.width)),
+        h: Math.max(0, Math.min(1, r.height / pageRect.height)),
+        page: pageNumber,
+      }))
+      .filter((r) => r.w > 0.005 && r.h > 0.005);
+    if (normalized.length === 0) return clear();
+
+    const bounds = range.getBoundingClientRect();
     onTextSelection({
-      text: selectedText,
-      pageNumber: targetPageNum,
-      rects: normalizedRects,
-      boundingRect: {
-        top: boundingRect.top,
-        left: boundingRect.left,
-        width: boundingRect.width,
-        height: boundingRect.height,
-      },
+      text,
+      pageNumber,
+      rects: normalized,
+      boundingRect: { top: bounds.top, left: bounds.left, width: bounds.width, height: bounds.height },
     });
-  }, [safeCurrentPage, secondPage, selectedRange, onTextSelection]);
+  }, [selectedRange, onTextSelection]);
 
-  // Auto-dismiss active text selection on outside click, window resize, or orientation change
+  // Dismiss the selection toolbar on outside click or resize.
   useEffect(() => {
-    const handleResizeOrRotate = () => {
-      if (selectedRange) {
-        onTextSelection(null);
-      }
+    const dismiss = () => {
+      if (selectedRange) onTextSelection(null);
     };
-
-    const handleDocumentMouseDown = (e: MouseEvent) => {
+    const onMouseDown = (e: MouseEvent) => {
       const target = e.target as HTMLElement | null;
       if (!target) return;
-      // If clicking inside selection toolbar or any part of the text selection layer, don't dismiss
       if (
         target.closest(".selection-toolbar") ||
         target.closest(".react-pdf__Page__textContent") ||
@@ -413,58 +507,38 @@ export function PdfCanvas({
       ) {
         return;
       }
-      if (selectedRange) {
-        onTextSelection(null);
-      }
+      dismiss();
     };
-
-    window.addEventListener("resize", handleResizeOrRotate, { passive: true });
-    window.addEventListener("orientationchange", handleResizeOrRotate, {
-      passive: true,
-    });
-    document.addEventListener("mousedown", handleDocumentMouseDown);
-
+    window.addEventListener("resize", dismiss, { passive: true });
+    window.addEventListener("orientationchange", dismiss, { passive: true });
+    document.addEventListener("mousedown", onMouseDown);
     return () => {
-      window.removeEventListener("resize", handleResizeOrRotate);
-      window.removeEventListener("orientationchange", handleResizeOrRotate);
-      document.removeEventListener("mousedown", handleDocumentMouseDown);
+      window.removeEventListener("resize", dismiss);
+      window.removeEventListener("orientationchange", dismiss);
+      document.removeEventListener("mousedown", onMouseDown);
     };
   }, [selectedRange, onTextSelection]);
 
-  const isSpotlightOnCurrentSpread = Boolean(
-    focusSpotlight &&
-      (focusSpotlight.page === safeCurrentPage ||
-        (secondPage && focusSpotlight.page === secondPage)),
-  );
+  const spotlightInView =
+    !!focusSpotlight &&
+    lastVisible >= firstVisible &&
+    focusSpotlight.page >= rows[firstVisible].pages[0] &&
+    focusSpotlight.page <= rows[lastVisible].pages[rows[lastVisible].pages.length - 1];
+
+  const innerWidth = Math.max(rowWidth + (size.width < 640 ? 16 : 48), size.width);
 
   return (
-    <div
-      ref={containerRef}
-      onMouseUp={handleMouseUp}
-      onWheel={handleWheel}
-      onScroll={() => {
-        if (selectedRange) {
-          onTextSelection(null);
-        }
-      }}
-      className="relative w-full h-full overflow-auto flex items-center justify-center p-2 sm:p-4 bg-muted/30 select-text"
-      tabIndex={0}
-    >
-      {/* Floating Focus Spotlight Banner */}
-      {isSpotlightOnCurrentSpread && focusSpotlight && (
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2.5 px-4 py-2 rounded-xl bg-rose-600/95 text-white shadow-2xl backdrop-blur-md animate-in fade-in zoom-in-95 duration-200 border border-rose-400 max-w-lg">
-          <Flame className="size-4 text-amber-200 shrink-0 animate-bounce" />
-          <div className="flex flex-col min-w-0">
-            <span className="text-xs font-bold leading-tight truncate">
-              Focus Priority: {focusSpotlight.title}
-            </span>
+    <div className="relative h-full w-full">
+      {spotlightInView && focusSpotlight && (
+        <div className="absolute top-4 left-1/2 z-30 flex max-w-lg -translate-x-1/2 items-center gap-2.5 rounded-xl border border-rose-400 bg-rose-600/95 px-4 py-2 text-white shadow-2xl backdrop-blur-md animate-in fade-in zoom-in-95 duration-200">
+          <Flame className="size-4 shrink-0 animate-bounce text-amber-200" />
+          <div className="flex min-w-0 flex-col">
+            <span className="truncate text-xs font-bold leading-tight">Focus Priority: {focusSpotlight.title}</span>
             {focusSpotlight.reason && (
-              <span className="text-[11px] text-rose-100/90 leading-tight line-clamp-1">
-                {focusSpotlight.reason}
-              </span>
+              <span className="line-clamp-1 text-[11px] leading-tight text-rose-100/90">{focusSpotlight.reason}</span>
             )}
             {focusSpotlight.quote && (
-              <span className="text-[10px] text-amber-100 font-serif italic line-clamp-1">
+              <span className="line-clamp-1 font-serif text-[10px] italic text-amber-100">
                 &ldquo;{focusSpotlight.quote}&rdquo;
               </span>
             )}
@@ -473,7 +547,8 @@ export function PdfCanvas({
             <Button
               variant="ghost"
               size="icon"
-              className="size-5 rounded text-white/80 hover:text-white hover:bg-rose-500 shrink-0 ml-1"
+              aria-label="Dismiss focus hint"
+              className="ml-1 size-5 shrink-0 rounded text-white/80 hover:bg-rose-500 hover:text-white"
               onClick={onDismissFocusSpotlight}
             >
               <X className="size-3" />
@@ -482,136 +557,92 @@ export function PdfCanvas({
         </div>
       )}
 
-      {/* Floating Selection Toolbar when text is selected */}
       {selectedRange && (
         <SelectionToolbar
           key={`${selectedRange.pageNumber}-${selectedRange.text}-${selectedRange.boundingRect.left}-${selectedRange.boundingRect.top}`}
           selection={selectedRange}
           onHighlight={(color, noteText) => onHighlight(color, noteText)}
-          onAddKeyPoint={(title, quote, pageNum) =>
-            onAddKeyPoint(title, quote, pageNum)
-          }
+          onAddKeyPoint={(title, quote, pageNum) => onAddKeyPoint(title, quote, pageNum)}
           onAskAi={(text, pageNum) => onAskAi(text, pageNum)}
           onClose={() => onTextSelection(null)}
         />
       )}
 
-      <Document
-        file={fileUrl}
-        onLoadSuccess={onLoadSuccess}
-        onLoadError={onLoadError}
-        loading={
-          <div className="flex flex-col items-center justify-center min-h-[500px] w-full gap-4">
-            <Skeleton className="w-[min(650px,90%)] h-[750px] rounded-xl shadow-lg border border-border/40" />
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <Loader2 className="size-4 animate-spin text-primary" />
-              <span>Rendering PDF pages…</span>
-            </div>
-          </div>
-        }
-        error={
-          <div className="flex flex-col items-center justify-center min-h-[400px] p-8 text-center bg-card rounded-2xl border border-destructive/20 shadow-sm max-w-md my-auto">
-            <AlertTriangle className="size-10 text-destructive mb-3" />
-            <h3 className="text-sm font-semibold text-foreground mb-1">
-              Failed to display PDF
-            </h3>
-            <p className="text-xs text-muted-foreground mb-4">
-              The PDF could not be rendered. It may be corrupt or encrypted.
-            </p>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={onRetry ? onRetry : () => window.location.reload()}
-              className="text-xs"
-            >
-              Retry
-            </Button>
-          </div>
-        }
-        className="flex items-center justify-center gap-6 m-auto py-2"
+      <div
+        ref={scrollRef}
+        onScroll={handleScroll}
+        onMouseUp={handleMouseUp}
+        tabIndex={0}
+        role="document"
+        aria-label="Document pages"
+        className="h-full w-full select-text overflow-auto bg-muted/30 outline-none"
       >
-        {/* Page 1 (Current Page) */}
-        <div
-          ref={page1WrapperRef}
-          className={cn(
-            "paper-sheet relative rounded-md shadow-2xl border border-border/50 bg-card overflow-hidden transition-all duration-150 shrink-0",
-            "ring-1 ring-black/5 dark:ring-white/5",
-            isSpotlightOnCurrentSpread &&
-              focusSpotlight?.page === safeCurrentPage &&
-              "ring-4 ring-rose-500/80 shadow-rose-500/20",
-          )}
-          style={{ width: computedPage1Width, height: computedPage1Height }}
+        <Document
+          file={fileUrl}
+          onLoadSuccess={handleLoadSuccess}
+          onLoadError={onLoadError}
+          loading={
+            <div className="flex min-h-[500px] w-full flex-col items-center justify-center gap-4">
+              <Skeleton className="h-[750px] w-[min(650px,90%)] rounded-xl border border-border/40 shadow-lg" />
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Loader2 className="size-4 animate-spin text-primary" />
+                <span>Opening document…</span>
+              </div>
+            </div>
+          }
+          error={
+            <div className="mx-auto my-16 flex min-h-[400px] max-w-md flex-col items-center justify-center rounded-2xl border border-destructive/20 bg-card p-8 text-center shadow-sm">
+              <AlertTriangle className="mb-3 size-10 text-destructive" />
+              <h3 className="mb-1 text-sm font-semibold text-foreground">Failed to display PDF</h3>
+              <p className="mb-4 text-xs text-muted-foreground">
+                The PDF could not be rendered. It may be corrupt or encrypted.
+              </p>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={onRetry ? onRetry : () => window.location.reload()}
+                className="text-xs"
+              >
+                Retry
+              </Button>
+            </div>
+          }
+          className="block"
         >
-          {/* Highlight Layer for Page 1 */}
-          <HighlightLayer
-            pageNumber={safeCurrentPage}
-            annotations={annotations}
-            pageWidth={computedPage1Width}
-            pageHeight={computedPage1Height}
-            onUpdateAnnotation={onUpdateAnnotation}
-            onDeleteAnnotation={onDeleteAnnotation}
-          />
-
-          <Page
-            pageNumber={safeCurrentPage}
-            width={computedPage1Width}
-            rotate={rotation}
-            renderTextLayer={true}
-            renderAnnotationLayer={true}
-            customTextRenderer={customTextRenderer}
-            onLoadSuccess={handlePage1LoadSuccess}
-            className="pdf-page-render max-w-full"
-            loading={
-              <Skeleton
-                className="w-full rounded-md"
-                style={{ height: computedPage1Height }}
-              />
-            }
-          />
-        </div>
-
-        {/* Page 2 (Two-page spread on wide screens) */}
-        {secondPage && (
-          <div
-            ref={page2WrapperRef}
-            className={cn(
-              "paper-sheet relative rounded-md shadow-2xl border border-border/50 bg-card overflow-hidden transition-all duration-150 shrink-0 hidden md:block",
-              "ring-1 ring-black/5 dark:ring-white/5",
-              isSpotlightOnCurrentSpread &&
-                focusSpotlight?.page === secondPage &&
-                "ring-4 ring-rose-500/80 shadow-rose-500/20",
-            )}
-            style={{ width: computedPage2Width, height: computedPage2Height }}
-          >
-            {/* Highlight Layer for Page 2 */}
-            <HighlightLayer
-              pageNumber={secondPage}
-              annotations={annotations}
-              pageWidth={computedPage2Width}
-              pageHeight={computedPage2Height}
-              onUpdateAnnotation={onUpdateAnnotation}
-              onDeleteAnnotation={onDeleteAnnotation}
-            />
-
-            <Page
-              pageNumber={secondPage}
-              width={computedPage2Width}
-              rotate={rotation}
-              renderTextLayer={true}
-              renderAnnotationLayer={true}
-              customTextRenderer={customTextRenderer}
-              onLoadSuccess={handlePage2LoadSuccess}
-              className="pdf-page-render max-w-full"
-              loading={
-                <Skeleton
-                  className="w-full rounded-md"
-                  style={{ height: computedPage2Height }}
-                />
-              }
-            />
-          </div>
-        )}
-      </Document>
+          {layoutReady && pageWidth > 0 ? (
+            <div className="relative" style={{ height: totalHeight, width: innerWidth }}>
+              {rows.slice(firstVisible, lastVisible + 1).map((row) => (
+                <div
+                  key={row.index}
+                  className="absolute left-0 right-0 flex justify-center"
+                  style={{ top: row.top, height: row.height, gap: COL_GAP }}
+                >
+                  {row.pages.map((pageNumber) => (
+                    <PdfPageView
+                      key={pageNumber}
+                      pageNumber={pageNumber}
+                      width={pageWidth}
+                      height={Math.round(pageWidth * ratioOf(pageNumber))}
+                      rotation={rotation}
+                      annotations={annotations}
+                      customTextRenderer={customTextRenderer}
+                      isSpotlight={focusSpotlight?.page === pageNumber}
+                      onUpdateAnnotation={onUpdateAnnotation}
+                      onDeleteAnnotation={onDeleteAnnotation}
+                      onRatio={handlePageRatio}
+                    />
+                  ))}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="flex min-h-[400px] w-full items-center justify-center gap-2 text-xs text-muted-foreground">
+              <Loader2 className="size-4 animate-spin text-primary" />
+              <span>Preparing pages…</span>
+            </div>
+          )}
+        </Document>
+      </div>
     </div>
   );
 }

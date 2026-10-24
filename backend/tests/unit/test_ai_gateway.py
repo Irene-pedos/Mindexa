@@ -121,3 +121,36 @@ async def test_gateway_embedding_fallback_success():
     assert result.provider == "openai"
     assert len(result.embeddings[0]) == 1536
 
+
+@pytest.mark.asyncio
+async def test_gateway_oversized_request_fails_over_without_shrinking_max_tokens():
+    """A too-large request must not be silently truncated or retried at a smaller size."""
+    db_mock = MagicMock()
+    db_mock.add = MagicMock()
+    db_mock.flush = AsyncMock()
+    db_mock.commit = AsyncMock()
+
+    provider1 = MagicMock(spec=BaseProvider)
+    provider1.name = "groq"
+    provider1.default_model = "model1"
+    provider1.complete = AsyncMock(side_effect=RateLimitError("Request too large for TPM", retry_after=0.01))
+
+    expected_response = AICompletionResponse(
+        content="ok", provider="gemini", model="model2", finish_reason="stop",
+        prompt_tokens=1, completion_tokens=1, total_tokens=2, raw={},
+    )
+    provider2 = MagicMock(spec=BaseProvider)
+    provider2.name = "gemini"
+    provider2.default_model = "model2"
+    provider2.complete = AsyncMock(return_value=expected_response)
+
+    gateway = AIGateway(db=db_mock, chat_providers=[provider1, provider2], embedding_providers=[])
+    request = AICompletionRequest(
+        messages=[AIMessage(role="user", content="hi")], temperature=0.7, max_tokens=4000
+    )
+
+    result = await gateway.complete(request, action_type="QUESTION_GENERATION", actor_id=None, actor_role=None)
+
+    assert result == expected_response
+    provider1.complete.assert_called_once()  # no retry loop for an oversized request
+    assert request.max_tokens == 4000

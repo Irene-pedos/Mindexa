@@ -83,8 +83,12 @@ class AttemptQuestionResponse(BaseModel):
     image_url: Optional[str] = Field(None, alias="imageUrl")
     marks: int
     order_index: int
+    # Set by the lecturer; a required question blocks early submission until answered
+    is_required: bool = False
     assessment_section_id: Optional[uuid.UUID] = None
     section_title: Optional[str] = None
+    # "Answer N of M" sections: N, or None when every question in the section counts
+    section_questions_to_answer: Optional[int] = None
     options: Optional[List[AttemptQuestionOption]] = None
     # MATCHING only: right-hand values, shuffled and detached from their options
     # so the correct pairing is not part of the payload.
@@ -127,6 +131,8 @@ class AttemptDetailResponse(BaseModel):
     
     # Nested data for the UI
     questions: List[AttemptQuestionResponse] = []
+    # Questions the student has chosen in "answer N of M" sections
+    selected_question_ids: List[uuid.UUID] = []
     group_members: Optional[List[Dict[str, Any]]] = None
 
 

@@ -22,6 +22,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core import links as frontend_links
 from app.core.constants import Duty
 from app.core.exceptions import (
     BadRequestError,
@@ -225,7 +226,7 @@ class SealService:
             body=f"Assessment '{assessment.title}' has been officially sealed by the exam office.",
             reference_id=assessment.id,
             reference_type="assessment",
-            action_url=f"/lecturer/assessments/{assessment.id}",
+            action_url=frontend_links.lecturer_assessment(assessment.id),
         )
 
         # Audit

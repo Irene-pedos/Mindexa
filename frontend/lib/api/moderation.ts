@@ -13,21 +13,53 @@ export interface ModeratorQueueItem {
   claimed_at?: string | null;
 }
 
+/** Mirrors backend ModerationCommentCategory. */
+export type ModerationCommentCategory =
+  | "MARKS"
+  | "DISTRIBUTION"
+  | "WORDING"
+  | "STRUCTURE"
+  | "OTHER";
+
+export const COMMENT_CATEGORY_LABELS: Record<ModerationCommentCategory, string> = {
+  MARKS: "Marks",
+  DISTRIBUTION: "Mark distribution",
+  WORDING: "Wording / clarity",
+  STRUCTURE: "Structure",
+  OTHER: "Other",
+};
+
 export interface ModerationComment {
   id: string;
-  review_id: string;
+  review_id?: string;
   target_type: "ASSESSMENT" | "SECTION" | "QUESTION";
   target_id?: string | null;
-  category: "GENERAL" | "SYLLABUS_ALIGNMENT" | "DIFFICULTY" | "CLARITY" | "MARKING_SCHEME";
+  category: ModerationCommentCategory;
   comment: string;
   resolved: boolean;
   resolved_at?: string | null;
-  created_at: string;
+  created_at?: string | null;
+}
+
+/**
+ * Backend ChecklistSeverity. BLOCKING = a required check (stops the author submitting, and the
+ * moderator must waive it with a reason to approve); WARNING = advisory; INFO = informational.
+ * Which of the institution's rules are required is set by an administrator.
+ */
+export type ChecklistSeverity = "BLOCKING" | "WARNING" | "INFO";
+
+/** Set when a moderator approved although required checks failed. */
+export interface ComplianceOverride {
+  codes: string[];
+  messages?: string[];
+  reason: string;
+  by_id?: string;
+  at?: string;
 }
 
 export interface ChecklistItem {
   code: string;
-  severity: string;
+  severity: ChecklistSeverity | string;
   passed: boolean;
   message: string;
   details?: Record<string, any>;
@@ -43,6 +75,8 @@ export interface ModerationOverview {
   assessment_id: string;
   status: string;
   latest_version_no: number;
+  /** The checks evaluated now under the institution's current rules (open rounds only). */
+  current_checklist?: ChecklistResult | null;
   rounds: Array<{
     id: string;
     round_no: number;
@@ -52,11 +86,13 @@ export interface ModerationOverview {
     started_at: string;
     claimed_at?: string | null;
     decided_at?: string | null;
+    /** Snapshot taken when the paper was submitted. */
     checklist_result?: {
       items?: ChecklistItem[];
       has_blocking_failures?: boolean;
       warnings_count?: number;
     } | null;
+    compliance_override?: ComplianceOverride | null;
     comments?: ModerationComment[];
   }>;
 }
@@ -73,7 +109,7 @@ export const moderationApi = {
   addComment: (
     reviewId: string,
     data: {
-      category: "GENERAL" | "SYLLABUS_ALIGNMENT" | "DIFFICULTY" | "CLARITY" | "MARKING_SCHEME";
+      category: ModerationCommentCategory;
       comment: string;
       target_type?: "ASSESSMENT" | "SECTION" | "QUESTION";
       target_id?: string;
@@ -95,16 +131,22 @@ export const moderationApi = {
       body: JSON.stringify({ decision_note: decisionNote }),
     }),
 
+  /**
+   * Approve a round. If required checks failed, pass `overrideReason` to waive them; the server
+   * records the waiver and tells the author and the exam office.
+   */
   approveReview: (
     reviewId: string,
     decisionNote?: string,
-    acknowledgeWarnings: boolean = true
+    options: { overrideReason?: string; acknowledgeWarnings?: boolean } = {},
   ) =>
     apiClient(`/moderator/reviews/${reviewId}/approve`, {
       method: "POST",
       body: JSON.stringify({
         decision_note: decisionNote || null,
-        acknowledge_warnings: acknowledgeWarnings,
+        acknowledge_warnings: options.acknowledgeWarnings ?? true,
+        override_failed_checks: !!options.overrideReason,
+        override_reason: options.overrideReason || null,
       }),
     }),
 

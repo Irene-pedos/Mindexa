@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlmodel import select
 
+from app.core import links as frontend_links
 from app.core.constants import UserRole
 from app.core.exceptions import AuthorizationError, ConflictError, NotFoundError
 from app.db.enums import AttemptStatus, ResultLetterGrade
@@ -83,7 +84,7 @@ class ResultService:
         from app.workers.tasks import send_email_notification
 
         target_id = result.attempt_id or result.id
-        action_url = f"/student/results/{target_id}"
+        action_url = frontend_links.student_result(target_id)
         notification_repo = NotificationRepository(self.db)
         await notification_repo.create(
             recipient_id=result.student_id,
@@ -893,6 +894,7 @@ class ResultService:
         if assessment:
             resp.assessment_title = assessment.title
             resp.academic_year = assessment.academic_year
+            resp.course_id = assessment.course_id
             resp.course_code = assessment.course_code
             resp.course_name = assessment.course_name
             resp.duration_minutes = assessment.duration_minutes
@@ -1202,6 +1204,7 @@ class ResultService:
                 
             q = response.question
             bd.question_text = q.content
+            bd.topic_tag = q.topic_tag
             bd.image_url = q.image_url
             bd.case_study_context = q.case_study_context
             bd.question_table_context = q.question_table_context

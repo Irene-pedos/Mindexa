@@ -68,6 +68,7 @@ import { integrityApi } from "@/lib/api/integrity";
 import { assessmentApi } from "@/lib/api/assessment";
 import { toast } from "sonner";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
 import { AIIntegrityExplainer } from "@/components/mindexa/integrity/ai-explainer";
@@ -99,20 +100,36 @@ export default function LecturerLiveSupervision() {
   // Search filter inside tabs
   const [candidateSearch, setCandidateSearch] = useState<string>("");
 
+  // Deep link: /lecturer/supervision?assessment=<id> (assessments list, integrity alerts)
+  const requestedAssessmentId = useSearchParams()?.get("assessment") ?? null;
+
   const fetchAssessments = useCallback(async () => {
     try {
       const response = await assessmentApi.getAssessments();
-      const data = response.items || response;
-      setAssessments(data);
-      if (data.length > 0 && !activeAssessmentId) {
-        setActiveAssessmentId(data[0].id);
+      const data: any[] = response.items || response;
+      let list = data;
+      // The requested assessment may be beyond the first page of results
+      if (requestedAssessmentId && !data.some((a) => a.id === requestedAssessmentId)) {
+        try {
+          const requested = await assessmentApi.getAssessmentById(requestedAssessmentId);
+          list = [requested, ...data];
+        } catch {
+          // not accessible: fall back to the default selection
+        }
+      }
+      setAssessments(list);
+      if (list.length > 0 && !activeAssessmentId) {
+        const preferred = requestedAssessmentId
+          ? list.find((a) => a.id === requestedAssessmentId)
+          : undefined;
+        setActiveAssessmentId((preferred ?? list[0]).id);
       }
     } catch (e: any) {
       toast.error(e.message || "Failed to load assessments");
     } finally {
       setLoading(false);
     }
-  }, [activeAssessmentId]);
+  }, [activeAssessmentId, requestedAssessmentId]);
 
   const fetchData = useCallback(async () => {
     if (!activeAssessmentId) return;

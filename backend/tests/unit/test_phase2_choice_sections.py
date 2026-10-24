@@ -837,7 +837,7 @@ async def test_get_marks_summary_endpoint(
 
     # Also check the /lecturer/assessments/{id}/marks-summary route
     res_alt = await client.get(
-        f"/lecturer/assessments/{env['assessment'].id}/marks-summary",
+        f"/api/v1/lecturer/assessments/{env['assessment'].id}/marks-summary",
         headers=lecturer_hdr,
     )
     assert res_alt.status_code == 200
@@ -864,7 +864,7 @@ async def test_student_select_and_deselect_endpoints(
 
     # 1. IDOR prevention: other student cannot select
     res_idor = await client.post(
-        f"/student/attempts/{env['attempt'].id}/sections/{env['sec2'].id}/select",
+        f"/api/v1/student/attempts/{env['attempt'].id}/sections/{env['sec2'].id}/select",
         headers=other_student_hdr,
         json={"question_id": str(env["q2"].id)},
     )
@@ -872,7 +872,7 @@ async def test_student_select_and_deselect_endpoints(
 
     # 2. Legitimate student selects question
     res_select = await client.post(
-        f"/student/attempts/{env['attempt'].id}/sections/{env['sec2'].id}/select",
+        f"/api/v1/student/attempts/{env['attempt'].id}/sections/{env['sec2'].id}/select",
         headers=student_hdr,
         json={"question_id": str(env["q2"].id)},
     )
@@ -883,7 +883,7 @@ async def test_student_select_and_deselect_endpoints(
 
     # 3. Limit exceeded: trying to select second question when N=1
     res_overflow = await client.post(
-        f"/student/attempts/{env['attempt'].id}/sections/{env['sec2'].id}/select",
+        f"/api/v1/student/attempts/{env['attempt'].id}/sections/{env['sec2'].id}/select",
         headers=student_hdr,
         json={"question_id": str(env["q3"].id)},
     )
@@ -896,14 +896,14 @@ async def test_student_select_and_deselect_endpoints(
 
     # 4. Deselect question
     res_del = await client.delete(
-        f"/student/attempts/{env['attempt'].id}/questions/{env['q2'].id}/select",
+        f"/api/v1/student/attempts/{env['attempt'].id}/questions/{env['q2'].id}/select",
         headers=student_hdr,
     )
     assert res_del.status_code == 204
 
     # 5. Now can select q3
     res_select2 = await client.post(
-        f"/student/attempts/{env['attempt'].id}/sections/{env['sec2'].id}/select",
+        f"/api/v1/student/attempts/{env['attempt'].id}/sections/{env['sec2'].id}/select",
         headers=student_hdr,
         json={"question_id": str(env["q3"].id)},
     )

@@ -13,7 +13,9 @@ function ScrollArea({
   return (
     <ScrollAreaPrimitive.Root
       data-slot="scroll-area"
-      className={cn("relative", className)}
+      // min-h-0: without it a ScrollArea used as `flex-1` inside a flex column grows to fit its
+      // content instead of scrolling, which pushes sibling footers (action buttons) off-screen.
+      className={cn("relative min-h-0", className)}
       {...props}
     >
       <ScrollAreaPrimitive.Viewport

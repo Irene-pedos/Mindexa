@@ -265,14 +265,8 @@ export const studyPlannerApi = {
   getSummary: async (): Promise<StudyPlannerSummary> => {
     return apiClient("/students/study-plans/summary");
   },
-  getConflicts: async (): Promise<ScheduleConflictWarning[]> => {
-    return apiClient("/students/study-plans/conflicts");
-  },
   listPlans: async (): Promise<StudyPlan[]> => {
     return apiClient("/students/study-plans");
-  },
-  getPlanDetail: async (planId: string): Promise<StudyPlan> => {
-    return apiClient(`/students/study-plans/${planId}`);
   },
   createManualPlan: async (payload: CreateStudyPlanPayload): Promise<StudyPlan> => {
     return apiClient("/students/study-plans", {
@@ -288,27 +282,6 @@ export const studyPlannerApi = {
       body: JSON.stringify(payload),
     });
   },
-  completeSession: async (
-    planId: string,
-    sessionId: string,
-    understanding_level: "YES" | "PARTIAL" | "NO",
-    difficulty_rating?: "Easy" | "Medium" | "Hard",
-    confidence_rating?: number,
-    feedback_notes?: string,
-    checklist_items?: ChecklistItem[]
-  ): Promise<StudySession> => {
-    return apiClient(`/students/study-plans/${planId}/sessions/${sessionId}/complete`, {
-      method: "POST",
-      body: JSON.stringify({
-        understanding_level,
-        difficulty_rating,
-        confidence_rating,
-        feedback_notes,
-        checklist_items,
-      }),
-    });
-  },
-
   rescheduleSession: async (
     planId: string,
     sessionId: string,
@@ -334,9 +307,6 @@ export const studyPlannerApi = {
     return apiClient(`/students/study-plans/sessions/${sessionId}/guided/start`, {
       method: "POST",
     });
-  },
-  getGuidedSession: async (sessionId: string): Promise<StudySession> => {
-    return apiClient(`/students/study-plans/sessions/${sessionId}/guided`);
   },
   saveSessionNotes: async (
     sessionId: string,
@@ -377,22 +347,6 @@ export const studyPlannerApi = {
     });
   },
   generateKnowledgeCheck: async (
-    sessionId: string,
-    questionCount: number = 5,
-    forceRegenerate: boolean = false
-  ): Promise<QuizQuestion[]> => {
-    return apiClient(
-      `/students/study-plans/sessions/${sessionId}/guided/knowledge-check/generate`,
-      {
-        method: "POST",
-        body: JSON.stringify({
-          question_count: questionCount,
-          force_regenerate: forceRegenerate,
-        }),
-      }
-    );
-  },
-  generateQuiz: async (
     sessionId: string,
     questionCount: number = 5,
     forceRegenerate: boolean = false

@@ -89,16 +89,22 @@ class Settings(BaseSettings):
         return self.JWT_REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60
 
     def build_password_reset_url(self, token: str) -> str:
-        return f"http://localhost:3000/reset-password?token={token}"
+        return f"{self.FRONTEND_URL.rstrip('/')}/reset-password?token={token}"
 
     # ─── Rate Limiting ────────────────────────────────────────────────────────
     RATE_LIMIT_LOGIN_PER_MINUTE: int = 5
     RATE_LIMIT_REFRESH_PER_MINUTE: int = 20
     RATE_LIMIT_DEFAULT_PER_MINUTE: int = 120
+    # Exam autosave, integrity events and batch grading, per signed-in user.
+    RATE_LIMIT_HIGH_VOLUME_PER_MINUTE: int = 600
     RATE_LIMIT_AI_PER_MINUTE: int = 20
     RATE_LIMIT_STUDENT_AI_SUPPORT_PER_HOUR: int = 30
     RATE_LIMIT_VERIFY_SEAL_PER_MINUTE: int = 20
     RATE_LIMIT_FAIL_CLOSED_ON_AI: bool = False
+    # Reverse proxies in front of the API (nginx, Caddy, a PaaS router). 0 = connect directly and
+    # ignore X-Forwarded-For, which is client-controlled. Set to 1+ in production behind proxies,
+    # otherwise every user shares the proxy's address in per-IP limits and the login lockout.
+    TRUSTED_PROXY_COUNT: int = Field(default=0, ge=0, le=5)
 
     # ─── Database ─────────────────────────────────────────────────────────────
     POSTGRES_SERVER: str = "localhost"
@@ -176,6 +182,8 @@ class Settings(BaseSettings):
 
     CORS_ALLOW_CREDENTIALS: bool = True
     METRICS_ENABLED: bool = True
+    # Sent by the scraper as the X-Metrics-Key header. Required in production; unset = metrics refused there.
+    METRICS_API_KEY: str = ""
 
     # ─── Storage ──────────────────────────────────────────────────────────────
     STORAGE_BACKEND: Literal["local", "s3"] = "local"
@@ -218,7 +226,7 @@ class Settings(BaseSettings):
     DEFAULT_EMBEDDING_MODEL: str = "jina-embeddings-v3"
     DEFAULT_LLM_MODEL: str = "openai/gpt-oss-120b"
     OPENAI_DEFAULT_MODEL: str = "gpt-4o-mini"
-    ANTHROPIC_DEFAULT_MODEL: str = "claude-3-5-haiku-latest"
+    ANTHROPIC_DEFAULT_MODEL: str = "claude-haiku-5-5"
     AI_REQUEST_TIMEOUT_SECONDS: float = 30.0
     AI_MAX_RETRIES: int = 2
     AI_RETRY_BACKOFF_SECONDS: float = 0.5

@@ -38,11 +38,12 @@ STATUS CODES:
 
 from __future__ import annotations
 
+import secrets
 import time
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Header, HTTPException, status
 from fastapi.responses import PlainTextResponse, Response
 from sqlalchemy import text
 
@@ -197,7 +198,9 @@ async def readiness_probe() -> dict[str, Any]:
     response_class=PlainTextResponse,
     include_in_schema=False,
 )
-async def metrics_endpoint() -> PlainTextResponse:
+async def metrics_endpoint(
+    x_metrics_key: str | None = Header(default=None),
+) -> PlainTextResponse:
     """
     Prometheus text-format metrics.
 
@@ -208,6 +211,17 @@ async def metrics_endpoint() -> PlainTextResponse:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Metrics are disabled.",
+        )
+
+    # Operational data (queue depth, grading backlog) must not be world-readable.
+    expected = settings.METRICS_API_KEY
+    if expected:
+        if not x_metrics_key or not secrets.compare_digest(x_metrics_key, expected):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid metrics key.")
+    elif settings.is_production:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Metrics require METRICS_API_KEY in production.",
         )
 
     lines = await _build_prometheus_metrics()

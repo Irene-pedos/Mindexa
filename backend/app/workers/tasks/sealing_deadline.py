@@ -24,6 +24,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core import links as frontend_links
 from app.core.celery_app import celery
 from app.core.constants import Duty
 from app.db.enums import (
@@ -118,7 +119,7 @@ async def run_check_sealing_deadlines(
                     body=f"Assessment '{asmt.title}' exam window has begun without exam office seal. Exam must be shifted.",
                     reference_id=asmt.id,
                     reference_type="assessment",
-                    action_url=f"/lecturer/assessments/{asmt.id}",
+                    action_url=frontend_links.lecturer_assessment(asmt.id),
                 )
 
                 # Notify HOD
@@ -138,7 +139,7 @@ async def run_check_sealing_deadlines(
                             body=f"Assessment '{asmt.title}' window reached without sealing.",
                             reference_id=asmt.id,
                             reference_type="assessment",
-                            action_url=f"/hod/assessments/{asmt.id}",
+                            action_url=frontend_links.hod_assessment(asmt.id),
                         )
 
                 # Notify Exam Officer
@@ -157,7 +158,7 @@ async def run_check_sealing_deadlines(
                         body=f"Assessment '{asmt.title}' window open without seal.",
                         reference_id=asmt.id,
                         reference_type="assessment",
-                        action_url=f"/exam-office/assessments/{asmt.id}",
+                        action_url=frontend_links.exam_office_queue(),
                     )
 
                 # Audit
@@ -189,7 +190,7 @@ async def run_check_sealing_deadlines(
                         body=f"Assessment '{asmt.title}' starts in less than {policy.sealing_warning_days} days and is not yet sealed.",
                         reference_id=asmt.id,
                         reference_type="assessment",
-                        action_url=f"/lecturer/assessments/{asmt.id}",
+                        action_url=frontend_links.lecturer_assessment(asmt.id),
                     )
 
                     # Notify Moderators
@@ -209,7 +210,7 @@ async def run_check_sealing_deadlines(
                                 body=f"Assessment '{asmt.title}' is at risk of missing sealing deadline.",
                                 reference_id=asmt.id,
                                 reference_type="assessment",
-                                action_url=f"/moderator/assessments/{asmt.id}",
+                                action_url=frontend_links.moderation_queue(),
                             )
 
                         # Notify HOD
@@ -228,7 +229,7 @@ async def run_check_sealing_deadlines(
                                 body=f"Assessment '{asmt.title}' is at risk of missing sealing deadline.",
                                 reference_id=asmt.id,
                                 reference_type="assessment",
-                                action_url=f"/hod/assessments/{asmt.id}",
+                                action_url=frontend_links.hod_assessment(asmt.id),
                             )
 
                     # Audit

@@ -126,10 +126,8 @@ class LecturerService:
         from app.db.models.auth import User, UserProfile
         from app.db.models.result import AssessmentResult
 
-        # 1. Fetch Workspace
-        ws = await self.workspace_repo.get_by_id(workspace_id)
-        if not ws:
-            raise NotFoundError("Workspace", str(workspace_id))
+        # 1. Fetch Workspace (must be one this lecturer teaches)
+        ws = await self._get_owned_workspace(lecturer_id, workspace_id)
 
         # 2. Fetch Student Profile and Enrollment in this section
         stmt = (
@@ -247,13 +245,18 @@ class LecturerService:
 
         return items, total
 
+    async def _get_owned_workspace(self, lecturer_id: uuid.UUID, workspace_id: uuid.UUID):
+        """Workspace the lecturer is assigned to; others get a 404 so workspace ids cannot be probed."""
+        ws = await self.workspace_repo.get_by_id(workspace_id)
+        if not ws or ws.teaching_assignment is None or ws.teaching_assignment.lecturer_id != lecturer_id:
+            raise NotFoundError("Workspace", str(workspace_id))
+        return ws
+
     async def get_workspace_detail(self, lecturer_id: uuid.UUID, workspace_id: uuid.UUID) -> WorkspaceDetail:
         from app.db.models.auth import User, UserProfile
         from app.db.models.result import AssessmentResult
 
-        ws = await self.workspace_repo.get_by_id(workspace_id)
-        if not ws:
-            raise NotFoundError("Workspace", str(workspace_id))
+        ws = await self._get_owned_workspace(lecturer_id, workspace_id)
 
         student_count = await self.workspace_repo.get_student_count(workspace_id)
 

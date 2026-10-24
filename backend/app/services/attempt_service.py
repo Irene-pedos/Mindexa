@@ -25,6 +25,7 @@ from typing import Any
 
 import structlog
 
+from app.core import links as frontend_links
 from app.core.exceptions import (AuthorizationError, BadRequestError, ConflictError,
                                  NotFoundError, ValidationError)
 from app.db.enums import (AssessmentStatus, AssessmentType, AttemptStatus,
@@ -38,6 +39,10 @@ from app.db.repositories.submission_repo import SubmissionRepository
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = structlog.get_logger(__name__)
+
+# A submit this much after expires_at still counts as a normal submission
+# (covers network latency between the client timer and the server clock).
+SUBMIT_LATENCY_TOLERANCE_SECONDS = 30
 
 
 def _utcnow() -> datetime:
@@ -330,21 +335,41 @@ class AttemptService:
     # RESUME ATTEMPT
     # -----------------------------------------------------------------------
 
+    async def reclaim_attempt(
+        self,
+        *,
+        attempt_id: uuid.UUID,
+        student_id: uuid.UUID,
+    ) -> AssessmentAttempt:
+        """
+        Re-issue the session token to the attempt's owner when the browser that
+        started it is gone (cleared storage, another device). Same rules as
+        resume_attempt — supervised exams that disallow resuming stay blocked —
+        and the old session's token stops working once this one is issued.
+        """
+        return await self.resume_attempt(
+            attempt_id=attempt_id, student_id=student_id, access_token=None
+        )
+
     async def resume_attempt(
         self,
         *,
         attempt_id: uuid.UUID,
         student_id: uuid.UUID,
-        access_token: uuid.UUID,
+        access_token: uuid.UUID | None,
     ) -> AssessmentAttempt:
         """
         Resume a PAUSED or IN_PROGRESS attempt, issuing a fresh access_token.
 
         Security: the old access_token must match before issuing the new one.
         This prevents a different browser/device from resuming a paused attempt
-        using a leaked token.
+        using a leaked token. `access_token=None` is only used by reclaim_attempt,
+        where the caller has already authenticated as the attempt's owner.
         """
-        attempt = await self.attempt_repo.get_by_access_token(attempt_id, access_token)
+        if access_token is None:
+            attempt = await self.attempt_repo.get_by_id(attempt_id)
+        else:
+            attempt = await self.attempt_repo.get_by_access_token(attempt_id, access_token)
         if not attempt:
             raise AuthorizationError(
                 "Invalid access token for this attempt",
@@ -421,7 +446,11 @@ class AttemptService:
         attempt.access_token = new_token
 
         # Append audit log for state-changing resume action
-        await self._append_submit_logs(attempt_id, change_type="resume", audit_payload={"submitted": False})
+        await self._append_submit_logs(
+            attempt_id,
+            change_type="resume",
+            audit_payload={"submitted": False, "reclaimed": access_token is None},
+        )
         return attempt
 
     # -----------------------------------------------------------------------
@@ -457,9 +486,21 @@ class AttemptService:
             )
 
         now = _utcnow()
-        await self.attempt_repo.set_status(attempt_id, AttemptStatus.SUBMITTED)
+
+        # A submit arriving well after the deadline is recorded as an automatic
+        # submission, not a regular one (a few seconds of network latency are fine).
+        late = bool(
+            attempt.expires_at
+            and now > attempt.expires_at + timedelta(seconds=SUBMIT_LATENCY_TOLERANCE_SECONDS)
+        )
+        final_status = AttemptStatus.AUTO_SUBMITTED if late else AttemptStatus.SUBMITTED
+        await self.attempt_repo.set_status(attempt_id, final_status)
         await self.submission_repo.finalize_all(attempt_id)
-        await self._append_submit_logs(attempt_id, change_type="submit", audit_payload={"submitted": True})
+        await self._append_submit_logs(
+            attempt_id,
+            change_type="auto_submit" if late else "submit",
+            audit_payload={"submitted": True, "late": late},
+        )
 
         # Automatic grading and result calculations are dispatched asynchronously via Celery in the route handler.
 
@@ -478,7 +519,7 @@ class AttemptService:
                 body=f"Your attempt for '{attempt.assessment.title}' has been securely recorded.",
                 reference_id=attempt_id,
                 reference_type="attempt",
-                action_url=f"/student/assessments/{attempt.assessment_id}/results"
+                action_url=frontend_links.student_result(attempt_id)
             )
 
             # Notify Lecturer (if assessment has an owner)
@@ -490,7 +531,7 @@ class AttemptService:
                     body=f"A student has submitted an attempt for '{attempt.assessment.title}'.",
                     reference_id=attempt_id,
                     reference_type="attempt",
-                    action_url=f"/lecturer/assessments/{attempt.assessment_id}/submissions"
+                    action_url=frontend_links.lecturer_grading(attempt.assessment_id)
                 )
         except Exception as e:
             # Don't fail submission if notification fails
@@ -508,7 +549,7 @@ class AttemptService:
         except Exception as e:
             print(f"FAILED to update reassessment requirement status on submit: {e}")
 
-        attempt.status = AttemptStatus.SUBMITTED
+        attempt.status = final_status
         attempt.submitted_at = now
         return attempt
 
@@ -592,6 +633,9 @@ class AttemptService:
         now = _utcnow()
         if attempt.expires_at and attempt.expires_at <= now:
             await self._auto_submit(attempt)
+            # The caller's error rolls the session back; commit first so the
+            # auto-submit (and the answers already saved) are not undone.
+            await self.db.commit()
             raise ConflictError(
                 "Your attempt has expired and was automatically submitted",
                 code="ATTEMPT_EXPIRED",

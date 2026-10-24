@@ -79,6 +79,8 @@ import { attemptApi } from "@/lib/api/attempt";
 import { gradingApi } from "@/lib/api/grading";
 import { aiGenerationApi } from "@/lib/api/ai-generation";
 import { moderationApi, ModerationOverview } from "@/lib/api/moderation";
+import { AssessmentLifecycleCard } from "@/components/mindexa/moderation/assessment-lifecycle-card";
+import { EDITABLE_STATUSES } from "@/lib/api/assessment";
 import { Skeleton } from "@/components/ui/interfaces-skeleton";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
@@ -175,8 +177,6 @@ export default function AssessmentDetailsPage() {
   const [editingMarks, setEditingMarks] = useState(2);
 
   const [moderationOverview, setModerationOverview] = useState<ModerationOverview | null>(null);
-  const [isSubmittingModeration, setIsSubmittingModeration] = useState(false);
-  const [isPublishingSummative, setIsPublishingSummative] = useState(false);
 
   // Fetch full assessment data & statistics
   const fetchDetails = useCallback(async () => {
@@ -251,31 +251,6 @@ export default function AssessmentDetailsPage() {
     }
   }, [assessmentId, fetchDetails]);
 
-  const handleSubmitForModeration = async () => {
-    try {
-      setIsSubmittingModeration(true);
-      await moderationApi.submitForModeration(assessmentId);
-      toast.success("Assessment submitted for department moderation!");
-      fetchDetails();
-    } catch (err: any) {
-      toast.error(err.message || "Failed to submit for moderation");
-    } finally {
-      setIsSubmittingModeration(false);
-    }
-  };
-
-  const handlePublishSealed = async () => {
-    try {
-      setIsPublishingSummative(true);
-      await assessmentApi.finalizeAssessment(assessmentId);
-      toast.success("Assessment published successfully!");
-      fetchDetails();
-    } catch (err: any) {
-      toast.error(err.message || "Failed to publish assessment");
-    } finally {
-      setIsPublishingSummative(false);
-    }
-  };
   // Derived Grading Stats
   const ungradedCount = useMemo(() => gradingQueue.length, [gradingQueue]);
   const gradedCount = useMemo(() => results.length, [results]);
@@ -450,7 +425,7 @@ export default function AssessmentDetailsPage() {
         marks: aq?.marks || 2,
         options: [],
         aiGenerated: true,
-        is_required: true,
+        is_required: false,
         bloom_level: candidate.bloom_level || undefined,
       };
 
@@ -519,7 +494,7 @@ export default function AssessmentDetailsPage() {
         marks: editingMarks,
         options: [],
         aiGenerated: true,
-        is_required: true,
+        is_required: false,
         bloom_level: candidate.bloom_level || undefined,
       };
 
@@ -582,7 +557,7 @@ export default function AssessmentDetailsPage() {
             marks: 2,
             options: [],
             aiGenerated: true,
-            is_required: true,
+            is_required: false,
             bloom_level: c.bloom_level || undefined,
           },
         };
@@ -652,7 +627,9 @@ export default function AssessmentDetailsPage() {
     );
   }
 
-  const isDraft = assessment.status === "DRAFT";
+  // The wizard may change content in DRAFT and after the moderator asked for changes.
+  // Approved / sealed / published papers go through the audited "Request edit".
+  const isDraft = (EDITABLE_STATUSES as readonly string[]).includes(assessment.status);
   const isActive = assessment.status === "ACTIVE";
 
   return (
@@ -664,7 +641,7 @@ export default function AssessmentDetailsPage() {
             variant="outline"
             size="icon"
             onClick={() => router.push("/lecturer/assessments")}
-            className="h-8 w-8 rounded-lg shrink-0 border-border/60 bg-card hover:bg-muted/50"
+            className="h-8 w-8 rounded-lg shrink-0 border-border/60 bg-card hover:bg-muted/20 border-border/600"
           >
             <ArrowLeft className="size-4 text-foreground" />
           </Button>
@@ -679,10 +656,11 @@ export default function AssessmentDetailsPage() {
           {/* Edit button */}
           <Button
             onClick={() => router.push(`/lecturer/assessments/${assessmentId}/edit`)}
-            disabled={!isDraft && assessment.status !== "PUBLISHED" && assessment.status !== "SCHEDULED"}
+            disabled={!isDraft}
+            title={isDraft ? undefined : "Use “Request edit” for papers that are approved, sealed or published"}
             variant="outline"
             size="sm"
-            className="h-8 text-[10px] font-bold uppercase tracking-wider rounded-lg border-border/60 bg-card hover:bg-muted/50"
+            className="h-8 text-[10px] font-bold uppercase tracking-wider rounded-lg border-border/60 bg-card hover:bg-muted/20 border-border/600"
           >
             <Pencil className="size-3.5 mr-1.5" />
             Edit Settings
@@ -708,80 +686,20 @@ export default function AssessmentDetailsPage() {
         </div>
       </div>
 
-      {/* Moderation Workflow Lifecycle Banner for Summative Assessments */}
-      {(assessment.assessment_type === "SUMMATIVE" || assessment.mode === "SUMMATIVE" || assessment.status === "PENDING_MODERATION" || assessment.status === "CHANGES_REQUESTED" || assessment.status === "APPROVED" || assessment.status === "SEALED") && (
-        <Card className="border-primary/20 bg-primary/[0.02] shadow-none">
-          <CardContent className="p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-            <div className="flex items-start gap-3">
-              <div className="p-2.5 rounded-xl bg-primary/10 text-primary shrink-0 mt-0.5">
-                <ShieldCheck className="size-5" />
-              </div>
-              <div className="space-y-1">
-                <div className="flex items-center gap-2">
-                  <h3 className="font-semibold text-sm text-foreground">
-                    Summative Assessment Moderation Lifecycle
-                  </h3>
-                  <Badge variant="outline" className="text-[10px] font-bold">
-                    Stage: {assessment.status.replace("_", " ")}
-                  </Badge>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  {assessment.status === "DRAFT" && "Assessment must pass automated pre-moderation and receive department moderator approval before Exam Office sealing."}
-                  {assessment.status === "PENDING_MODERATION" && "Submitted to Department Moderation Queue. Waiting for moderator to claim and review."}
-                  {assessment.status === "CHANGES_REQUESTED" && "Moderator requested changes on this draft. Please review feedback and resubmit."}
-                  {assessment.status === "APPROVED" && "Moderation complete! Assessment has moved to Exam Office queue for cryptographic sealing."}
-                  {assessment.status === "SEALED" && "Exam Office cryptographic seal active! Content is securely locked and ready for publish."}
-                  {assessment.status === "PUBLISHED" && "Official summative assessment sealed and published."}
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2 shrink-0 w-full md:w-auto justify-end">
-              {(assessment.status === "DRAFT" || assessment.status === "CHANGES_REQUESTED") && (
-                <Button
-                  size="sm"
-                  disabled={isSubmittingModeration}
-                  onClick={handleSubmitForModeration}
-                  className="h-8 text-xs rounded-lg gap-1.5"
-                >
-                  {isSubmittingModeration ? (
-                    <LoaderCircleIcon className="size-3.5 animate-spin" />
-                  ) : (
-                    <>
-                      <ShieldCheck className="size-3.5" />
-                      Submit for Moderation
-                    </>
-                  )}
-                </Button>
-              )}
-
-              {assessment.status === "SEALED" && (
-                <Button
-                  size="sm"
-                  disabled={isPublishingSummative}
-                  onClick={handlePublishSealed}
-                  className="h-8 text-xs rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5"
-                >
-                  {isPublishingSummative ? (
-                    <LoaderCircleIcon className="size-3.5 animate-spin" />
-                  ) : (
-                    <>
-                      <Check className="size-3.5" />
-                      Publish Sealed Assessment
-                    </>
-                  )}
-                </Button>
-              )}
-            </div>
-          </CardContent>
-        </Card>
+      {/* Moderation & publishing lifecycle — summative papers and any paper already in moderation */}
+      {(assessment.assessment_type === "SUMMATIVE" ||
+        ["PENDING_MODERATION", "CHANGES_REQUESTED", "APPROVED", "SEALED"].includes(assessment.status)) && (
+        <AssessmentLifecycleCard
+          assessment={assessment}
+          overview={moderationOverview}
+          onChanged={fetchDetails}
+        />
       )}
-
       {/* Progress & statistics dashboard rows */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {/* Grading widget */}
-        <Card className="shadow-none border hover:border-primary/10 transition-colors">
-          <CardHeader className="py-4 border-b bg-muted/5">
+        <Card className="shadow-none border border-border/60 rounded-xl bg-card hover:border-primary/20 transition-colors">
+          <CardHeader className="py-4 border-b bg-muted/20 border-border/60">
             <CardTitle className="text-sm font-semibold flex items-center justify-between">
               <span>Grading Progress</span>
               <Badge variant="outline" className="text-[10px] font-bold">
@@ -810,8 +728,8 @@ export default function AssessmentDetailsPage() {
         </Card>
 
         {/* Student Attempts statistics */}
-        <Card className="shadow-none border hover:border-primary/10 transition-colors">
-          <CardHeader className="py-4 border-b bg-muted/5">
+        <Card className="shadow-none border border-border/60 rounded-xl bg-card hover:border-primary/20 transition-colors">
+          <CardHeader className="py-4 border-b bg-muted/20 border-border/60">
             <CardTitle className="text-sm font-semibold flex items-center justify-between">
               <span>Attempt Activity</span>
               <Badge variant="outline" className="text-[10px] font-bold">
@@ -821,34 +739,34 @@ export default function AssessmentDetailsPage() {
           </CardHeader>
           <CardContent className="p-5 space-y-3">
             <div className="grid grid-cols-3 gap-2 text-center">
-              <div className="p-2 border rounded-lg bg-emerald-50/25 border-emerald-100">
-                <span className="block text-lg font-extrabold text-emerald-600 tabular-nums">
+              <div className="p-2 border rounded-lg bg-emerald-500/10 border-emerald-500/25">
+                <span className="block text-lg font-extrabold text-emerald-600 dark:text-emerald-400 tabular-nums">
                   {attemptStats.submitted}
                 </span>
-                <span className="text-[9px] font-semibold text-emerald-800 uppercase tracking-tight">Submitted</span>
+                <span className="text-[9px] font-semibold text-emerald-700 dark:text-emerald-300 uppercase tracking-tight">Submitted</span>
               </div>
-              <div className="p-2 border rounded-lg bg-blue-50/25 border-blue-100">
-                <span className="block text-lg font-extrabold text-blue-600 tabular-nums">
+              <div className="p-2 border rounded-lg bg-blue-500/10 border-blue-500/25">
+                <span className="block text-lg font-extrabold text-blue-600 dark:text-blue-400 tabular-nums">
                   {attemptStats.started}
                 </span>
-                <span className="text-[9px] font-semibold text-blue-800 uppercase tracking-tight">Started</span>
+                <span className="text-[9px] font-semibold text-blue-700 dark:text-blue-300 uppercase tracking-tight">Started</span>
               </div>
-              <div className="p-2 border rounded-lg bg-slate-50 border-slate-200">
-                <span className="block text-lg font-extrabold text-slate-500 tabular-nums">
+              <div className="p-2 border rounded-lg bg-muted/30 border-border/60">
+                <span className="block text-lg font-extrabold text-muted-foreground tabular-nums">
                   {attemptStats.other}
                 </span>
-                <span className="text-[9px] font-semibold text-slate-600 uppercase tracking-tight">Inactive</span>
+                <span className="text-[9px] font-semibold text-muted-foreground uppercase tracking-tight">Inactive</span>
               </div>
             </div>
           </CardContent>
         </Card>
 
         {/* Integrity summary stats */}
-        <Card className="shadow-none border hover:border-primary/10 transition-colors">
-          <CardHeader className="py-4 border-b bg-muted/5">
+        <Card className="shadow-none border border-border/60 rounded-xl bg-card hover:border-primary/20 transition-colors">
+          <CardHeader className="py-4 border-b bg-muted/20 border-border/60">
             <CardTitle className="text-sm font-semibold flex items-center justify-between">
               <span>Integrity Overview</span>
-              <Badge variant="outline" className="text-[10px] font-bold text-amber-700 bg-amber-50">
+              <Badge variant="outline" className="text-[10px] font-bold text-amber-700 dark:text-amber-400 bg-amber-500/10 border-amber-500/30">
                 {(supervisionStats?.warning_count || 0)} warnings
               </Badge>
             </CardTitle>
@@ -885,20 +803,20 @@ export default function AssessmentDetailsPage() {
 
       {/* Manual release results controls */}
       {assessment.result_release_mode === "MANUAL" && unreleasedResults.length > 0 && (
-        <Card className="border-emerald-200 bg-emerald-50/20 shadow-none border overflow-hidden">
-          <CardContent className="p-5 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+        <Card className="border-emerald-500/30 bg-emerald-500/10 shadow-none border rounded-xl overflow-hidden">
+          <CardContent className="p-4 sm:p-5 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
             <div className="space-y-1">
-              <h4 className="text-sm font-bold text-emerald-950 flex items-center gap-2">
-                <Award className="size-4 text-emerald-600" /> Results Pending Release
+              <h4 className="text-sm font-bold text-emerald-900 dark:text-emerald-200 flex items-center gap-2">
+                <Award className="size-4 text-emerald-600 dark:text-emerald-400" /> Results Pending Release
               </h4>
-              <p className="text-xs text-emerald-800">
+              <p className="text-xs text-emerald-800 dark:text-emerald-300">
                 Lecturers have graded and finalized <strong>{unreleasedResults.length}</strong> attempts. Results are not yet visible to students.
               </p>
             </div>
             <Button
               onClick={handleReleaseResults}
               disabled={releasingResults}
-              className="h-10 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs uppercase tracking-wider rounded-lg shrink-0 px-6"
+              className="h-9 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs uppercase tracking-wider rounded-lg shrink-0 px-5"
             >
               {releasingResults ? "Releasing..." : `Release ${unreleasedResults.length} Results`}
             </Button>
@@ -907,10 +825,10 @@ export default function AssessmentDetailsPage() {
       )}
 
       {/* Settings read-only display cards */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         <div className="lg:col-span-2 space-y-6">
-          <Card className="shadow-none border">
-            <CardHeader className="py-4 border-b bg-muted/5">
+          <Card className="shadow-none border border-border/60 rounded-xl bg-card">
+            <CardHeader className="py-4 border-b bg-muted/20 border-border/60">
               <CardTitle className="text-sm font-bold uppercase tracking-wider text-muted-foreground">
                 Assessments Environment & Security Settings
               </CardTitle>
@@ -963,8 +881,8 @@ export default function AssessmentDetailsPage() {
           </Card>
 
           {/* Blueprint compliance details */}
-          <Card className="shadow-none border">
-            <CardHeader className="py-4 border-b bg-muted/5">
+          <Card className="shadow-none border border-border/60 rounded-xl bg-card">
+            <CardHeader className="py-4 border-b bg-muted/20 border-border/60">
               <CardTitle className="text-sm font-bold uppercase tracking-wider text-muted-foreground">
                 Blueprint Compliance Status
               </CardTitle>
@@ -974,30 +892,30 @@ export default function AssessmentDetailsPage() {
                 <div className="space-y-3">
                   {validationResult.violations && validationResult.violations.length > 0 ? (
                     <div className="space-y-2">
-                      <div className="flex items-center gap-2 p-2 px-3 bg-red-50 border border-red-200 text-xs font-semibold text-red-800 rounded-md">
-                        <AlertTriangle className="size-4 text-red-600" />
+                      <div className="flex items-center gap-2 p-2.5 px-3 bg-rose-500/10 border border-rose-500/30 text-xs font-semibold text-rose-800 dark:text-rose-300 rounded-lg">
+                        <AlertTriangle className="size-4 text-rose-600 dark:text-rose-400 shrink-0" />
                         <span>This assessment does not comply with the established blueprint rules.</span>
                       </div>
                       <div className="space-y-1.5 pl-3">
                         {validationResult.violations.map((v: any, idx: number) => (
-                          <div key={idx} className="text-xs text-red-700 flex items-center gap-2">
-                            <X className="size-3.5 text-red-500 shrink-0" />
+                          <div key={idx} className="text-xs text-rose-700 dark:text-rose-400 flex items-center gap-2">
+                            <X className="size-3.5 text-rose-500 shrink-0" />
                             <span>{v.message}</span>
                           </div>
                         ))}
                       </div>
                     </div>
                   ) : (
-                    <div className="flex items-center gap-2 p-3 bg-emerald-50 border border-emerald-200 text-xs font-semibold text-emerald-800 rounded-md">
-                      <CheckCircle2 className="size-4 text-emerald-600" />
+                    <div className="flex items-center gap-2 p-2.5 px-3 bg-emerald-500/10 border border-emerald-500/30 text-xs font-semibold text-emerald-800 dark:text-emerald-300 rounded-lg">
+                      <CheckCircle2 className="size-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
                       <span>Blueprint fully compliant! All rules verified.</span>
                     </div>
                   )}
                   {validationResult.warnings && validationResult.warnings.length > 0 && (
                     <div className="space-y-1.5 pt-2">
-                      <p className="text-xs font-bold text-amber-800">Compliance Warnings:</p>
+                      <p className="text-xs font-bold text-amber-800 dark:text-amber-300">Compliance Warnings:</p>
                       {validationResult.warnings.map((w: any, idx: number) => (
-                        <div key={idx} className="text-xs text-amber-700 flex items-center gap-2">
+                        <div key={idx} className="text-xs text-amber-700 dark:text-amber-400 flex items-center gap-2">
                           <AlertCircle className="size-3.5 text-amber-500 shrink-0" />
                           <span>{w.message}</span>
                         </div>
@@ -1014,8 +932,8 @@ export default function AssessmentDetailsPage() {
 
         {/* Identity details panel */}
         <div className="space-y-6">
-          <Card className="shadow-none border">
-            <CardHeader className="py-4 border-b bg-muted/5">
+          <Card className="shadow-none border border-border/60 rounded-xl bg-card">
+            <CardHeader className="py-4 border-b bg-muted/20 border-border/60">
               <CardTitle className="text-sm font-bold uppercase tracking-wider text-muted-foreground">
                 Identity & Schedule
               </CardTitle>
@@ -1068,8 +986,8 @@ export default function AssessmentDetailsPage() {
           const currentSectionMarks = sectionQuestions.reduce((sum: number, aq: any) => sum + (aq.marks_override || 0), 0);
 
           return (
-            <Card key={sec.id} className="shadow-none border overflow-hidden">
-              <CardHeader className="bg-muted/30 border-b p-4 flex flex-row items-center justify-between">
+            <Card key={sec.id} className="shadow-none border border-border/60 rounded-xl bg-card overflow-hidden">
+              <CardHeader className="bg-muted/20 border-b border-border/60 p-4 flex flex-row items-center justify-between">
                 <div>
                   <div className="flex items-center gap-2">
                     <Badge variant="secondary" className="font-bold text-[10px]">
@@ -1123,8 +1041,8 @@ export default function AssessmentDetailsPage() {
                 {sectionQuestions.map((aq: any, idx: number) => {
                   const q = aq.question;
                   return (
-                    <div key={aq.id || q.id} className="flex gap-4 p-4 rounded-lg border bg-background group">
-                      <span className="text-muted-foreground font-bold text-lg tabular-nums shrink-0">
+                    <div key={aq.id || q.id} className="flex gap-4 p-4 rounded-xl border border-border/60 bg-card hover:bg-muted/10 transition-colors group">
+                      <span className="text-muted-foreground font-mono font-bold text-base tabular-nums shrink-0 pt-0.5">
                         {(idx + 1).toString().padStart(2, "0")}
                       </span>
                       <div className="space-y-3 flex-1">
@@ -1179,10 +1097,10 @@ export default function AssessmentDetailsPage() {
                                 <div
                                   key={oIdx}
                                   className={cn(
-                                    "text-xs p-2.5 rounded-md border flex items-center justify-between",
+                                    "text-xs p-2.5 rounded-lg border flex items-center justify-between transition-colors",
                                     opt.is_correct
-                                      ? "bg-emerald-50 border-emerald-100 text-emerald-900 font-medium"
-                                      : "bg-background border-border"
+                                      ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-800 dark:text-emerald-300 font-medium"
+                                      : "bg-muted/20 border-border/60 text-foreground"
                                   )}
                                 >
                                   <span>{opt.content || opt.option_text}</span>
@@ -1195,7 +1113,7 @@ export default function AssessmentDetailsPage() {
                           {q.question_type === "matching" && q.options && (
                             <div className="space-y-1 max-w-xl">
                               {q.options.map((opt: any, oIdx: number) => (
-                                <div key={oIdx} className="flex items-center gap-3 bg-muted/5 p-2 rounded-md border text-xs">
+                                <div key={oIdx} className="flex items-center gap-3 bg-muted/20 p-2.5 rounded-lg border border-border/60 text-xs">
                                   <span className="font-medium flex-1">{opt.content || opt.option_text}</span>
                                   <ChevronRight className="size-3 text-primary shrink-0" />
                                   <span className="font-bold text-primary flex-1">{opt.match_value || opt.option_text_right}</span>
@@ -1207,7 +1125,7 @@ export default function AssessmentDetailsPage() {
                           {q.question_type === "ordering" && q.options && (
                             <div className="space-y-1 max-w-md">
                               {q.options.map((opt: any, oIdx: number) => (
-                                <div key={oIdx} className="flex items-center gap-3 border p-2 rounded-md bg-background text-xs">
+                                <div key={oIdx} className="flex items-center gap-3 border border-border/60 p-2.5 rounded-lg bg-card text-xs">
                                   <span className="size-5 bg-primary text-white rounded-full flex items-center justify-center text-[10px]">
                                     {oIdx + 1}
                                   </span>
@@ -1221,7 +1139,7 @@ export default function AssessmentDetailsPage() {
                             q.question_type === "essay" ||
                             q.question_type === "computational" ||
                             q.question_type === "case_study") && (
-                            <div className="p-3 bg-muted/10 border-l-2 border-primary/20 rounded-r-md text-xs italic text-muted-foreground">
+                            <div className="p-3 bg-muted/20 border-l-2 border-primary/40 rounded-r-lg text-xs italic text-muted-foreground">
                               <span className="block text-[9px] font-bold uppercase tracking-wider text-primary not-italic mb-1">
                                 Grading Key / Model Answer
                               </span>
@@ -1405,13 +1323,13 @@ export default function AssessmentDetailsPage() {
                 <CheckCircle2 className="size-5 text-emerald-500" /> Review Generated Questions
               </SheetTitle>
               <div className="flex gap-2">
-                <Button variant="outline" size="sm" onClick={handleAcceptAll} className="text-xs h-8 text-emerald-600 hover:bg-emerald-50">Accept All</Button>
-                <Button variant="outline" size="sm" onClick={handleRejectAll} className="text-xs h-8 text-destructive hover:bg-destructive/5">Reject All</Button>
+                <Button variant="outline" size="sm" onClick={handleAcceptAll} className="text-xs h-8 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 border-emerald-500/30">Accept All</Button>
+                <Button variant="outline" size="sm" onClick={handleRejectAll} className="text-xs h-8 text-destructive hover:bg-destructive/10 border-destructive/30">Reject All</Button>
               </div>
             </div>
             <div className="flex items-center justify-between text-xs text-muted-foreground pt-1.5 font-semibold">
               <span>Candidates Remaining: {aiCandidates.length}</span>
-              <span className="text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-100">
+              <span className="text-emerald-700 dark:text-emerald-300 bg-emerald-500/10 px-2 py-0.5 rounded-md border border-emerald-500/30">
                 {aiAcceptedCount} accepted • {aiRejectedCount} rejected
               </span>
             </div>
@@ -1436,7 +1354,7 @@ export default function AssessmentDetailsPage() {
                             </Badge>
                           )}
                           {isLowConfidence && (
-                            <Badge variant="default" className="text-[9px] font-bold bg-amber-500 hover:bg-amber-600 text-white">
+                            <Badge variant="outline" className="text-[9px] font-bold bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/30">
                               Low Confidence
                             </Badge>
                           )}
@@ -1446,7 +1364,7 @@ export default function AssessmentDetailsPage() {
                             variant="ghost"
                             size="icon"
                             onClick={() => handleAcceptCandidate(cand.id)}
-                            className="h-8 w-8 text-emerald-600 hover:bg-emerald-50"
+                            className="h-8 w-8 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10"
                             title="Accept"
                           >
                             <Check className="size-4" />
@@ -1518,8 +1436,8 @@ export default function AssessmentDetailsPage() {
                                 <div
                                   key={oIdx}
                                   className={cn(
-                                    "text-[10px] p-2 rounded border flex items-center justify-between",
-                                    opt.is_correct ? "bg-emerald-50 border-emerald-200 text-emerald-800" : "bg-muted/10 border-border"
+                                    "text-[10px] p-2 rounded-md border flex items-center justify-between",
+                                    opt.is_correct ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-800 dark:text-emerald-300" : "bg-muted/20 border-border/60"
                                   )}
                                 >
                                   <span>{opt.text}</span>

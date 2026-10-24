@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -38,6 +39,14 @@ class ApprovalPolicyUpdate(BaseModel):
     sealing_warning_days: int | None = Field(
         None, description="Days before window start to alert if not sealed"
     )
+    compliance_rules: dict[str, Any] | None = Field(
+        None,
+        description=(
+            "How strictly each automatic pre-moderation check applies. "
+            "Keys: MARKS_TOTAL, MARKS_DISTRIBUTION, STRUCTURE, QUESTIONS_COMPLETE; "
+            "each has a mode of BLOCKING, WARNING or OFF."
+        ),
+    )
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -54,6 +63,8 @@ class ApprovalPolicyResponse(BaseModel):
     post_approval_edit_mode: PostApprovalEditMode
     post_start_edit_mode: PostStartEditMode
     sealing_warning_days: int | None = None
+    # Always the full effective rules (institution settings laid over the platform defaults).
+    compliance_rules: dict[str, Any] = Field(default_factory=dict)
     is_active: bool
     created_at: datetime
     updated_at: datetime | None = None

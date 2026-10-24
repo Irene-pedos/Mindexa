@@ -255,9 +255,17 @@ def _to_detail_response(question: Question) -> QuestionDetailResponse:
     return QuestionDetailResponse(
         id=question.id,
         content=question.content,
+        image_url=getattr(question, "image_url", None),
         explanation=question.explanation,
         hint=getattr(question, "hint", None),
         question_type=question.question_type,
+        # These were omitted, so a bank question lost its scenario, image and tables
+        # when it was fetched to be added to an assessment.
+        case_study_context=getattr(question, "case_study_context", None),
+        question_table_context=getattr(question, "question_table_context", None),
+        requires_table_answer=bool(getattr(question, "requires_table_answer", False)),
+        answer_table_template=getattr(question, "answer_table_template", None),
+        computational_type=getattr(question, "computational_type", None),
         difficulty=question.difficulty,
         grading_mode=getattr(question, "grading_mode", "auto"),
         status=getattr(question, "status", "active"),
@@ -291,7 +299,8 @@ async def upload_question_image(
     current_user: User = Depends(require_lecturer_or_admin),
 ) -> dict:
     ext = os.path.splitext(file.filename)[1].lower()
-    if ext not in [".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg"]:
+    # SVG is excluded: it can carry scripts and is served from the API origin.
+    if ext not in [".jpg", ".jpeg", ".png", ".gif", ".webp"]:
         from app.core.exceptions import ValidationError
         raise ValidationError("Only image files are allowed.", code="INVALID_IMAGE_TYPE")
 

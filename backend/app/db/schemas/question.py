@@ -22,7 +22,7 @@ class QuestionOptionCreate(MindexaSchema):
     content: str = Field(min_length=1, max_length=2000)
     is_correct: bool | None = None
     match_key: str | None = Field(default=None, max_length=500)
-    match_value: str | None = Field(default=None, max_length=500)
+    match_value: str | None = Field(default=None, max_length=5000)
     order_index: int = Field(ge=0)
 
 
@@ -189,7 +189,7 @@ class AddQuestionToAssessmentRequest(MindexaSchema):
     assessment_section_id: uuid.UUID | None = None
     order_index: int = Field(ge=0)
     marks_override: int | None = Field(default=None, ge=1, le=100)
-    is_required: bool = True
+    is_required: bool = False
 
 
 class AssessmentQuestionResponse(BaseAuditedResponse):

@@ -21,6 +21,14 @@ export type AcademicClassSection = ClassSectionResponse
 export type AcademicCourse = CourseResponse
 export type AcademicPeriod = AcademicPeriodResponse
 
+export type TeachingAssignmentRole =
+  | "MAIN_LECTURER"
+  | "ASSISTANT_LECTURER"
+  | "CO_LECTURER"
+  | "SUPERVISOR"
+  | "REVIEWER"
+  | "GUEST_LECTURER";
+
 export interface TeachingAssignment {
   id: string;
   lecturer_id: string;
@@ -32,7 +40,7 @@ export interface TeachingAssignment {
   course_id: string;
   class_section_id?: string;
   academic_period_id: string;
-  role: "MAIN_LECTURER" | "ASSISTANT_LECTURER" | "SUPERVISOR" | "REVIEWER";
+  role: TeachingAssignmentRole;
   is_active: boolean;
   academic_year?: string;
   institution_name?: string;
@@ -105,10 +113,38 @@ export const academicApi = {
 // Also export as individual functions for robustness
 export const getAcademicPeriods = academicApi.getPeriods;
 
+export interface TeachingAssignmentPayload {
+  lecturer_id: string;
+  institution_id: string;
+  campus_id?: string | null;
+  college_id?: string | null;
+  department_id: string;
+  option_id?: string | null;
+  course_id: string;
+  class_section_id?: string | null;
+  academic_period_id: string;
+  academic_year: string;
+  role: TeachingAssignmentRole;
+}
+
+/** Academic year label for a period, e.g. "2026" or "2026/2027" when it spans two calendar years. */
+export function academicYearOf(period: { start_date: string; end_date: string }): string {
+  const start = new Date(period.start_date).getUTCFullYear();
+  const end = new Date(period.end_date).getUTCFullYear();
+  return start === end ? String(start) : `${start}/${end}`;
+}
+
 export const adminAcademicApi = {
   // Teaching Assignments
-  assignLecturer: async (data: any) => {
+  assignLecturer: async (data: TeachingAssignmentPayload) => {
     return apiClient("/admin/academic/assignments", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+  /** Creates all assignments in one transaction: all succeed or none do. */
+  assignLecturerBulk: async (data: TeachingAssignmentPayload[]): Promise<TeachingAssignment[]> => {
+    return apiClient("/admin/academic/assignments/bulk", {
       method: "POST",
       body: JSON.stringify(data),
     });

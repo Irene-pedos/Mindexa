@@ -21,6 +21,8 @@ import {
   Sparkles,
   QrCode,
   Loader2,
+  ChevronDown,
+  Download,
 } from "lucide-react";
 
 import {
@@ -47,9 +49,29 @@ import {
 } from "@/components/ui/dialog";
 
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
   examOfficeApi,
+  ExamDocumentType,
   ExamOfficeQueueItem,
 } from "@/lib/api/exam-office";
+
+const DOCUMENTS: Array<{ type: ExamDocumentType; label: string; file: string }> = [
+  { type: "paper", label: "Exam paper (with seal QR)", file: "exam-paper.docx" },
+  { type: "marking-scheme", label: "Marking scheme", file: "marking-scheme.docx" },
+  { type: "moderation-form", label: "Moderation form", file: "moderation-form.docx" },
+];
+
+/** Next step of the print job lifecycle: REQUESTED → PRINTED → STORED → DISTRIBUTED. */
+const NEXT_PRINT_STEP: Record<string, { status: string; label: string } | undefined> = {
+  REQUESTED: { status: "PRINTED", label: "Mark printed" },
+  PRINTED: { status: "STORED", label: "Mark stored" },
+  STORED: { status: "DISTRIBUTED", label: "Mark distributed" },
+};
 import { cn } from "@/lib/utils";
 
 interface ExamOfficeQueueViewProps {
@@ -72,6 +94,9 @@ export function ExamOfficeQueueView({ portal = "lecturer" }: ExamOfficeQueueView
   const [revokingItem, setRevokingItem] = useState<ExamOfficeQueueItem | null>(null);
   const [revokeReason, setRevokeReason] = useState("");
   const [isRevoking, setIsRevoking] = useState(false);
+
+  // Document download / print job progress (keyed so only one button spins)
+  const [busyKey, setBusyKey] = useState<string | null>(null);
 
   const fetchQueue = useCallback(async () => {
     try {
@@ -110,9 +135,42 @@ export function ExamOfficeQueueView({ portal = "lecturer" }: ExamOfficeQueueView
     }
   };
 
+  const handleDownload = async (
+    item: ExamOfficeQueueItem,
+    doc: (typeof DOCUMENTS)[number],
+  ) => {
+    const key = `doc:${item.assessment_id}:${doc.type}`;
+    setBusyKey(key);
+    try {
+      await examOfficeApi.downloadDocument(item.assessment_id, doc.type, doc.file);
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Could not download the document");
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
+  const handleAdvancePrintJob = async (item: ExamOfficeQueueItem) => {
+    const job = item.print_job;
+    const next = job ? NEXT_PRINT_STEP[job.status] : undefined;
+    if (!job || !next) return;
+    const key = `job:${job.id}`;
+    setBusyKey(key);
+    try {
+      await examOfficeApi.updatePrintJob(job.id, { status: next.status });
+      toast.success(`Print job ${next.status.toLowerCase()}.`);
+      fetchQueue();
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Could not update the print job");
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
   const handleRevoke = async () => {
-    if (!revokingItem || !revokeReason.trim()) {
-      toast.error("Please enter a mandatory reason for seal revocation.");
+    // The API requires at least 5 characters; check here so the error is clear
+    if (!revokingItem || revokeReason.trim().length < 5) {
+      toast.error("Enter a reason for revoking the seal (at least 5 characters).");
       return;
     }
     try {
@@ -320,6 +378,10 @@ export function ExamOfficeQueueView({ portal = "lecturer" }: ExamOfficeQueueView
                           <Printer className="size-3.5 text-foreground/70" />
                           <span>
                             Copies: <strong>{printData.copies_total}</strong> ({printData.enrolled_count} + {printData.spare_percent}% spare)
+                            {" · "}
+                            <Badge variant="outline" className="text-[9px] uppercase">
+                              {printData.status}
+                            </Badge>
                           </span>
                         </div>
                       )}
@@ -348,22 +410,43 @@ export function ExamOfficeQueueView({ portal = "lecturer" }: ExamOfficeQueueView
                       </Button>
                     ) : (
                       <>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="h-9 text-xs rounded-lg gap-1.5"
-                          asChild
-                        >
-                          <a
-                            href={examOfficeApi.getPrintableUrl(item.assessment_id)}
-                            target="_blank"
-                            rel="noopener noreferrer"
+                        {printData && NEXT_PRINT_STEP[printData.status] && (
+                          <Button
+                            size="sm"
+                            className="h-9 text-xs rounded-lg gap-1.5"
+                            disabled={busyKey === `job:${printData.id}`}
+                            onClick={() => handleAdvancePrintJob(item)}
                           >
-                            <Printer className="size-3.5 text-primary" />
-                            Print Master Copy
-                            <ExternalLink className="size-3 text-muted-foreground" />
-                          </a>
-                        </Button>
+                            {busyKey === `job:${printData.id}` ? (
+                              <Loader2 className="size-3.5 animate-spin" />
+                            ) : (
+                              <Printer className="size-3.5" />
+                            )}
+                            {NEXT_PRINT_STEP[printData.status]?.label}
+                          </Button>
+                        )}
+
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button size="sm" variant="outline" className="h-9 text-xs rounded-lg gap-1.5">
+                              <Download className="size-3.5 text-primary" />
+                              Documents
+                              <ChevronDown className="size-3 text-muted-foreground" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            {DOCUMENTS.map((doc) => (
+                              <DropdownMenuItem
+                                key={doc.type}
+                                disabled={busyKey === `doc:${item.assessment_id}:${doc.type}`}
+                                onSelect={() => handleDownload(item, doc)}
+                              >
+                                <FileText className="mr-2 size-3.5" />
+                                {doc.label}
+                              </DropdownMenuItem>
+                            ))}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
 
                         <Button
                           size="sm"

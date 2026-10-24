@@ -1439,3 +1439,93 @@ async def test_conflict_of_interest_rechecked_at_approval(db: AsyncSession):
         )
 
 
+@pytest.mark.asyncio
+async def test_request_changes_with_note_only_reaches_the_author(db: AsyncSession):
+    """A moderator who writes feedback only in the decision note must not be rejected,
+    and the author must be told what to change (status, notification and a comment)."""
+    from app.db.enums import NotificationType
+    from app.db.models.notification import Notification
+
+    env = await _setup_institutional_env(db)
+    asmt, review = await _submitted_cs_review(db, env)
+    mod_svc = ModerationService(db)
+    await mod_svc.claim_review(review.id, env["mod_cs"])
+
+    asmt.draft_is_complete = True  # as left by finalizing the paper before submission
+    await db.commit()
+
+    note = "Section A must be closed questions only, and add Sections B and C."
+    decided = await mod_svc.request_changes(review.id, env["mod_cs"], decision_note=note)
+
+    assert decided.status == ModerationReviewStatus.CHANGES_REQUESTED
+    await db.refresh(asmt)
+    assert asmt.status == AssessmentStatus.CHANGES_REQUESTED
+    assert asmt.draft_is_complete is False  # editing tools reopen with the status
+
+    db.expire(review, ["comments"])  # the author reads this in a fresh request, not the moderator's session
+    overview = await mod_svc.get_moderation_overview(asmt.id, env["author"])
+    comments = [c for r in overview["rounds"] for c in r["comments"]]
+    assert [c["comment"] for c in comments] == [note]
+
+    notices = (
+        await db.execute(
+            select(Notification).where(
+                Notification.recipient_id == env["author"].id,
+                Notification.notification_type == NotificationType.MODERATION_CHANGES_REQUESTED,
+            )
+        )
+    ).scalars().all()
+    assert len(notices) == 1
+    assert note[:40] in notices[0].body
+
+
+@pytest.mark.asyncio
+async def test_request_changes_without_any_feedback_is_rejected(db: AsyncSession):
+    env = await _setup_institutional_env(db)
+    _, review = await _submitted_cs_review(db, env)
+    mod_svc = ModerationService(db)
+    await mod_svc.claim_review(review.id, env["mod_cs"])
+
+    with pytest.raises(BadRequestError, match="Explain what must change"):
+        await mod_svc.request_changes(review.id, env["mod_cs"], decision_note="   ")
+
+
+@pytest.mark.asyncio
+async def test_claiming_a_review_notifies_the_author(db: AsyncSession):
+    from app.db.enums import NotificationType
+    from app.db.models.notification import Notification
+
+    env = await _setup_institutional_env(db)
+    asmt, review = await _submitted_cs_review(db, env)
+    await ModerationService(db).claim_review(review.id, env["mod_cs"])
+
+    notices = (
+        await db.execute(
+            select(Notification).where(
+                Notification.recipient_id == env["author"].id,
+                Notification.notification_type == NotificationType.MODERATION_STARTED,
+            )
+        )
+    ).scalars().all()
+    assert len(notices) == 1
+    assert notices[0].reference_id == asmt.id
+
+
+@pytest.mark.asyncio
+async def test_failing_notification_never_rolls_back_the_decision(db: AsyncSession, monkeypatch):
+    """A rejected notification used to abort the whole 'request changes' transaction."""
+    env = await _setup_institutional_env(db)
+    asmt, review = await _submitted_cs_review(db, env)
+    mod_svc = ModerationService(db)
+    await mod_svc.claim_review(review.id, env["mod_cs"])
+
+    async def broken_create(**_kwargs):
+        raise RuntimeError('invalid input value for enum notificationtype: "MODERATION_CHANGES_REQUESTED"')
+
+    monkeypatch.setattr(mod_svc.notification_repo, "create", broken_create)
+
+    decided = await mod_svc.request_changes(review.id, env["mod_cs"], decision_note="Fix section A.")
+
+    assert decided.status == ModerationReviewStatus.CHANGES_REQUESTED
+    await db.refresh(asmt)
+    assert asmt.status == AssessmentStatus.CHANGES_REQUESTED

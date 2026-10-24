@@ -112,8 +112,11 @@ class AIGenerationRepository:
         ai_model_used: str | None = None,
         ai_provider: str | None = None,
         total_tokens_used: int | None = None,
+        sections_json: list[dict[str, Any]] | None = None,
     ) -> None:
         values: dict[str, Any] = {"status": status}
+        if sections_json is not None:
+            values["sections_json"] = sections_json
         if total_generated is not None:
             values["total_generated"] = total_generated
         if total_failed is not None:

@@ -20,12 +20,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.auth import User
 from app.db.session import get_db
-from app.dependencies.auth import require_active_user, require_lecturer_or_admin
+from app.dependencies.auth import require_lecturer_or_admin
 from app.schemas.blueprint import (
     BlueprintSummaryResponse,
     BlueprintValidationResult,
     SetBlueprintRequest,
 )
+from app.services.assessment_service import AssessmentService
 from app.services.blueprint_service import BlueprintService
 
 router = APIRouter(prefix="/blueprint", tags=["Blueprint Engine"])
@@ -33,6 +34,16 @@ router = APIRouter(prefix="/blueprint", tags=["Blueprint Engine"])
 
 def _service(db: AsyncSession) -> BlueprintService:
     return BlueprintService(db)
+
+
+# A blueprint describes how the paper is built, so it is staff-only and follows the assessment's own
+# access rules instead of trusting the id in the URL.
+async def _authorize_read(db: AsyncSession, assessment_id: uuid.UUID, user: User) -> None:
+    await AssessmentService(db).get_assessment(assessment_id, user)
+
+
+async def _authorize_write(db: AsyncSession, assessment_id: uuid.UUID, user: User) -> None:
+    await AssessmentService(db).assert_can_edit_assessment(assessment_id, user)
 
 
 # ---------------------------------------------------------------------------
@@ -56,6 +67,7 @@ async def set_blueprint(
     current_user: User = Depends(require_lecturer_or_admin),
     db: AsyncSession = Depends(get_db),
 ) -> BlueprintSummaryResponse:
+    await _authorize_write(db, assessment_id, current_user)
     svc = _service(db)
     result = await svc.set_blueprint(assessment_id, body)
     return result
@@ -73,9 +85,10 @@ async def set_blueprint(
 )
 async def get_blueprint(
     assessment_id: uuid.UUID,
-    current_user: User = Depends(require_active_user),
+    current_user: User = Depends(require_lecturer_or_admin),
     db: AsyncSession = Depends(get_db),
 ) -> BlueprintSummaryResponse:
+    await _authorize_read(db, assessment_id, current_user)
     svc = _service(db)
     return await svc.get_blueprint(assessment_id)
 
@@ -97,9 +110,10 @@ async def get_blueprint(
 )
 async def validate_blueprint(
     assessment_id: uuid.UUID,
-    current_user: User = Depends(require_active_user),
+    current_user: User = Depends(require_lecturer_or_admin),
     db: AsyncSession = Depends(get_db),
 ) -> BlueprintValidationResult:
+    await _authorize_read(db, assessment_id, current_user)
     svc = _service(db)
     return await svc.validate_blueprint(assessment_id)
 
@@ -120,8 +134,9 @@ async def validate_blueprint(
 )
 async def get_distribution(
     assessment_id: uuid.UUID,
-    current_user: User = Depends(require_active_user),
+    current_user: User = Depends(require_lecturer_or_admin),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
+    await _authorize_read(db, assessment_id, current_user)
     svc = _service(db)
     return await svc.calculate_question_distribution(assessment_id)

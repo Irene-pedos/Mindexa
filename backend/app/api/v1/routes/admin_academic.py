@@ -37,6 +37,7 @@ from app.db.schemas.academic import (
 )
 from app.db.repositories.notification_repo import NotificationRepository
 from app.db.enums import NotificationType
+from app.core import links as frontend_links
 from app.core.logger import get_logger
 from app.dependencies.auth import require_admin
 
@@ -50,6 +51,22 @@ router = APIRouter(
 )
 
 # ── Teaching Assignments ───────────────────────────────────────────────────
+
+async def _link_course_department(db: AsyncSession, assignment: TeachingAssignment) -> None:
+    """Give a department-less course the department it is being taught under.
+
+    Moderation, the exam office and appeals all route by course.department_id, so a
+    course without one makes every paper for it invisible to moderators.
+    """
+    course = await db.get(Course, assignment.course_id)
+    if course and course.department_id is None and assignment.department_id:
+        course.department_id = assignment.department_id
+        logger.info(
+            "course_department_linked",
+            course_id=str(course.id),
+            department_id=str(assignment.department_id),
+        )
+
 
 async def _send_assignment_notification(db: AsyncSession, assignment: TeachingAssignment):
     """Internal helper to notify lecturer of new assignment."""
@@ -66,7 +83,7 @@ async def _send_assignment_notification(db: AsyncSession, assignment: TeachingAs
             notification_type=NotificationType.TEACHING_ASSIGNMENT_CREATED,
             title="New Teaching Assignment",
             body=f"You have been assigned to the Department of {dept.name if dept else 'Academic Unit'} at {inst.name if inst else 'your institution'}{course_info} for the {assignment.academic_year} academic year.",
-            action_url="/lecturer/profile",
+            action_url=frontend_links.lecturer_profile(),
             reference_id=assignment.id,
             reference_type="teaching_assignment"
         )
@@ -94,6 +111,7 @@ async def create_bulk_assignments(
     # Send notifications (Lecturer is the same for all in this context from UI)
     # But we iterate just in case of future varied usage
     for a in new_assignments:
+        await _link_course_department(db, a)
         await _send_assignment_notification(db, a)
         
     await db.commit()
@@ -111,6 +129,7 @@ async def create_assignment(
     db.add(new_assignment)
     await db.flush() # Get ID
     
+    await _link_course_department(db, new_assignment)
     await _send_assignment_notification(db, new_assignment)
 
     await db.commit()
@@ -150,6 +169,7 @@ async def get_assignments(
         .outerjoin(ClassSection, TeachingAssignment.class_section_id == ClassSection.id)
         .outerjoin(ClassGroup, ClassSection.class_group_id == ClassGroup.id)
         .where(TeachingAssignment.is_active == True)
+        .where(TeachingAssignment.is_deleted == False)  # noqa: E712
     )
 
     if lecturer_id:

@@ -27,12 +27,8 @@ DESIGN RULES:
        (prevents enumeration attacks)
 
 IP ADDRESS EXTRACTION:
-    We read from X-Forwarded-For (when behind a reverse proxy) with fallback
-    to request.client.host. In production, configure your reverse proxy
-    (nginx / Caddy) to set X-Real-IP or X-Forwarded-For correctly.
-
-    WARNING: Do NOT trust X-Forwarded-For in environments where the reverse
-    proxy is not under your control. Configure TRUSTED_HOSTS accordingly.
+    Delegated to app.core.client_ip.get_client_ip: X-Forwarded-For is only read
+    when TRUSTED_PROXY_COUNT > 0, otherwise request.client.host is used.
 
 EMAIL SENDING:
     This module does NOT send emails directly. It calls AuthService methods
@@ -59,6 +55,7 @@ from fastapi import APIRouter, Cookie, Depends, Request, Response, status, File,
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.client_ip import get_client_ip
 from app.core.config import settings
 from app.db.enums import UserRole
 from app.core.exceptions import AuthenticationError
@@ -99,25 +96,13 @@ logger = structlog.get_logger(__name__)
 # HELPERS
 # ─────────────────────────────────────────────────────────────────────────────
 
+_AVATAR_EXTENSIONS = frozenset({".jpg", ".jpeg", ".png", ".gif", ".webp"})
+_AVATAR_MAX_BYTES = 5 * 1024 * 1024
+
+
 def _get_client_ip(request: Request) -> str | None:
-    """
-    Extract the client's real IP address from the request.
-
-    Checks X-Forwarded-For first (set by reverse proxies like nginx, Caddy).
-    Falls back to the direct connection IP from request.client.
-
-    NOTE: X-Forwarded-For can be spoofed if you're not behind a trusted proxy.
-    In production, configure your ingress to set this header reliably and
-    strip any user-supplied values.
-    """
-    forwarded_for = request.headers.get("X-Forwarded-For")
-    if forwarded_for:
-        # X-Forwarded-For can be a comma-separated list: "client, proxy1, proxy2"
-        # The leftmost IP is the original client
-        return forwarded_for.split(",")[0].strip()
-    if request.client:
-        return request.client.host
-    return None
+    """Client address for audit logs and lockout; X-Forwarded-For is trusted only via TRUSTED_PROXY_COUNT."""
+    return get_client_ip(request)
 
 
 def _queue_email_notification(
@@ -985,13 +970,24 @@ async def upload_avatar(
             detail="File must be an image",
         )
 
+    # The Content-Type header is client-controlled, so the stored extension is what is enforced.
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in _AVATAR_EXTENSIONS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Profile picture must be a JPG, PNG, GIF or WebP image",
+        )
+    if file.size is not None and file.size > _AVATAR_MAX_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="Profile picture must be 5 MB or smaller",
+        )
+
     # Ensure upload directory exists
-    # We use a relative path from the app root
-    upload_dir = os.path.join("uploads", "avatars")
+    upload_dir = os.path.join(settings.UPLOAD_DIR, "avatars")
     os.makedirs(upload_dir, exist_ok=True)
 
     # Generate unique filename
-    ext = os.path.splitext(file.filename)[1]
     filename = f"{current_user.id}_{uuid4().hex}{ext}"
     file_path = os.path.join(upload_dir, filename)
 

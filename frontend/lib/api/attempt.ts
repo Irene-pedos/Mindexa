@@ -15,7 +15,21 @@ export const attemptApi = {
       method: "POST", 
       body: JSON.stringify({ access_token: accessToken }) 
     }),
-  submitAttempt: (attemptId: string, accessToken: string, confirm: boolean = true) => 
+  /** Choose a question in an "answer N of M" section. Fails with CHOICE_LIMIT_EXCEEDED beyond N. */
+  selectQuestion: (attemptId: string, sectionId: string, questionId: string) =>
+    apiClient(`/attempts/${attemptId}/sections/${sectionId}/select`, {
+      method: "POST",
+      body: JSON.stringify({ question_id: questionId }),
+    }),
+  /** Remove a choice made with selectQuestion. */
+  deselectQuestion: (attemptId: string, questionId: string) =>
+    apiClient(`/attempts/${attemptId}/questions/${questionId}/select`, {
+      method: "DELETE",
+    }),
+  /** Re-issue the session token when this browser lost it (new device / cleared storage). */
+  reclaimAttempt: (attemptId: string) =>
+    apiClient(`/attempts/${attemptId}/reclaim`, { method: "POST" }),
+  submitAttempt: (attemptId: string, accessToken: string, confirm: boolean = true) =>
     apiClient(`/attempts/${attemptId}/submit`, { 
       method: "POST", 
       body: JSON.stringify({ access_token: accessToken, confirm }) 
@@ -31,9 +45,4 @@ export const attemptApi = {
       })
     }),
   getAttemptsForAssessment: (assessmentId: string) => apiClient(`/attempts/assessment/${assessmentId}`),
-  grantReassessment: (attemptId: string, data: Record<string, unknown>) => 
-    apiClient(`/attempts/${attemptId}/reassessment`, { 
-      method: "POST", 
-      body: JSON.stringify(data) 
-    }),
 };

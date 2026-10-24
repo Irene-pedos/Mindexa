@@ -101,9 +101,11 @@ const getNotificationLink = (notification: {
   const id = notification.related_id;
   if ((type.includes("RESULT") || type.includes("GRADE")) && id)
     return `/student/results/${id}`;
-  if (type.includes("ASSESSMENT") && id) return `/student/assessments/${id}`;
+  // There is no /student/assessments/{id} page: an assessment opens on its take
+  // page, and the list is the safe fallback.
+  if (type.includes("REASSESSMENT") && id) return `/student/assessments/${id}/take`;
+  if (type.includes("ASSESSMENT") && id) return `/student/assessments/${id}/take`;
   if (type.includes("INTEGRITY") && id) return `/student/results/${id}`;
-  if (type.includes("REASSESSMENT") && id) return `/student/assessments/${id}`;
   return "/student/notifications";
 };
 

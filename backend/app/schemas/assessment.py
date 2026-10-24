@@ -114,13 +114,24 @@ class AssessmentQuestionResponse(BaseModel):
     assessment_id: uuid.UUID
     question_id: uuid.UUID
     section_id: uuid.UUID | None = Field(None, validation_alias="assessment_section_id", serialization_alias="assessment_section_id")
-    marks: int = Field(..., validation_alias="marks_override", serialization_alias="marks_override")
+    # Empty override = "use the question's own marks" everywhere else in the backend
+    # (assessment_marks._effective_aq_marks); resolved below instead of failing to serialize.
+    marks: int | None = Field(None, validation_alias="marks_override", serialization_alias="marks_override")
     order_index: int
     added_via: str
     is_required: bool
+    # Group work: the group this question is assigned to (None = shared by everyone).
+    group_id: uuid.UUID | None = None
     question: QuestionDetailResponse | None = None
 
     model_config = {"from_attributes": True, "populate_by_name": True, "by_alias": True}
+
+    @model_validator(mode="after")
+    def _fall_back_to_question_marks(self) -> "AssessmentQuestionResponse":
+        if self.marks is None:
+            own = getattr(self.question, "marks", None) if self.question else None
+            self.marks = int(own) if own is not None else 0
+        return self
 
 
 # ─── Assessment Draft Progress Schema ─────────────────────────────────────────
@@ -487,6 +498,12 @@ class AssessmentDetailResponse(BaseModel):
     ai_assistance_allowed: bool
     is_open_book: bool
     integrity_monitoring_enabled: bool
+    # Settings the edit page must be able to load back, or saving would reset them.
+    allow_resume: bool = True
+    result_release_at: datetime | None = None
+    max_group_size: int | None = None
+    group_formation_mode: str | None = None
+    integrity_profile_code: str | None = None
     randomize_questions: bool = Field(serialization_alias="randomise_questions")
     randomize_options: bool = Field(serialization_alias="randomise_options")
     is_ai_generation_enabled: bool
@@ -652,7 +669,7 @@ class BulkAssessmentQuestion(BaseModel):
     imageUrl: str | None = None
     computationalType: str | None = None
     caseStudyContext: str | None = None
-    is_required: bool | None = True
+    is_required: bool | None = False
     question_table_context: dict | list | None = Field(None, validation_alias="question_table_context")
     questionTableContext: dict | list | None = Field(None, validation_alias="questionTableContext")
     requires_table_answer: bool | None = Field(False, validation_alias="requires_table_answer")
@@ -746,7 +763,8 @@ class BulkAssessmentRules(BaseModel):
     shuffleQuestions: bool | None = True
     shuffleOptions: bool | None = True
     resultRelease: str | None = "manual"
-    resultReleaseAt: datetime | str | None = None
+    # Must be parsed here: as `datetime | str` an ISO string stayed a string and the insert failed.
+    resultReleaseAt: datetime | None = None
     attempts: int | str | None = 1
     passwordProtected: bool | None = False
     accessPassword: str | None = None
@@ -765,6 +783,8 @@ class BulkAssessmentRules(BaseModel):
     @classmethod
     def ensure_numeric_rules(cls, data: dict) -> dict:
         if not isinstance(data, dict): return data
+        if data.get("resultReleaseAt") == "":
+            data["resultReleaseAt"] = None
         for f in ["attempts", "latePenaltyPercent", "gracePeriodMinutes"]:
             val = data.get(f)
             if val == "" or val is None:
@@ -815,6 +835,13 @@ class MarksSummaryResponse(BaseModel):
     total_required_marks: int
     max_possible_score: int
     configured_total_marks: int
+    # What the institution's approval policy requires a SUMMATIVE paper to add up to; the
+    # service computed these but the response model dropped them, so the UI could not show
+    # "required 70 / policy 100" until the submit call failed.
+    policy_total: int | None = None
+    # How strictly the institution applies that total: BLOCKING (required), WARNING (advice) or OFF
+    policy_total_mode: str = "BLOCKING"
+    configured_policy_total_marks: int | None = None
     is_summative: bool
     is_valid_structure: bool
     choice_pool_issues: list[ChoicePoolIssueResponse] = []

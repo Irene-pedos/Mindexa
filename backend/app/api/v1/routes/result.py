@@ -207,7 +207,11 @@ async def list_my_results(
 
     # 2. Add any submitted attempts that do not yet have an AssessmentResult row
     for attempt in attempts:
-        if attempt.id in handled_attempt_ids or attempt.assessment_id in handled_assessment_ids:
+        if attempt.id in handled_attempt_ids:
+            continue
+        # A group attempt is represented by the group's result row; individual
+        # retakes of the same assessment must still show up while they await a result.
+        if attempt.group_id is not None and attempt.assessment_id in handled_assessment_ids:
             continue
         ass = attempt.assessment
         held = bool(attempt.is_flagged or (attempt.integrity_risk_score and attempt.integrity_risk_score >= 70.0))

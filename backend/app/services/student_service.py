@@ -250,6 +250,9 @@ class StudentService:
         """Get detailed information for a specific teaching workspace."""
         ws = await self.workspace_repo.get_by_id(workspace_id)
         if not ws or ws.is_deleted: return None
+        # Callers (workspace page, material list/download, study reader) rely on None meaning "no access".
+        if not await self.workspace_repo.is_student_enrolled(student_id, workspace_id):
+            return None
 
         student_count = await self.workspace_repo.get_student_count(workspace_id)
         progress = await self._calculate_workspace_progress(student_id, workspace_id)

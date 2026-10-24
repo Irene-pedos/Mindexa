@@ -1,107 +1,89 @@
 // frontend/app/student/resources/[id]/read/page.tsx
 "use client";
 
-import React, { useEffect, useState, use } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
-import dynamic from "next/dynamic";
-import { studentApi, StudentResourceResponse } from "@/lib/api/student";
-import { ReaderSource } from "@/components/mindexa/study-reader/types";
-import { Loader2, AlertCircle } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import Link from "next/link";
-
-const StudyReader = dynamic(
-  () => import("@/components/mindexa/study-reader/study-reader").then((m) => m.StudyReader),
-  {
-    ssr: false,
-    loading: () => (
-      <div className="fixed inset-0 z-50 bg-background flex flex-col items-center justify-center p-6 gap-3">
-        <Loader2 className="size-8 animate-spin text-primary" />
-        <p className="text-xs text-muted-foreground font-medium">Opening study reader…</p>
-      </div>
-    ),
-  },
-);
+import { use, useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { studyReaderApi } from "@/lib/api/study-reader";
+import type { ReaderSource } from "@/components/mindexa/study-reader/types";
+import {
+  LazyStudyReader,
+  ReaderErrorScreen,
+  ReaderLoadingScreen,
+  errorMessage,
+  useInitialPage,
+} from "@/components/mindexa/study-reader/reader-page-parts";
 
 interface PageProps {
-  params: Promise<{
-    id: string;
-  }>;
+  params: Promise<{ id: string }>;
 }
 
+type LoadState =
+  | { status: "loading" }
+  | { status: "error"; message: string }
+  | { status: "ready"; source: ReaderSource };
+
+const RESOURCES_HREF = "/student/resources";
+
 export default function PersonalResourceReaderPage({ params }: PageProps) {
-  const resolvedParams = use(params);
-  const resourceId = resolvedParams.id;
-
+  const { id: resourceId } = use(params);
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const pageParam = searchParams.get("page");
-  const parsedPage = pageParam ? parseInt(pageParam, 10) : null;
-  const initialPage = parsedPage && !isNaN(parsedPage) && parsedPage >= 1 ? parsedPage : null;
-
-  const [resource, setResource] = useState<StudentResourceResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const initialPage = useInitialPage();
+  const [state, setState] = useState<LoadState>({ status: "loading" });
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
-    async function loadData() {
-      try {
-        setLoading(true);
-        setError(null);
-        const resources = await studentApi.getPersonalResources();
-        const found = resources.find((r) => r.id === resourceId);
-        if (!found) {
-          setError("Study resource not found.");
-        } else {
-          setResource(found);
+    let cancelled = false;
+
+    studyReaderApi
+      .getMetadata("student_resource", resourceId)
+      .then((meta) => {
+        if (cancelled) return;
+        setState({
+          status: "ready",
+          source: {
+            kind: "student_resource",
+            id: meta.id,
+            title: meta.title,
+            mimeType: meta.mime_type,
+            extension: meta.extension,
+            downloadFilename: meta.title,
+          },
+        });
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          setState({ status: "error", message: errorMessage(err, "This study resource could not be opened.") });
         }
-      } catch (err: any) {
-        setError(err.message || "Failed to load study resource.");
-      } finally {
-        setLoading(false);
-      }
-    }
+      });
 
-    loadData();
-  }, [resourceId]);
+    return () => {
+      cancelled = true;
+    };
+  }, [resourceId, attempt]);
 
-  if (loading) {
+  const retry = useCallback(() => {
+    setState({ status: "loading" });
+    setAttempt((n) => n + 1);
+  }, []);
+
+  if (state.status === "loading") return <ReaderLoadingScreen message="Opening study resource…" />;
+
+  if (state.status === "error") {
     return (
-      <div className="fixed inset-0 z-50 bg-background flex flex-col items-center justify-center p-6 gap-3">
-        <Loader2 className="size-8 animate-spin text-primary" />
-        <p className="text-xs text-muted-foreground font-medium">Opening study resource…</p>
-      </div>
+      <ReaderErrorScreen
+        title="Unable to open resource"
+        message={state.message}
+        backHref={RESOURCES_HREF}
+        backLabel="Return to resources"
+        onRetry={retry}
+      />
     );
   }
-
-  if (error || !resource) {
-    return (
-      <div className="fixed inset-0 z-50 bg-background flex flex-col items-center justify-center p-6 text-center">
-        <AlertCircle className="size-10 text-destructive mb-3" />
-        <h2 className="text-sm font-semibold text-foreground mb-1">Unable to Open Resource</h2>
-        <p className="text-xs text-muted-foreground mb-4 max-w-sm">
-          {error || "The requested personal resource could not be found."}
-        </p>
-        <Button asChild variant="outline" size="sm">
-          <Link href="/student/resources">Return to Resources</Link>
-        </Button>
-      </div>
-    );
-  }
-
-  const source: ReaderSource = {
-    kind: "student_resource",
-    id: resource.id,
-    title: resource.display_name || resource.original_filename,
-    mimeType: resource.mime_type,
-    extension: resource.file_extension,
-    downloadFilename: resource.original_filename,
-  };
 
   return (
-    <StudyReader
-      source={source}
-      onBack={() => router.push("/student/resources")}
+    <LazyStudyReader
+      source={state.source}
+      onBack={() => router.push(RESOURCES_HREF)}
       initialPage={initialPage}
     />
   );

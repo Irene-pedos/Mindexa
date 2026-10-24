@@ -94,7 +94,10 @@ class QuestionService:
             requires_table_answer=req_table,
         )
 
-        if data.question_type in {QuestionType.MCQ.value, QuestionType.TRUE_FALSE.value}:
+        # The API sends lowercase types ("mcq") while the enum values are uppercase, so these
+        # checks never matched before and invalid MCQ / true-false questions were accepted.
+        qtype = (data.question_type or "").upper()
+        if qtype in {QuestionType.MCQ.value, QuestionType.TRUE_FALSE.value}:
             if not data.options:
                 raise ConflictError(
                     f"{data.question_type.upper()} questions must have at least 2 options.",
@@ -106,14 +109,23 @@ class QuestionService:
                     "At least one option must be marked as correct.",
                     code="NO_CORRECT_OPTION",
                 )
-            if data.question_type == QuestionType.TRUE_FALSE.value and len(data.options) != 2:
+            if qtype == QuestionType.TRUE_FALSE.value and len(data.options) != 2:
                 raise ConflictError(
                     "True/False questions must have exactly 2 options.",
                     code="INVALID_OPTION_COUNT",
                 )
 
+        if qtype == QuestionType.CASE_STUDY.value:
+            parts = [o for o in (data.options or []) if (o.option_text or "").strip()]
+            if not (data.case_study_context or "").strip() or len(parts) < 2:
+                raise ConflictError(
+                    "A case study needs its scenario and at least 2 sub-questions.",
+                    code="INCOMPLETE_CASE_STUDY",
+                )
+
         question = await self._repo.create(
             content=data.content,
+            case_study_context=data.case_study_context,
             question_type=data.question_type,
             difficulty=data.difficulty,
             image_url=data.image_url,
@@ -125,7 +137,8 @@ class QuestionService:
             requires_table_answer=req_table,
             answer_table_template=data.answer_table_template,
             course_id=data.course_id,
-            topic_tag=data.topic,
+            # The request allows 200 characters but the column holds 100; cut rather than 500.
+            topic_tag=(data.topic or "").strip()[:100] or None,
             is_in_question_bank=True,
             bank_added_at=datetime.now(UTC),
             bank_added_by_id=created_by.id,
@@ -138,8 +151,10 @@ class QuestionService:
                 content=opt.option_text,
                 is_correct=opt.is_correct,
                 order_index=opt.order_index,
-                match_key=getattr(opt, "match_key", None),
-                match_value=getattr(opt, "match_value", None),
+                # Matching pairs keep their right-hand side here; case studies keep the
+                # sub-question marks in match_key and the answer guidance in match_value.
+                match_key=opt.match_key,
+                match_value=opt.option_text_right,
             )
 
         await self._repo.create_bank_entry(
