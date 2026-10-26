@@ -221,6 +221,8 @@ class ReleaseQueueItem(BaseModel):
     max_score: float | None = None
     percentage: float | None = None
     letter_grade: str | None = None
+    # AI grades accepted without a recorded review; they block release until reviewed.
+    unreviewed_question_ids: list[uuid.UUID] = []
 
 
 class ReleaseQueueResponse(BaseModel):

@@ -99,6 +99,20 @@ class WorkspaceRepository:
         )
         return (await self.db.execute(stmt)).first() is not None
 
+    async def is_student_in_course(self, student_id: uuid.UUID, course_id: uuid.UUID) -> bool:
+        """True when the student has active access to at least one workspace of the course."""
+        stmt = (
+            select(TeachingWorkspace.id)
+            .join(TeachingAssignment, TeachingAssignment.id == TeachingWorkspace.teaching_assignment_id)
+            .where(
+                TeachingWorkspace.course_id == course_id,
+                TeachingWorkspace.is_deleted == False,
+                self._student_access_clause(student_id),
+            )
+            .limit(1)
+        )
+        return (await self.db.execute(stmt)).first() is not None
+
     async def list_by_student(
         self, student_id: uuid.UUID
     ) -> List[TeachingWorkspace]:

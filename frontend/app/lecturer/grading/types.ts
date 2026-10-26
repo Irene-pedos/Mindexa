@@ -135,11 +135,14 @@ export interface ReleaseQueueItem {
   max_score?: number | null;
   percentage: number | null;
   letter_grade: string | null;
+  /** AI grades accepted without a recorded review; they block release. */
+  unreviewed_question_ids?: string[];
   status:
     | "PENDING_RELEASE"
     | "RELEASED"
     | "INTEGRITY_HOLD"
     | "GRADING_IN_PROGRESS"
+    | "NEEDS_REVIEW"
     | "AWAITING_CLASS_COMPLETION"
     | "NOT_SUBMITTED"
     | string;

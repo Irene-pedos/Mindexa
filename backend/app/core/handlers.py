@@ -95,10 +95,12 @@ def register_exception_handlers(app: FastAPI) -> None:
                 "nameorpolicynotknown",
                 "connection refused",
                 "socket.gaierror",
-                "all configured ai providers failed",
             ]
         ):
             message = "Network problem: Unable to connect to AI services. Please check your internet connection and try again."
+        elif "all configured ai providers failed" in detail_lower:
+            # Provider-side failure (quota, outage, bad key): not the user's connection.
+            message = "The AI service is temporarily unavailable. Please try again in a few minutes."
 
         response = _error_response(
             status_code=exc.status_code,

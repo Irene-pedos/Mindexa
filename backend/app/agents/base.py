@@ -9,6 +9,9 @@ from pydantic import BaseModel, ValidationError as PydanticValidationError
 from app.core.ai.gateway import AIGateway
 from app.core.ai.prompt_registry import get_prompt
 from app.core.exceptions import ValidationError
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -134,7 +137,13 @@ class BaseAgent:
                 return response_model.model_validate(data)
 
         except (json.JSONDecodeError, PydanticValidationError, ValueError) as exc:
+            # The parser error can quote model output; keep it in the logs, not the response.
+            logger.warning(
+                "ai_output_validation_failed",
+                model=response_model.__name__,
+                error=str(exc)[:500],
+            )
             raise ValidationError(
-                f"The AI returned an invalid response: {str(exc)}",
+                "The AI returned a response we could not use. Please try again.",
                 code="AI_OUTPUT_VALIDATION_FAILED",
             ) from exc

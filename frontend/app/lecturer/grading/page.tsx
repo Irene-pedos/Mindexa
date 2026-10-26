@@ -78,12 +78,19 @@ import {
   Maximize2,
   Minimize2,
   RotateCcw,
+  ScanSearch,
 } from "lucide-react";
 import { ContextualExplainer } from "@/components/mindexa/common/contextual-explainer";
 import { renderRichMathText } from "@/components/mindexa/common/math-renderer";
 import { TableContextViewer } from "@/components/mindexa/common/table-context-viewer";
 
-import { gradingApi } from "@/lib/api/grading";
+import {
+  gradingApi,
+  type AttemptReview,
+  type GradeCheck,
+  type GradingConsistency,
+  type GradingOverview,
+} from "@/lib/api/grading";
 import { lecturerApi, WorkspaceListItem } from "@/lib/api/lecturer";
 import { assessmentApi } from "@/lib/api/assessment";
 import { attemptApi } from "@/lib/api/attempt";
@@ -97,6 +104,27 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { AIReviewPanel } from "@/components/mindexa/grading/ai-review-panel";
 import { AiSampleCheckDialog } from "@/components/mindexa/grading/ai-sample-check-dialog";
 import { AIFeedbackEditor } from "@/components/mindexa/grading/ai-feedback-editor";
+import { GradingGuardAlerts } from "@/components/mindexa/grading/grading-guard-alerts";
+import { GradeCheckPanel } from "@/components/mindexa/grading/grade-check-panel";
+import { AttemptReviewDialog } from "@/components/mindexa/grading/attempt-review-dialog";
+import { evaluateConsistency, evaluateGrade } from "@/lib/grading-guard";
+import { useAuth } from "@/hooks/use-auth";
+import {
+  clearDraft,
+  clearDraftIfSaved,
+  clearResumePoint,
+  draftDiffers,
+  isNetworkFailure,
+  purgeLegacyGradingData,
+  readDraft,
+  readResumePoint,
+  resumeSearchParams,
+  scopedStorage,
+  writeDraft,
+  writeResumePoint,
+  type ResumePoint,
+  type StorageLike,
+} from "@/lib/grading-session";
 import { RubricGradingPanel } from "@/components/mindexa/grading/rubric-grading-panel";
 import {
   SpeedGraderStudentAnswerCanvas,
@@ -169,9 +197,70 @@ function ManualOnlyLanguageBanner({
   );
 }
 
+// An AI grade counts as human-reviewed only if the answer was open at least this
+// long. Mirrors MIN_REVIEW_SECONDS in the backend release gate.
+const MIN_REVIEW_SECONDS = 3;
+
 // Universal constants
 const DEFAULT_QUESTION_MAX_MARKS = 10;
 const DEFAULT_ASSESSMENT_TOTAL_MARKS = 100;
+
+/**
+ * The signed-in lecturer's private slice of localStorage. localStorage is shared by
+ * everyone using this browser, so keys are namespaced by user id; with no user id
+ * nothing is stored. It can also throw or be absent (private windows, blocked data).
+ */
+function getGradingStore(userId: string | null | undefined): StorageLike | null {
+  if (!userId) return null;
+  try {
+    return typeof window === "undefined"
+      ? null
+      : scopedStorage(window.localStorage, userId);
+  } catch {
+    return null;
+  }
+}
+
+/** "3 to grade · 2h ago" summary used by the workspace and assessment pickers. */
+function SubmissionActivity({
+  activity,
+}: {
+  activity?: {
+    latest_submission_at: string | null;
+    submitted_count: number;
+    pending_count: number;
+  };
+}) {
+  if (!activity || activity.submitted_count === 0) {
+    return <span className="text-[11px] text-muted-foreground">No submissions</span>;
+  }
+  return (
+    <div className="flex flex-col items-center gap-0.5">
+      {activity.pending_count > 0 ? (
+        <Badge
+          variant="outline"
+          className="text-[10px] font-medium bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/30"
+        >
+          {activity.pending_count} to grade
+        </Badge>
+      ) : (
+        <Badge
+          variant="outline"
+          className="text-[10px] font-medium bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/30"
+        >
+          Up to date
+        </Badge>
+      )}
+      {activity.latest_submission_at && (
+        <span className="text-[10px] text-muted-foreground">
+          {formatDistanceToNow(new Date(activity.latest_submission_at), {
+            addSuffix: true,
+          })}
+        </span>
+      )}
+    </div>
+  );
+}
 
 function DrawerIconButton({
   icon: Icon,
@@ -243,6 +332,12 @@ function CollapsibleDrawerSection({
 }
 
 function LecturerGradingQueueContent() {
+  const { user } = useAuth();
+  // A ref so long-lived listeners (online/offline, unload) always see the current user.
+  const userIdRef = useRef<string | null>(null);
+  userIdRef.current = user?.id ?? null;
+  const gradingStore = () => getGradingStore(userIdRef.current);
+
   const router = useRouter();
   const searchParams = useSearchParams();
   const pathname = usePathname();
@@ -265,10 +360,14 @@ function LecturerGradingQueueContent() {
   );
 
   // Filters & sorting
-  const [status, setStatus] = useState<string>("all");
+  // "needs_action" = work still waiting for the lecturer; "all" includes graded work.
+  const [status, setStatus] = useState<string>("needs_action");
   const [questionType, setQuestionType] = useState<string>("all");
   const [search, setSearch] = useState<string>("");
-  const [sortBy, setSortBy] = useState<string>("priority_desc");
+  const [sortBy, setSortBy] = useState<string>("date_desc");
+
+  // Latest-submission activity, used to put the busiest work first.
+  const [overview, setOverview] = useState<GradingOverview | null>(null);
 
   // Selection & Bulk actions in Step D Main Queue
   const [selectedAttemptIds, setSelectedAttemptIds] = useState<string[]>([]);
@@ -290,7 +389,8 @@ function LecturerGradingQueueContent() {
 
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [hasMore, setHasMore] = useState<boolean>(false);
-  const PAGE_SIZE = 50;
+  // Rows are per question, so a large page keeps one student's attempt on one page.
+  const PAGE_SIZE = 100;
 
   // Reassessment Confirmation Dialog state
   const [rejectDialogOpen, setRejectDialogOpen] = useState(false);
@@ -325,6 +425,100 @@ function LecturerGradingQueueContent() {
   useEffect(() => {
     setReviewStartedAt(new Date());
   }, [activeQuestionIndex]);
+  // "Confirm reviewed" unlocks only after the answer has been open long enough to read.
+  const [reviewReady, setReviewReady] = useState(false);
+  useEffect(() => {
+    setReviewReady(false);
+    const timer = setTimeout(() => setReviewReady(true), MIN_REVIEW_SECONDS * 1000);
+    return () => clearTimeout(timer);
+  }, [activeQuestionIndex, selectedStudent?.attempt_id]);
+  // How other students' similar answers were marked; fetched once per question,
+  // then compared against the score as it is typed.
+  const [consistency, setConsistency] = useState<GradingConsistency | null>(null);
+  const consistencySubmissionId = (() => {
+    const q = activeAttempt?.questions?.[activeQuestionIndex];
+    if (!q || isQuestionAutoGraded(q)) return null;
+    const subs = Array.isArray(activeSubmissions) ? activeSubmissions : [];
+    return subs.find((s) => s.question_id === q.id)?.id ?? null;
+  })();
+  useEffect(() => {
+    setConsistency(null);
+    if (!consistencySubmissionId) return;
+    let stale = false;
+    gradingApi
+      .getConsistency(consistencySubmissionId)
+      .then((c) => {
+        if (!stale) setConsistency(c);
+      })
+      .catch(() => undefined); // advisory only
+    return () => {
+      stale = true;
+    };
+  }, [consistencySubmissionId]);
+  // AI second-marker review. Kept with the exact grade it reviewed so we can
+  // tell when the lecturer has changed the grade since.
+  const [gradeCheck, setGradeCheck] = useState<{
+    submissionId: string;
+    gradeKey: string;
+    result: GradeCheck;
+  } | null>(null);
+  const [isCheckingGrade, setIsCheckingGrade] = useState(false);
+  const gradeKeyFor = (score: string, feedback: string) =>
+    `${score.trim()}|${feedback.trim()}|${JSON.stringify(rubricScores)}`;
+
+  const handleCheckGrade = async (submissionId: string, maxMarks: number) => {
+    const score = parseFloat(overrideScore);
+    if (isNaN(score) || score < 0 || score > maxMarks) {
+      toast.error(`Enter a score between 0 and ${maxMarks} first.`);
+      return;
+    }
+    const gradeKey = gradeKeyFor(overrideScore, finalFeedback);
+    setIsCheckingGrade(true);
+    try {
+      const result = await gradingApi.reviewGrade(submissionId, {
+        score,
+        feedback: finalFeedback,
+        rubric_scores: rubricScores,
+      });
+      setGradeCheck({ submissionId, gradeKey, result });
+    } catch (err: unknown) {
+      toast.error(
+        err instanceof Error && err.message
+          ? err.message
+          : "The AI check is unavailable right now. Try again in a moment.",
+      );
+    } finally {
+      setIsCheckingGrade(false);
+    }
+  };
+  // Whole-attempt AI review (uses saved grades). Tied to the attempt it ran for.
+  const [attemptReview, setAttemptReview] = useState<{
+    attemptId: string;
+    data: AttemptReview;
+  } | null>(null);
+  const [attemptReviewOpen, setAttemptReviewOpen] = useState(false);
+  const [isReviewingAttempt, setIsReviewingAttempt] = useState(false);
+
+  const handleReviewAttempt = async () => {
+    if (!activeAttempt) return;
+    setIsReviewingAttempt(true);
+    try {
+      // The review reads saved grades; give a pending autosave time to land.
+      if (autosaveTimerRef.current) {
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+      }
+      const data = await gradingApi.reviewAttempt(activeAttempt.id);
+      setAttemptReview({ attemptId: activeAttempt.id, data });
+    } catch (err: unknown) {
+      toast.error(
+        err instanceof Error && err.message
+          ? err.message
+          : "The AI review is unavailable right now. Try again in a moment.",
+      );
+    } finally {
+      setIsReviewingAttempt(false);
+    }
+  };
   const [isSaving, setIsSaving] = useState(false);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -413,9 +607,21 @@ function LecturerGradingQueueContent() {
 
   // Autosave & Keyboard Shortcuts State
   const [autosaveStatus, setAutosaveStatus] = useState<
-    "idle" | "saving" | "saved"
+    "idle" | "saving" | "saved" | "offline"
   >("idle");
   const [lastAutosavedAt, setLastAutosavedAt] = useState<Date | null>(null);
+  // Work typed here is backed up on this device before any network call; these
+  // track what the server has not confirmed yet and what was just restored.
+  const [restoredDraft, setRestoredDraft] = useState<{
+    submissionId: string;
+    savedAt: number;
+  } | null>(null);
+  const pendingSyncRef = useRef<
+    Map<string, { score: number; feedback: string; rubric: RubricScore[] }>
+  >(new Map());
+  const autosaveInFlightRef = useRef(0);
+  // Questions whose AI grade was accepted without a recorded review (blocks release).
+  const [unreviewedQuestionIds, setUnreviewedQuestionIds] = useState<string[]>([]);
   const [showShortcutsDialog, setShowShortcutsDialog] = useState(false);
   const autosaveTimerRef = React.useRef<NodeJS.Timeout | null>(null);
   const groupAutosaveTimerRef = React.useRef<NodeJS.Timeout | null>(null);
@@ -467,7 +673,8 @@ function LecturerGradingQueueContent() {
   const loadWorkspaces = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await lecturerApi.getWorkspaces();
+      // The default page size (20) silently hid workspaces beyond the first 20.
+      const res = await lecturerApi.getWorkspaces(1, 100);
       setWorkspaces(res || []);
     } catch {
       toast.error("Failed to load lecturer workspaces.");
@@ -533,34 +740,97 @@ function LecturerGradingQueueContent() {
     [],
   );
 
+  // Only the newest request may write results, so a slow earlier response
+  // (e.g. before a filter change) can never overwrite the current queue.
+  const queueRequestRef = useRef(0);
+
   const fetchQueue = useCallback(
     async (assessmentId: string, classId?: string, page: number = 1) => {
+      const requestId = ++queueRequestRef.current;
       setLoading(true);
       try {
         const res: any = await gradingApi.getGradingQueue({
           assessment_id: assessmentId,
           class_section_id: classId || "",
-          status: status === "all" ? "" : status,
-          search: search || "",
+          // needs_action = backend default (everything still awaiting a lecturer)
+          status: status === "needs_action" ? "" : status === "all" ? "ALL" : status,
+          q: search.trim(),
+          sort_by: "submitted_desc",
           page_size: PAGE_SIZE,
           page,
         });
+        if (requestId !== queueRequestRef.current) return;
         setData(res?.items || []);
         setTotal(res?.total || 0);
         setCurrentPage(page);
         setHasMore(Boolean(res?.has_more));
       } catch {
+        if (requestId !== queueRequestRef.current) return;
         toast.error("Failed to fetch grading queue.");
       } finally {
-        setLoading(false);
+        if (requestId === queueRequestRef.current) setLoading(false);
       }
     },
     [status, search],
   );
 
+  // Refetch whenever the class or a filter changes (search is debounced).
+  // Filters previously only changed local state, so the list never updated.
+  useEffect(() => {
+    if (!selectedAssessment || !selectedClass) return;
+    const timer = setTimeout(
+      () => fetchQueue(selectedAssessment.id, selectedClass.class_id, 1),
+      search ? 300 : 0,
+    );
+    return () => clearTimeout(timer);
+  }, [selectedAssessment, selectedClass, status, search, fetchQueue]);
+
+  const loadOverview = useCallback(async () => {
+    try {
+      setOverview(await gradingApi.getOverview());
+    } catch {
+      // Ordering is an enhancement; the pickers still work without it.
+      setOverview(null);
+    }
+  }, []);
+
   useEffect(() => {
     loadWorkspaces();
-  }, [loadWorkspaces]);
+    loadOverview();
+  }, [loadWorkspaces, loadOverview]);
+
+  const latestAt = (iso?: string | null) => (iso ? new Date(iso).getTime() : 0);
+
+  // Workspaces / assessments with the most recent submissions come first;
+  // ties (and ones with no submissions) fall back to alphabetical order.
+  const sortedWorkspaces = useMemo(() => {
+    const byId = new Map(overview?.workspaces.map((w) => [w.workspace_id, w]));
+    return [...workspaces].sort(
+      (a, b) =>
+        latestAt(byId.get(b.id)?.latest_submission_at) -
+          latestAt(byId.get(a.id)?.latest_submission_at) ||
+        a.title.localeCompare(b.title),
+    );
+  }, [workspaces, overview]);
+
+  const sortedAssessments = useMemo(() => {
+    const byId = new Map(overview?.assessments.map((a) => [a.assessment_id, a]));
+    return [...assessments].sort(
+      (a, b) =>
+        latestAt(byId.get(b.id)?.latest_submission_at) -
+          latestAt(byId.get(a.id)?.latest_submission_at) ||
+        a.title.localeCompare(b.title),
+    );
+  }, [assessments, overview]);
+
+  const workspaceActivity = useCallback(
+    (id: string) => overview?.workspaces.find((w) => w.workspace_id === id),
+    [overview],
+  );
+  const assessmentActivity = useCallback(
+    (id: string) => overview?.assessments.find((a) => a.assessment_id === id),
+    [overview],
+  );
 
   const handleSelectWorkspace = (ws: WorkspaceListItem) => {
     setSelectedWorkspace(ws);
@@ -577,14 +847,26 @@ function LecturerGradingQueueContent() {
     if (asmt.is_group_assessment) {
       loadGroupQueue(asmt.id);
     } else {
-      loadClassStats(asmt.id);
+      // Self-heal first: a submitted attempt whose grading job failed has no
+      // queue entry and would never show up. The call is idempotent.
+      gradingApi
+        .resyncAssessment(asmt.id)
+        .then((r) => {
+          if (r.repaired > 0) {
+            toast.success(
+              `Recovered ${r.repaired} submission${r.repaired === 1 ? "" : "s"} that had not reached the grading queue.`,
+            );
+          }
+        })
+        .catch(() => undefined)
+        .finally(() => loadClassStats(asmt.id));
     }
   };
 
   const handleSelectClass = (cls: ClassStatRecord) => {
+    // The queue itself is loaded by the filter effect once the class is set.
     setSelectedClass(cls);
     if (selectedAssessment) {
-      fetchQueue(selectedAssessment.id, cls.class_id, 1);
       loadReleaseQueue(selectedAssessment.id, cls.class_id);
     }
   };
@@ -593,17 +875,50 @@ function LecturerGradingQueueContent() {
   // assessments list) opens that assessment directly instead of the workspace picker.
   const deepLinkAssessmentId = searchParams?.get("assessment");
   const deepLinkHandledRef = useRef<string | null>(null);
+
+  // A link (or saved resume point) that this account cannot open: say so plainly,
+  // forget the stale resume point and leave a clean URL instead of a dead page.
+  const handleLinkUnavailable = (message: string) => {
+    toast.info(message, { id: "grading-link-unavailable" });
+    const store = gradingStore();
+    if (store) clearResumePoint(store);
+    setResumePoint(null);
+    router.replace(pathname, { scroll: false });
+  };
+  // Where inside the assessment to land (class → student → question) once its
+  // classes have loaded. Set from the URL, so a refresh returns to the same spot.
+  const restoreTargetRef = useRef<{
+    classId: string | null;
+    attemptId: string | null;
+    questionId: string | null;
+  } | null>(null);
   useEffect(() => {
-    if (!deepLinkAssessmentId || workspaces.length === 0) return;
+    if (!deepLinkAssessmentId) {
+      deepLinkHandledRef.current = null;
+      return;
+    }
+    if (workspaces.length === 0) return;
     if (deepLinkHandledRef.current === deepLinkAssessmentId) return;
     deepLinkHandledRef.current = deepLinkAssessmentId;
+
+    const classId = searchParams?.get("class") ?? null;
+    const attemptId = searchParams?.get("attempt") ?? null;
+    const questionId = searchParams?.get("question") ?? null;
+    if (classId || attemptId) {
+      restoreTargetRef.current = { classId, attemptId, questionId };
+      // Never let an unreachable target (class removed, no classes) block URL syncing.
+      setTimeout(() => {
+        restoreTargetRef.current = null;
+      }, 20000);
+    }
 
     (async () => {
       try {
         const detail = await assessmentApi.getAssessmentById(deepLinkAssessmentId);
         const ws = workspaces.find((w) => w.id === detail.teaching_workspace_id);
         if (!ws) {
-          toast.info("Pick the workspace this assessment belongs to.");
+          restoreTargetRef.current = null;
+          handleLinkUnavailable("You don't have this assessment in your workspaces.");
           return;
         }
         const res: any = await assessmentApi.getAssessments({ workspace_id: ws.id });
@@ -612,15 +927,128 @@ function LecturerGradingQueueContent() {
         setSelectedWorkspace(ws);
         setAssessments(items);
         if (target) handleSelectAssessment(target);
-      } catch {
-        toast.error("Could not open that assessment for grading.");
+      } catch (err: unknown) {
+        restoreTargetRef.current = null;
+        const status = (err as { status?: number } | null)?.status;
+        if (status === 403 || status === 404) {
+          handleLinkUnavailable(
+            "You don't have access to that assessment, or it no longer exists.",
+          );
+        } else {
+          toast.error("Could not open that assessment for grading.");
+        }
       }
     })();
     // handleSelectAssessment only calls stable setters / loaders
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deepLinkAssessmentId, workspaces]);
 
+  // Once the assessment's classes are known, walk to the saved class / student / question.
+  useEffect(() => {
+    const target = restoreTargetRef.current;
+    if (!target || !selectedAssessment || classStats.length === 0) return;
+    restoreTargetRef.current = null;
+    const cls = target.classId
+      ? classStats.find((c) => c.class_id === target.classId)
+      : undefined;
+    if (!cls) {
+      toast.info("That class is no longer available. Pick one to continue.");
+      return;
+    }
+    handleSelectClass(cls);
+    if (target.attemptId) {
+      openAttemptDirect(target.attemptId, "", target.questionId ?? undefined);
+    }
+    // handleSelectClass / openAttemptDirect only use stable setters and loaders
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [classStats, selectedAssessment]);
+
+  // A restored attempt has no queue row yet; take the student's name from the
+  // queue once it loads.
+  useEffect(() => {
+    if (!selectedStudent || selectedStudent.student_name) return;
+    const row = data.find((d) => d.attempt_id === selectedStudent.attempt_id);
+    if (row) setSelectedStudent((prev) => (prev ? { ...prev, student_name: row.student_name } : prev));
+  }, [data, selectedStudent]);
+
+  // Keep the URL (and a local "continue" record) pointing at where the lecturer is.
+  const activeQuestionId = activeAttempt?.questions?.[activeQuestionIndex]?.id ?? null;
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (restoreTargetRef.current) return; // still walking back to the saved spot
+    if (deepLinkAssessmentId && !selectedAssessment) return; // deep link still resolving
+
+    const params = new URLSearchParams();
+    const tab = new URLSearchParams(window.location.search).get("tab");
+    if (tab) params.set("tab", tab);
+    if (selectedAssessment) {
+      resumeSearchParams({
+        assessmentId: selectedAssessment.id,
+        classId: selectedClass?.class_id,
+        attemptId: selectedStudent?.attempt_id,
+        questionId: selectedStudent ? activeQuestionId : null,
+      }).forEach((value, key) => params.set(key, value));
+      // The URL now describes the current state; it is not a deep link to act on.
+      deepLinkHandledRef.current = selectedAssessment.id;
+    }
+    const qs = params.toString();
+    const next = qs ? `${pathname}?${qs}` : pathname;
+    if (next !== `${pathname}${window.location.search}`) {
+      router.replace(next, { scroll: false });
+    }
+
+    const store = gradingStore();
+    if (store && selectedAssessment) {
+      const idx = activeAttempt?.questions?.findIndex((q) => q.id === activeQuestionId) ?? -1;
+      writeResumePoint(store, {
+        assessmentId: selectedAssessment.id,
+        assessmentTitle: selectedAssessment.title,
+        classId: selectedClass?.class_id ?? null,
+        className: selectedClass?.class_name ?? null,
+        attemptId: selectedStudent?.attempt_id ?? null,
+        studentName: selectedStudent?.student_name || null,
+        questionId: selectedStudent ? activeQuestionId : null,
+        questionNumber: selectedStudent && idx >= 0 ? idx + 1 : null,
+        updatedAt: Date.now(),
+      });
+    }
+    // router / pathname are stable for the page; the rest are the state we mirror
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    selectedAssessment,
+    selectedClass,
+    selectedStudent?.attempt_id,
+    selectedStudent?.student_name,
+    activeQuestionId,
+    deepLinkAssessmentId,
+  ]);
+
+  // "Continue where you left off" card for a fresh visit with no deep link.
+  const [resumePoint, setResumePoint] = useState<ResumePoint | null>(null);
+  useEffect(() => {
+    try {
+      // Data saved before keys were per-user cannot be attributed to anyone.
+      purgeLegacyGradingData(window.localStorage);
+    } catch {
+      // storage unavailable
+    }
+    const store = gradingStore();
+    setResumePoint(store ? readResumePoint(store) : null);
+  }, [user?.id]);
+
+  const handleContinueWhereLeftOff = () => {
+    if (!resumePoint) return;
+    router.push(`${pathname}?${resumeSearchParams(resumePoint).toString()}`);
+  };
+
+  const handleDismissResume = () => {
+    const store = gradingStore();
+    if (store) clearResumePoint(store);
+    setResumePoint(null);
+  };
+
   const handleBackToWorkspaces = () => {
+    loadOverview();
     setSelectedWorkspace(null);
     setSelectedAssessment(null);
     setSelectedClass(null);
@@ -758,7 +1186,25 @@ function LecturerGradingQueueContent() {
       const notReleased =
         (res.held_count ?? 0) + (res.incomplete_count ?? 0) + (res.unreviewed_count ?? 0);
       if (notReleased > 0) {
-        toast.warning(res.message, { duration: 8000 });
+        const firstBlocked = res.unreviewed_attempt_ids?.[0];
+        const blockedRow = firstBlocked
+          ? releaseQueue.find((r) => r.attempt_id === firstBlocked)
+          : undefined;
+        toast.warning(res.message, {
+          duration: 12000,
+          action:
+            firstBlocked && blockedRow
+              ? {
+                  label: "Review now",
+                  onClick: () =>
+                    openAttemptDirect(
+                      firstBlocked,
+                      blockedRow.student_name,
+                      blockedRow.unreviewed_question_ids?.[0],
+                    ),
+                }
+              : undefined,
+        });
       } else {
         toast.success(res.message || `Released ${res.released_count} result(s).`);
       }
@@ -787,6 +1233,7 @@ function LecturerGradingQueueContent() {
     const groups = Array.from(map.values());
 
     if (sortBy === "priority_desc") {
+      // Flagged first, then high integrity risk, then newest submission.
       groups.sort((a, b) => {
         const aFlag = a.some((i) => i.is_flagged);
         const bFlag = b.some((i) => i.is_flagged);
@@ -797,12 +1244,10 @@ function LecturerGradingQueueContent() {
         const bRisk = Math.max(
           ...b.map((i) => (i as any).integrity_risk_score || 0),
         );
-        if (aRisk >= 50 || bRisk >= 50) {
-          return (bRisk >= 50 ? 1 : 0) - (aRisk >= 50 ? 1 : 0);
-        }
+        if ((aRisk >= 50) !== (bRisk >= 50)) return aRisk >= 50 ? -1 : 1;
         return (
-          new Date(a[0].submitted_at || 0).getTime() -
-          new Date(b[0].submitted_at || 0).getTime()
+          new Date(b[0].submitted_at || 0).getTime() -
+          new Date(a[0].submitted_at || 0).getTime()
         );
       });
     } else if (sortBy === "date_asc") {
@@ -851,13 +1296,51 @@ function LecturerGradingQueueContent() {
   }, [selectedGroupSubmission, filteredGroupQueue]);
 
   // ── INDIVIDUAL SPEEDGRADER WORKSPACE LOGIC ───────────────────────────────────
-  const handleOpenIndividualGrader = async (item: GradingQueueItem) => {
+  // Puts back what the lecturer typed but never got saved (refresh, crash, lost
+  // connection). The local backup is cleared as soon as it matches the server.
+  const restoreDraftFor = (sub: SubmissionRecord | undefined) => {
+    setRestoredDraft(null);
+    const store = gradingStore();
+    if (!sub || !store) return;
+    const draft = readDraft(store, sub.id);
+    if (!draft) return;
+    const server = {
+      score: sub.score !== null && sub.score !== undefined ? String(sub.score) : "",
+      feedback: sub.feedback_comments || sub.feedback || "",
+    };
+    if (!draftDiffers(draft, server)) {
+      clearDraft(store, sub.id);
+      return;
+    }
+    setOverrideScore(draft.score);
+    setFinalFeedback(draft.feedback);
+    if (draft.rubricScores.length > 0) {
+      setRubricScores(draft.rubricScores as RubricScore[]);
+    }
+    setIsEditing(true);
+    setIsAiAccepted(false);
+    setRestoredDraft({ submissionId: sub.id, savedAt: draft.savedAt });
+  };
+
+  const handleDiscardRestoredDraft = () => {
+    const store = gradingStore();
+    if (store && restoredDraft) clearDraft(store, restoredDraft.submissionId);
+    setRestoredDraft(null);
+    handleSelectQuestion(activeQuestionIndex);
+  };
+
+  const handleOpenIndividualGrader = async (
+    item: GradingQueueItem,
+    startQuestionId?: string,
+  ) => {
     setSelectedStudent(item);
     setLoading(true);
     setReviewStartedAt(new Date());
     setIsEditing(false);
     setIsAiAccepted(false);
     setActiveQuestionIndex(0);
+    setRestoredDraft(null);
+    setUnreviewedQuestionIds([]);
     setMobileWorkspaceTab("canvas");
 
     try {
@@ -888,8 +1371,24 @@ function LecturerGradingQueueContent() {
       setActiveAttempt(attemptRes);
       setActiveSubmissions(normalizedSubmissions);
 
+      // Which grades block release for lack of a recorded review (advisory UI only).
+      gradingApi
+        .verifyAttemptGrades(item.attempt_id)
+        .then((v: { unreviewed_question_ids?: string[] }) =>
+          setUnreviewedQuestionIds(v?.unreviewed_question_ids ?? []),
+        )
+        .catch(() => undefined);
+
       if (attemptRes.questions && attemptRes.questions.length > 0) {
-        const firstQ = attemptRes.questions[0];
+        // Resume at a specific question when asked (release review, refresh, "continue").
+        const startIdx = Math.max(
+          0,
+          startQuestionId
+            ? attemptRes.questions.findIndex((q: AttemptQuestion) => q.id === startQuestionId)
+            : 0,
+        );
+        setActiveQuestionIndex(startIdx);
+        const firstQ = attemptRes.questions[startIdx];
         const firstSub = normalizedSubmissions.find(
           (s: SubmissionRecord) => s.question_id === firstQ.id,
         );
@@ -908,6 +1407,7 @@ function LecturerGradingQueueContent() {
           setFinalFeedback("");
           setRubricScores([]);
         }
+        restoreDraftFor(firstSub);
       }
     } catch {
       toast.error("Failed to load student attempt details.");
@@ -915,6 +1415,40 @@ function LecturerGradingQueueContent() {
     } finally {
       setLoading(false);
     }
+  };
+
+  // Opens an attempt without needing its row in the queue list. The queue hides
+  // graded work by default, which is exactly where a blocked release lives.
+  const openAttemptDirect = (
+    attemptId: string,
+    studentName: string,
+    questionId?: string,
+  ) => {
+    if (!selectedAssessment) return;
+    const existing = data.find((d) => d.attempt_id === attemptId);
+    const item: GradingQueueItem =
+      existing ??
+      ({
+        id: attemptId,
+        student_id: "",
+        student_name: studentName,
+        assessment_title: selectedAssessment.title,
+        assessment_id: selectedAssessment.id,
+        question_id: questionId ?? "",
+        question_title: "",
+        question_type: "",
+        attempt_id: attemptId,
+        response_id: "",
+        status: "COMPLETED",
+        submitted_at: null,
+        student_answer: null,
+        score: null,
+        feedback: null,
+        is_flagged: false,
+        integrity_risk_score: 0,
+        class_section_id: selectedClass?.class_id ?? "",
+      } as GradingQueueItem);
+    handleOpenIndividualGrader(item, questionId);
   };
 
   const handleCloseIndividualWorkspace = () => {
@@ -957,6 +1491,7 @@ function LecturerGradingQueueContent() {
       setRubricScores([]);
       setAiFeedbackDraft("");
     }
+    restoreDraftFor(sub);
     // On small screens, switch to canvas view automatically on question pick
     setMobileWorkspaceTab("canvas");
   };
@@ -990,11 +1525,25 @@ function LecturerGradingQueueContent() {
       const sub = subs.find((s) => s.question_id === currentQ.id);
       if (!sub) return;
 
-      if (autosaveTimerRef.current) {
-        clearTimeout(autosaveTimerRef.current);
+      // Back up on this device first, on every keystroke, so a refresh, crash or
+      // lost connection never costs the lecturer their typing — including feedback
+      // written before any score was entered.
+      const store = gradingStore();
+      if (store) {
+        writeDraft(store, sub.id, {
+          score: scoreVal,
+          feedback: fbVal,
+          rubricScores: rScores,
+          savedAt: Date.now(),
+        });
       }
 
-      // Nothing to save until a score is entered (the backend requires one).
+      if (autosaveTimerRef.current) {
+        clearTimeout(autosaveTimerRef.current);
+        autosaveTimerRef.current = null;
+      }
+
+      // Nothing to send until a score is entered (the backend requires one).
       const parsed = parseFloat(scoreVal);
       if (isNaN(parsed)) {
         setAutosaveStatus("idle");
@@ -1003,6 +1552,8 @@ function LecturerGradingQueueContent() {
 
       setAutosaveStatus("saving");
       autosaveTimerRef.current = setTimeout(async () => {
+        autosaveTimerRef.current = null;
+        autosaveInFlightRef.current += 1;
         try {
           await gradingApi.saveGrade(sub.id, {
             score: parsed,
@@ -1010,21 +1561,92 @@ function LecturerGradingQueueContent() {
             rubric_scores: rScores,
             is_final: false,
           });
+          pendingSyncRef.current.delete(sub.id);
+          if (store) clearDraftIfSaved(store, sub.id, { score: scoreVal, feedback: fbVal });
           setAutosaveStatus("saved");
           setLastAutosavedAt(new Date());
         } catch (err: unknown) {
-          setAutosaveStatus("idle");
-          toast.error(
-            err instanceof Error && err.message
-              ? `Autosave failed: ${err.message}`
-              : "Autosave failed — your changes are not saved yet.",
-            { id: "grading-autosave-failed" },
-          );
+          if (isNetworkFailure(err, typeof navigator === "undefined" ? true : navigator.onLine)) {
+            // Keep it for when the connection returns; the device backup already has it.
+            pendingSyncRef.current.set(sub.id, { score: parsed, feedback: fbVal, rubric: rScores });
+            setAutosaveStatus("offline");
+            toast.warning(
+              "You're offline. Your grading is kept on this device and will save automatically when you're back online.",
+              { id: "grading-offline", duration: 8000 },
+            );
+          } else {
+            setAutosaveStatus("idle");
+            toast.error(
+              err instanceof Error && err.message
+                ? `Autosave failed: ${err.message}`
+                : "Autosave failed — your changes are not saved yet.",
+              { id: "grading-autosave-failed" },
+            );
+          }
+        } finally {
+          autosaveInFlightRef.current -= 1;
         }
       }, 1200);
     },
     [selectedStudent, activeAttempt, activeQuestionIndex, activeSubmissions],
   );
+
+  // When the connection returns, send everything autosave could not.
+  useEffect(() => {
+    const flushPending = async () => {
+      const pending = Array.from(pendingSyncRef.current.entries());
+      if (pending.length === 0) return;
+      let saved = 0;
+      for (const [submissionId, p] of pending) {
+        try {
+          await gradingApi.saveGrade(submissionId, {
+            score: p.score,
+            feedback: p.feedback,
+            rubric_scores: p.rubric,
+            is_final: false,
+          });
+          pendingSyncRef.current.delete(submissionId);
+          const store = gradingStore();
+          if (store) {
+            clearDraftIfSaved(store, submissionId, {
+              score: String(p.score),
+              feedback: p.feedback,
+            });
+          }
+          saved += 1;
+        } catch (err: unknown) {
+          if (isNetworkFailure(err, navigator.onLine)) return; // still offline; retry on the next event
+          // The server answered with a refusal (e.g. already released): retrying cannot help.
+          pendingSyncRef.current.delete(submissionId);
+        }
+      }
+      if (saved > 0) {
+        setAutosaveStatus("saved");
+        setLastAutosavedAt(new Date());
+        toast.success("Back online — your grading has been saved.", { id: "grading-offline" });
+      }
+    };
+    const onOnline = () => {
+      void flushPending();
+    };
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      // Only work the server has not confirmed warrants a prompt; typing is already backed up locally.
+      if (
+        autosaveTimerRef.current ||
+        autosaveInFlightRef.current > 0 ||
+        pendingSyncRef.current.size > 0
+      ) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    };
+    window.addEventListener("online", onOnline);
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => {
+      window.removeEventListener("online", onOnline);
+      window.removeEventListener("beforeunload", onBeforeUnload);
+    };
+  }, []);
 
   const submitGrade = async (
     isFinal: boolean,
@@ -1044,6 +1666,21 @@ function LecturerGradingQueueContent() {
       return false;
     }
 
+    // A queued autosave must not land after this and overwrite the final score.
+    if (autosaveTimerRef.current) {
+      clearTimeout(autosaveTimerRef.current);
+      autosaveTimerRef.current = null;
+    }
+    const store = gradingStore();
+    if (store) {
+      writeDraft(store, sub.id, {
+        score: overrideScore,
+        feedback: finalFeedback,
+        rubricScores: rubricScores,
+        savedAt: Date.now(),
+      });
+    }
+
     if (isFinal) {
       setIsSaving(true);
     } else {
@@ -1052,6 +1689,10 @@ function LecturerGradingQueueContent() {
 
     try {
       const startedAt = reviewStartedAt ?? new Date();
+      const reviewSeconds = Math.max(
+        1,
+        Math.round((Date.now() - startedAt.getTime()) / 1000),
+      );
       await gradingApi.saveGrade(sub.id, {
         score: parsedScore,
         feedback: finalFeedback,
@@ -1059,10 +1700,7 @@ function LecturerGradingQueueContent() {
         is_final: isFinal,
         accept_ai_suggestion: aiAccepted,
         review_started_at: startedAt.toISOString(),
-        review_duration_seconds: Math.max(
-          1,
-          Math.round((Date.now() - startedAt.getTime()) / 1000),
-        ),
+        review_duration_seconds: reviewSeconds,
       });
 
       setActiveSubmissions((prev) => {
@@ -1082,6 +1720,25 @@ function LecturerGradingQueueContent() {
         );
       });
 
+      pendingSyncRef.current.delete(sub.id);
+      if (store) {
+        clearDraftIfSaved(store, sub.id, { score: overrideScore, feedback: finalFeedback });
+      }
+      setRestoredDraft(null);
+      if (isFinal) {
+        const tooQuick = aiAccepted && reviewSeconds < MIN_REVIEW_SECONDS;
+        setUnreviewedQuestionIds((prev) => {
+          const rest = prev.filter((id) => id !== currentQ.id);
+          return tooQuick ? [...rest, currentQ.id] : rest;
+        });
+        if (tooQuick) {
+          toast.warning(
+            `Saved, but accepted in under ${MIN_REVIEW_SECONDS} seconds, which doesn't count as a review. Read the answer, then confirm it before publishing.`,
+            { duration: 9000 },
+          );
+        }
+      }
+
       if (isFinal) {
         toast.success(`Question ${activeQuestionIndex + 1} grade finalized.`);
         setIsEditing(false);
@@ -1090,7 +1747,13 @@ function LecturerGradingQueueContent() {
       }
       return true;
     } catch (err: any) {
-      toast.error(err.message || "Failed to submit grade.");
+      if (isNetworkFailure(err, typeof navigator === "undefined" ? true : navigator.onLine)) {
+        toast.error(
+          "No connection. Your grade is kept on this device — press save again once you're back online.",
+        );
+      } else {
+        toast.error(err.message || "Failed to submit grade.");
+      }
       return false;
     } finally {
       setIsSaving(false);
@@ -1552,6 +2215,14 @@ function LecturerGradingQueueContent() {
                     <Loader2 className="size-3 animate-spin text-amber-500" />
                     <span>Saving...</span>
                   </div>
+                ) : autosaveStatus === "offline" ? (
+                  <div
+                    className="flex items-center gap-1 px-2 py-1 bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400 rounded-xl text-[10px] font-medium"
+                    title="Kept on this device; saves automatically when the connection returns"
+                  >
+                    <AlertTriangle className="size-3" />
+                    <span>Offline — kept on this device</span>
+                  </div>
                 ) : autosaveStatus === "saved" ? (
                   <div className="hidden md:flex items-center gap-1 px-2 py-1 bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 rounded-xl text-[10px] font-medium">
                     <CheckCircle2 className="size-3 text-emerald-500" />
@@ -1757,6 +2428,38 @@ function LecturerGradingQueueContent() {
                         Alt+U
                       </kbd>
                     </Button>
+
+                    {/* Whole-attempt AI review */}
+                    {isAssessmentAiAllowed(selectedAssessment) && (
+                      <>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setAttemptReviewOpen(true)}
+                          className="w-full h-7 px-2 text-[11px] font-medium rounded-xl border-primary/30 bg-primary/5 text-primary hover:bg-primary/10 flex items-center justify-start gap-1"
+                          title="Have the AI second-mark all your saved grades for this student"
+                        >
+                          <ScanSearch className="size-3" /> Review whole attempt
+                        </Button>
+                        <AttemptReviewDialog
+                          open={attemptReviewOpen}
+                          onOpenChange={setAttemptReviewOpen}
+                          loading={isReviewingAttempt}
+                          review={
+                            attemptReview?.attemptId === activeAttempt.id
+                              ? attemptReview.data
+                              : null
+                          }
+                          onRun={handleReviewAttempt}
+                          onGoToQuestion={(questionId) => {
+                            const idx = (activeAttempt.questions ?? []).findIndex(
+                              (q) => q.id === questionId,
+                            );
+                            if (idx >= 0) handleSelectQuestion(idx);
+                          }}
+                        />
+                      </>
+                    )}
 
                     {/* Filter Pill: All vs Ungraded */}
                     {(() => {
@@ -2255,6 +2958,54 @@ function LecturerGradingQueueContent() {
                           </span>
                         </div>
 
+                        {restoredDraft?.submissionId === currentSubmission?.id && (
+                          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-sky-500/30 bg-sky-500/5 p-2.5 text-sky-900 dark:text-sky-200">
+                            <p className="text-[11px] leading-snug">
+                              <strong>Restored your unsaved changes</strong> from{" "}
+                              {formatDistanceToNow(new Date(restoredDraft!.savedAt), {
+                                addSuffix: true,
+                              })}
+                              . Nothing was lost.
+                            </p>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="h-6 px-2 text-[10px]"
+                              onClick={handleDiscardRestoredDraft}
+                            >
+                              Discard
+                            </Button>
+                          </div>
+                        )}
+
+                        {currentQuestion &&
+                          unreviewedQuestionIds.includes(currentQuestion.id) && (
+                            <div className="space-y-2 rounded-xl border border-amber-500/40 bg-amber-500/5 p-3 text-amber-900 dark:text-amber-200">
+                              <p className="text-[11px] font-semibold flex items-center gap-1.5">
+                                <AlertTriangle className="size-3.5" />
+                                This AI grade was accepted without a recorded review
+                              </p>
+                              <p className="text-[11px] leading-snug">
+                                It blocks this student&apos;s result from being published. Read the
+                                answer and the score below. If you agree, confirm it; if not, change
+                                the score and save.
+                              </p>
+                              <Button
+                                type="button"
+                                size="sm"
+                                disabled={isSaving || !reviewReady}
+                                onClick={() => submitGrade(true, true)}
+                                className="h-7 text-[11px] font-medium rounded-lg gap-1"
+                              >
+                                <CheckCircle2 className="size-3" />
+                                {reviewReady
+                                  ? "I've reviewed this — confirm"
+                                  : "Read the answer first…"}
+                              </Button>
+                            </div>
+                          )}
+
                         <div className="space-y-4">
                           {/* Score Input & Quick Mark Preset Chips */}
                           <div className="space-y-2">
@@ -2320,6 +3071,65 @@ function LecturerGradingQueueContent() {
                               }}
                               className="h-9 text-xs rounded-xl font-mono font-bold w-full bg-background"
                             />
+                            <GradingGuardAlerts
+                              findings={[
+                                ...evaluateGrade({
+                                scoreText: overrideScore,
+                                maxMarks,
+                                answerText:
+                                  currentSubmission?.answer_type === "TEXT" ||
+                                  currentSubmission?.answer_type === undefined
+                                    ? (currentSubmission?.answer_text ?? null)
+                                    : null,
+                                feedback: finalFeedback,
+                                rubricScores: rubricScores,
+                                aiScore: getAiSuggestion(currentSubmission).score,
+                                aiConfidence:
+                                  getAiSuggestion(currentSubmission).confidence,
+                                }),
+                                ...evaluateConsistency(
+                                  overrideScore,
+                                  maxMarks,
+                                  consistency,
+                                ),
+                              ]}
+                            />
+                            {!isAutoGraded &&
+                              currentSubmission &&
+                              isAssessmentAiAllowed(selectedAssessment) && (
+                                <GradeCheckPanel
+                                  result={
+                                    gradeCheck?.submissionId ===
+                                    currentSubmission.id
+                                      ? gradeCheck.result
+                                      : null
+                                  }
+                                  stale={
+                                    gradeCheck?.submissionId ===
+                                      currentSubmission.id &&
+                                    gradeCheck.gradeKey !==
+                                      gradeKeyFor(overrideScore, finalFeedback)
+                                  }
+                                  loading={isCheckingGrade}
+                                  canRun={overrideScore.trim() !== ""}
+                                  onRun={() =>
+                                    handleCheckGrade(
+                                      currentSubmission.id,
+                                      maxMarks,
+                                    )
+                                  }
+                                  onUseFeedback={(text) => {
+                                    setFinalFeedback(text);
+                                    setIsAiAccepted(false);
+                                    setIsEditing(true);
+                                    triggerDebouncedAutosave(
+                                      overrideScore,
+                                      text,
+                                      rubricScores,
+                                    );
+                                  }}
+                                />
+                              )}
                           </div>
 
                           {/* Feedback Input & Quick Feedback Suggestions */}
@@ -3335,6 +4145,36 @@ function LecturerGradingQueueContent() {
           {/* STEP A: WORKSPACES LIST */}
           {!selectedWorkspace ? (
             <div className="space-y-3 animate-in fade-in duration-300">
+              {resumePoint && !deepLinkAssessmentId && (
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-primary/30 bg-primary/5 p-3.5">
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold text-foreground">
+                      Continue where you left off
+                    </p>
+                    <p className="text-[11px] text-muted-foreground truncate">
+                      {resumePoint.assessmentTitle}
+                      {resumePoint.className ? ` · ${resumePoint.className}` : ""}
+                      {resumePoint.studentName ? ` · ${resumePoint.studentName}` : ""}
+                      {resumePoint.questionNumber ? ` · Question ${resumePoint.questionNumber}` : ""}
+                      {" · "}
+                      {formatDistanceToNow(new Date(resumePoint.updatedAt), { addSuffix: true })}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button size="sm" className="h-7 text-xs rounded-lg" onClick={handleContinueWhereLeftOff}>
+                      Continue
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 text-xs rounded-lg text-muted-foreground"
+                      onClick={handleDismissResume}
+                    >
+                      Dismiss
+                    </Button>
+                  </div>
+                </div>
+              )}
               <div className="flex items-center justify-between">
                 <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                   Select Teaching Workspace ({workspaces.length})
@@ -3359,6 +4199,9 @@ function LecturerGradingQueueContent() {
                         Students
                       </TableHead>
                       <TableHead className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider text-center">
+                        Latest Submission
+                      </TableHead>
+                      <TableHead className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider text-center">
                         Avg Perf.
                       </TableHead>
                       <TableHead className="text-right text-[11px] font-medium pr-6 text-muted-foreground uppercase tracking-wider">
@@ -3367,7 +4210,7 @@ function LecturerGradingQueueContent() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {workspaces.map((ws: WorkspaceListItem) => (
+                    {sortedWorkspaces.map((ws: WorkspaceListItem) => (
                       <TableRow
                         onClick={() => handleSelectWorkspace(ws)}
                         key={ws.id}
@@ -3394,6 +4237,9 @@ function LecturerGradingQueueContent() {
                             <Users className="size-3 opacity-50" />{" "}
                             {ws.student_count}
                           </span>
+                        </TableCell>
+                        <TableCell className="py-2.5 text-center">
+                          <SubmissionActivity activity={workspaceActivity(ws.id)} />
                         </TableCell>
                         <TableCell className="py-2.5 text-center">
                           <div className="flex flex-col items-center gap-1">
@@ -3425,7 +4271,7 @@ function LecturerGradingQueueContent() {
 
               {/* Mobile Cards View (< 768px) */}
               <div className="grid grid-cols-1 gap-2.5 md:hidden">
-                {workspaces.map((ws: WorkspaceListItem) => (
+                {sortedWorkspaces.map((ws: WorkspaceListItem) => (
                   <div
                     key={ws.id}
                     onClick={() => handleSelectWorkspace(ws)}
@@ -3447,6 +4293,9 @@ function LecturerGradingQueueContent() {
                       <p className="text-[11px] text-muted-foreground mt-0.5">
                         {ws.class_name} • {ws.student_count} students
                       </p>
+                    </div>
+                    <div className="flex items-center justify-between text-[11px] pt-1 border-t border-border/30">
+                      <SubmissionActivity activity={workspaceActivity(ws.id)} />
                     </div>
                     <div className="flex items-center justify-between text-[11px] pt-1 border-t border-border/30">
                       <span className="text-muted-foreground">Class Avg</span>
@@ -3484,13 +4333,16 @@ function LecturerGradingQueueContent() {
                       <TableHead className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider text-center">
                         Grading Mode
                       </TableHead>
+                      <TableHead className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider text-center">
+                        Latest Submission
+                      </TableHead>
                       <TableHead className="text-right text-[11px] font-medium pr-6 text-muted-foreground uppercase tracking-wider">
                         Actions
                       </TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {assessments.map((asmt: AssessmentSummary) => (
+                    {sortedAssessments.map((asmt: AssessmentSummary) => (
                       <TableRow
                         onClick={() => handleSelectAssessment(asmt)}
                         key={asmt.id}
@@ -3530,6 +4382,9 @@ function LecturerGradingQueueContent() {
                             {asmt.grading_mode}
                           </Badge>
                         </TableCell>
+                        <TableCell className="py-2.5 text-center">
+                          <SubmissionActivity activity={assessmentActivity(asmt.id)} />
+                        </TableCell>
                         <TableCell className="text-right pr-6 py-2.5">
                           <Button
                             variant="ghost"
@@ -3547,7 +4402,7 @@ function LecturerGradingQueueContent() {
 
               {/* Mobile Cards View (< 768px) */}
               <div className="grid grid-cols-1 gap-2.5 md:hidden">
-                {assessments.map((asmt: AssessmentSummary) => (
+                {sortedAssessments.map((asmt: AssessmentSummary) => (
                   <div
                     key={asmt.id}
                     onClick={() => handleSelectAssessment(asmt)}
@@ -3570,6 +4425,7 @@ function LecturerGradingQueueContent() {
                         {asmt.total_marks} pts • {asmt.grading_mode} mode
                       </p>
                     </div>
+                    <SubmissionActivity activity={assessmentActivity(asmt.id)} />
                   </div>
                 ))}
               </div>
@@ -4054,6 +4910,7 @@ function LecturerGradingQueueContent() {
                           <SelectValue placeholder="Status" />
                         </SelectTrigger>
                         <SelectContent>
+                          <SelectItem value="needs_action">Needs Grading</SelectItem>
                           <SelectItem value="all">All Submissions</SelectItem>
                           <SelectItem value="PENDING">Awaiting Review</SelectItem>
                           <SelectItem value="AI_SUGGESTED">AI Ready</SelectItem>
@@ -4067,9 +4924,9 @@ function LecturerGradingQueueContent() {
                           <SelectValue placeholder="Sort" />
                         </SelectTrigger>
                         <SelectContent>
+                          <SelectItem value="date_desc">Newest First</SelectItem>
                           <SelectItem value="priority_desc">Priority (Flagged First)</SelectItem>
                           <SelectItem value="date_asc">Oldest First</SelectItem>
-                          <SelectItem value="date_desc">Newest First</SelectItem>
                           <SelectItem value="name_asc">Name (A-Z)</SelectItem>
                         </SelectContent>
                       </Select>
@@ -4382,11 +5239,14 @@ function LecturerGradingQueueContent() {
                           const isHold =
                             item.integrity_hold ||
                             item.status === "INTEGRITY_HOLD";
+                          const needsReview =
+                            item.status === "NEEDS_REVIEW" && !isReleased;
                           const isReady =
                             (item.can_release ||
                               item.status === "PENDING_RELEASE") &&
                             !isReleased &&
-                            !isHold;
+                            !isHold &&
+                            !needsReview;
 
                           return (
                             <TableRow
@@ -4414,21 +5274,49 @@ function LecturerGradingQueueContent() {
                                       ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/20"
                                       : isHold
                                         ? "bg-rose-500/10 text-rose-600 border-rose-500/20"
-                                        : isReady
-                                          ? "bg-amber-500/10 text-amber-600 border-amber-500/20"
-                                          : "bg-muted/50 text-muted-foreground border-border/40",
+                                        : needsReview
+                                          ? "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/40"
+                                          : isReady
+                                            ? "bg-amber-500/10 text-amber-600 border-amber-500/20"
+                                            : "bg-muted/50 text-muted-foreground border-border/40",
                                   )}
                                 >
                                   {isReleased
                                     ? "RELEASED"
                                     : isHold
                                       ? "INTEGRITY HOLD"
-                                      : isReady
-                                        ? "READY TO RELEASE"
-                                        : "PENDING"}
+                                      : needsReview
+                                        ? "NEEDS YOUR REVIEW"
+                                        : isReady
+                                          ? "READY TO RELEASE"
+                                          : "PENDING"}
                                 </Badge>
+                                {needsReview && (
+                                  <p className="mt-1 text-[10px] leading-snug text-muted-foreground max-w-[220px] mx-auto">
+                                    {item.unreviewed_question_ids?.length ?? 1} AI-accepted
+                                    grade
+                                    {(item.unreviewed_question_ids?.length ?? 1) === 1 ? "" : "s"}{" "}
+                                    without a recorded review
+                                  </p>
+                                )}
                               </TableCell>
                               <TableCell className="text-right pr-6 py-2.5">
+                                {needsReview && item.attempt_id && (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() =>
+                                      openAttemptDirect(
+                                        item.attempt_id as string,
+                                        item.student_name,
+                                        item.unreviewed_question_ids?.[0],
+                                      )
+                                    }
+                                    className="h-7 text-xs font-medium rounded-lg border-amber-500/40 text-amber-700 dark:text-amber-300 hover:bg-amber-500/10"
+                                  >
+                                    Review now
+                                  </Button>
+                                )}
                                 {isReady && (
                                   <Button
                                     size="sm"
@@ -4436,20 +5324,31 @@ function LecturerGradingQueueContent() {
                                     onClick={async () => {
                                       if (!item.attempt_id) return;
                                       try {
-                                        await resultApi.releaseResults(
+                                        const res = await resultApi.releaseResults(
                                           selectedAssessment.id,
                                           [item.attempt_id],
                                           selectedClass.class_id,
                                         );
-                                        toast.success(
-                                          "Result published successfully",
-                                        );
+                                        // Report what the server actually did: a refused
+                                        // release used to be announced as a success.
+                                        if ((res.released_count ?? 0) > 0) {
+                                          toast.success("Result published successfully");
+                                        } else {
+                                          toast.warning(
+                                            res.message || "Nothing was published.",
+                                            { duration: 8000 },
+                                          );
+                                        }
                                         loadReleaseQueue(
                                           selectedAssessment.id,
                                           selectedClass.class_id,
                                         );
-                                      } catch {
-                                        toast.error("Failed to publish result");
+                                      } catch (err: unknown) {
+                                        toast.error(
+                                          err instanceof Error && err.message
+                                            ? err.message
+                                            : "Failed to publish result",
+                                        );
                                       }
                                     }}
                                     className="h-7 text-xs font-medium rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white"

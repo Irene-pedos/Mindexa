@@ -10,6 +10,7 @@ from pydantic import model_validator
 from app.agents.base import BaseAgent
 from app.core.ai.gateway import AIGateway
 from app.core.ai.prompt_registry import get_prompt
+from app.core.ai.prompt_render import render_prompt, untrusted_block
 from app.core.ai.providers import AICompletionRequest, AIMessage
 from app.core.logger import get_logger
 from app.db.enums import AIActionType
@@ -477,12 +478,15 @@ class StudyPlannerAgent(BaseAgent):
         """Generate ordered list of study topics tailored to target assessment, materials, and student weak areas."""
         template = get_prompt("study_topics", "v1")
         mats_str = ", ".join(material_titles) if material_titles else "None specified"
-        system_content = (
-            template.replace("{{assessment_title}}", assessment_title)
-            .replace("{{course_context}}", course_context or "General Academic Course")
-            .replace("{{material_titles}}", mats_str)
-            .replace("{{session_count}}", str(session_count))
-            .replace("{{difficulty_pace}}", difficulty_pace)
+        system_content = render_prompt(
+            template,
+            {
+                "assessment_title": assessment_title,
+                "course_context": course_context or "General Academic Course",
+                "material_titles": mats_str,
+                "session_count": str(session_count),
+                "difficulty_pace": difficulty_pace,
+            },
         )
 
         if weak_topics:
@@ -533,13 +537,18 @@ class StudyPlannerAgent(BaseAgent):
 
         template = get_prompt("study_lesson", "v1")
         profile_str = json.dumps(learning_profile or {})
-        system_content = (
-            template.replace("{{topic}}", session.topic)
-            .replace("{{session_title}}", session.title)
-            .replace("{{duration_minutes}}", str(duration))
-            .replace("{{target_sections}}", target_sections)
-            .replace("{{learning_profile}}", profile_str)
-            .replace("{{rag_context}}", rag_context or "No additional lecturer materials retrieved.")
+        system_content = render_prompt(
+            template,
+            {
+                "topic": session.topic,
+                "session_title": session.title,
+                "duration_minutes": str(duration),
+                "target_sections": target_sections,
+                "learning_profile": profile_str,
+                "rag_context": untrusted_block("lecturer_materials", rag_context)
+                if rag_context
+                else "No additional lecturer materials retrieved.",
+            },
         )
 
         request = AICompletionRequest(
@@ -584,11 +593,16 @@ class StudyPlannerAgent(BaseAgent):
         """Generate non-academic self-evaluation knowledge check questions."""
         template = get_prompt("study_knowledge_check", "v1")
         weak_str = ", ".join(weak_topics or []) or "None"
-        system_content = (
-            template.replace("{{topic}}", session.topic)
-            .replace("{{lesson_content}}", lesson_content[:3000] if lesson_content else f"Session topic: {session.topic}")
-            .replace("{{weak_topics}}", weak_str)
-            .replace("{{question_count}}", str(question_count))
+        system_content = render_prompt(
+            template,
+            {
+                "topic": session.topic,
+                "lesson_content": lesson_content[:3000]
+                if lesson_content
+                else f"Session topic: {session.topic}",
+                "weak_topics": weak_str,
+                "question_count": str(question_count),
+            },
         )
 
         request = AICompletionRequest(
@@ -755,10 +769,13 @@ class StudyPlannerAgent(BaseAgent):
         """Generate post-lesson concise learning summary."""
         template = get_prompt("study_session_summary", "v1")
         kc_str = json.dumps(knowledge_check_report or {})
-        system_content = (
-            template.replace("{{topic}}", topic)
-            .replace("{{lesson_content}}", lesson_content[:2500] if lesson_content else topic)
-            .replace("{{knowledge_check_report}}", kc_str)
+        system_content = render_prompt(
+            template,
+            {
+                "topic": topic,
+                "lesson_content": lesson_content[:2500] if lesson_content else topic,
+                "knowledge_check_report": kc_str,
+            },
         )
 
         request = AICompletionRequest(
@@ -795,11 +812,18 @@ class StudyPlannerAgent(BaseAgent):
     ) -> GuidedExerciseOutput:
         """Generate AI/RAG-grounded inline practice activity for a specific guided lesson section."""
         template = get_prompt("study_guided_exercise", "v1")
-        system_content = (
-            template.replace("{{topic}}", topic)
-            .replace("{{section_title}}", section_title)
-            .replace("{{section_content}}", section_content[:1500] if section_content else f"Section on {section_title}")
-            .replace("{{rag_context}}", rag_context[:1500] if rag_context else "None available.")
+        system_content = render_prompt(
+            template,
+            {
+                "topic": topic,
+                "section_title": section_title,
+                "section_content": section_content[:1500]
+                if section_content
+                else f"Section on {section_title}",
+                "rag_context": untrusted_block("lecturer_materials", rag_context[:1500])
+                if rag_context
+                else "None available.",
+            },
         )
 
         request = AICompletionRequest(

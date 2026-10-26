@@ -5,6 +5,7 @@ import { useEffect, useState, useCallback } from "react";
 import {
   Card,
   CardContent,
+  CardFooter,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
@@ -323,116 +324,136 @@ export default function LecturerDashboard() {
       </div>
 
       {/* Middle Grid: Workflow Shortcuts + Interactive Institutional Activity Chart */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6">
-        {/* Quick Registry Links (Workflow Shortcuts - preserved) */}
-        <Card className="lg:col-span-4 xl:col-span-3 border border-border/50 bg-card/60 backdrop-blur-xs shadow-2xs rounded-2xl overflow-hidden flex flex-col justify-between">
-          <CardHeader className="py-3.5 px-4 sm:px-5 border-b border-border/30 bg-muted/10">
-            <CardTitle className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
-              <Sparkles className="size-3.5 text-primary" />
-              Workflow Shortcuts
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="p-3 space-y-2 flex-1 flex flex-col justify-between">
-            {[
-              {
-                label: "Draft Assessment",
-                href: "/lecturer/assessments/new",
-                icon: Plus,
-                variant: "default" as const,
-              },
-              {
-                label: "Manage Registry",
-                href: "/lecturer/assessments",
-                icon: BookOpen,
-                variant: "outline" as const,
-              },
-              {
-                label: "Question Bank",
-                href: "/lecturer/question-bank",
-                icon: GraduationCap,
-                variant: "outline" as const,
-              },
-              {
-                label: "Grading Desk",
-                href: "/lecturer/grading",
-                icon: CheckCircle,
-                variant: "outline" as const,
-              },
-              {
-                label: "AI Faculty Assistant",
-                href: "/lecturer/ai-assistant",
-                icon: Sparkles,
-                variant: "outline" as const,
-              },
-              {
-                label: "Live Supervision",
-                href: "/lecturer/supervision",
-                icon: ShieldCheck,
-                variant: "outline" as const,
-              },
-            ].map((action, idx) => (
-              <Button
-                key={idx}
-                asChild
-                variant={action.variant}
-                size="sm"
-                className="w-full justify-between h-9 px-3.5 text-xs font-semibold rounded-xl"
-              >
-                <Link href={action.href}>
-                  <div className="flex items-center gap-2">
-                    <action.icon className="size-3.5" />
-                    {action.label}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6 items-stretch">
+        {/* Workflow Shortcuts Hub */}
+        <div className="lg:col-span-4 xl:col-span-3 flex flex-col h-full">
+          <Card className="border border-border/60 bg-card/80 backdrop-blur-xs shadow-2xs rounded-2xl overflow-hidden flex flex-col justify-between h-full">
+            <CardHeader className="p-4 sm:p-5 pb-3 border-b border-border/40 space-y-0">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="size-7 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
+                    <Sparkles className="size-3.5" />
                   </div>
-                  <ChevronRight className="size-3 opacity-40" />
+                  <h3 className="text-sm font-bold text-foreground tracking-tight">
+                    Workflow Shortcuts
+                  </h3>
+                </div>
+                <Badge variant="outline" className="text-[10px] font-mono h-5 px-2 rounded-full bg-muted/40 text-muted-foreground border-border/50">
+                  5 Actions
+                </Badge>
+              </div>
+              <p className="text-[11px] text-muted-foreground pl-9">
+                Quick access to core academic operations
+              </p>
+            </CardHeader>
+            <CardContent className="p-3 sm:p-3.5 flex-1 flex flex-col justify-between gap-2">
+              {[
+                {
+                  title: "Draft Assessment",
+                  subtitle: "Configure exam or quiz",
+                  href: "/lecturer/assessments/new",
+                  icon: Plus,
+                  color: "text-primary",
+                  bgColor: "bg-primary/10 border-primary/20",
+                  badge: "Create",
+                  badgeVariant: "default",
+                },
+                {
+                  title: "Manage Registry",
+                  subtitle: "All assessment sessions",
+                  href: "/lecturer/assessments",
+                  icon: BookOpen,
+                  color: "text-blue-600 dark:text-blue-400",
+                  bgColor: "bg-blue-500/10 border-blue-500/20",
+                  badge: upcomingAssessmentsVal > 0 ? `${upcomingAssessmentsVal} active` : undefined,
+                  badgeVariant: "outline",
+                },
+                {
+                  title: "Grading Desk",
+                  subtitle: "SpeedGrader & evaluations",
+                  href: "/lecturer/grading",
+                  icon: CheckCircle2,
+                  color: pendingGradingVal > 0 ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400",
+                  bgColor: pendingGradingVal > 0 ? "bg-amber-500/10 border-amber-500/20" : "bg-emerald-500/10 border-emerald-500/20",
+                  badge: pendingGradingVal > 0 ? `${pendingGradingVal} to review` : "Clean",
+                  badgeVariant: pendingGradingVal > 0 ? "warning" : "success",
+                },
+                {
+                  title: "AI Faculty Assistant",
+                  subtitle: "Analytics & grading copilot",
+                  href: "/lecturer/ai-assistant",
+                  icon: Sparkles,
+                  color: "text-violet-600 dark:text-violet-400",
+                  bgColor: "bg-violet-500/10 border-violet-500/20",
+                  badge: "Copilot",
+                  badgeVariant: "violet",
+                },
+                {
+                  title: "Live Supervision",
+                  subtitle: "Proctoring & integrity",
+                  href: "/lecturer/supervision",
+                  icon: flaggedEventsVal > 0 ? ShieldAlert : ShieldCheck,
+                  color: flaggedEventsVal > 0 ? "text-rose-600 dark:text-rose-400" : "text-emerald-600 dark:text-emerald-400",
+                  bgColor: flaggedEventsVal > 0 ? "bg-rose-500/10 border-rose-500/20" : "bg-emerald-500/10 border-emerald-500/20",
+                  badge: flaggedEventsVal > 0 ? `${flaggedEventsVal} alerts` : "Secure",
+                  badgeVariant: flaggedEventsVal > 0 ? "destructive" : "success",
+                },
+              ].map((action, idx) => (
+                <Link
+                  key={idx}
+                  href={action.href}
+                  className="group flex items-center justify-between gap-2.5 p-2.5 rounded-xl border border-border/40 hover:border-border/80 bg-background/50 hover:bg-muted/40 transition-all duration-150 flex-1"
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className={cn("size-8 rounded-xl flex items-center justify-center shrink-0 border transition-transform duration-200 group-hover:scale-105", action.bgColor, action.color)}>
+                      <action.icon className="size-4" />
+                    </div>
+                    <div className="min-w-0">
+                      <span className="text-xs font-semibold text-foreground group-hover:text-primary transition-colors block truncate">
+                        {action.title}
+                      </span>
+                      <span className="text-[10px] text-muted-foreground block truncate">
+                        {action.subtitle}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {action.badge && (
+                      <span className={cn(
+                        "text-[9px] font-semibold px-1.5 py-0.5 rounded-md leading-none transition-colors",
+                        action.badgeVariant === "default" && "bg-primary/10 text-primary border border-primary/20",
+                        action.badgeVariant === "warning" && "bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20",
+                        action.badgeVariant === "destructive" && "bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20",
+                        action.badgeVariant === "success" && "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20",
+                        action.badgeVariant === "violet" && "bg-violet-500/10 text-violet-600 dark:text-violet-400 border border-violet-500/20",
+                        action.badgeVariant === "outline" && "bg-muted/50 text-muted-foreground border border-border/50",
+                      )}>
+                        {action.badge}
+                      </span>
+                    )}
+                    <ChevronRight className="size-3 text-muted-foreground/40 group-hover:text-primary group-hover:translate-x-0.5 transition-all" />
+                  </div>
                 </Link>
-              </Button>
-            ))}
-          </CardContent>
-        </Card>
+              ))}
+            </CardContent>
+            <CardFooter className="py-2.5 px-4 sm:px-5 border-t border-border/40 bg-muted/10 flex items-center justify-between text-[10px] text-muted-foreground">
+              <span>Direct Faculty Launcher</span>
+              <span className="font-mono text-muted-foreground/60">5 hubs</span>
+            </CardFooter>
+          </Card>
+        </div>
 
         {/* Analytics Chart */}
-        <div className="lg:col-span-8 xl:col-span-9 min-w-0">
-          {chartData.length === 0 || totalSubmissionsInChart === 0 ? (
-            <Card className="border border-border/50 bg-card/60 backdrop-blur-xs shadow-2xs rounded-2xl p-6 h-full flex flex-col items-center justify-center text-center">
-              <div className="size-12 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary mb-3">
-                <BarChart3 className="size-6" />
-              </div>
-              <h3 className="text-sm font-semibold text-foreground">
-                No Submission Activity Recorded (30 Days)
-              </h3>
-              <p className="text-xs text-muted-foreground max-w-sm mt-1">
-                Visual telemetry and AI-assisted grading volume will automatically chart here once students submit attempts.
-              </p>
-              <Button
-                variant="outline"
-                size="sm"
-                className="mt-4 h-8 text-xs font-medium rounded-xl"
-                asChild
-              >
-                <Link href="/lecturer/assessments/new">
-                  <Plus className="size-3 mr-1" /> Launch New Assessment
-                </Link>
-              </Button>
-            </Card>
-          ) : (
-            <ChartAreaInteractive
-              title="Institutional Activity & Grading Volume"
-              description="Daily submission distribution and AI-assisted automated review volume"
-              data={chartData}
-              config={{
-                manual: { label: "Manual Review", color: "var(--primary)" },
-                ai: { label: "AI Processed", color: "#8b5cf6" },
-              }}
-              areaKeys={[
-                {
-                  key: "manual",
-                  fill: "var(--primary)",
-                  stroke: "var(--primary)",
-                },
-                { key: "ai", fill: "#8b5cf6", stroke: "#8b5cf6" },
-              ]}
-            />
-          )}
+        <div className="lg:col-span-8 xl:col-span-9 min-w-0 flex flex-col h-full">
+          <ChartAreaInteractive
+            title="Institutional Activity & Grading Volume"
+            description="Daily submission distribution and AI-assisted automated review volume"
+            data={chartData}
+            emptyActionHref="/lecturer/assessments/new"
+            emptyActionLabel="Launch Assessment"
+            className="h-full"
+          />
         </div>
       </div>
 

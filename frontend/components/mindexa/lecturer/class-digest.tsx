@@ -117,14 +117,22 @@ export function ClassDigest({ workspaceId }: ClassDigestProps) {
   const selectedAsmt = assessments.find((a) => a.id === selectedAssessmentId);
 
   return (
-    <div className="flex-1 p-3 sm:p-5 lg:p-6 overflow-y-auto space-y-4 w-full max-w-full">
+    <div className="flex-1 p-3 sm:p-5 lg:p-6 overflow-y-auto space-y-4 w-full max-w-full narrow-scrollbar-dark">
       {/* Header Bar */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between border-b border-border/40 pb-3 gap-3">
-        <div className="space-y-0.5">
-          <h3 className="text-sm sm:text-base font-semibold text-foreground flex items-center gap-2">
-            <BarChart2 className="size-4 text-primary" /> Class Digest & AI Insights
-          </h3>
-          <p className="text-xs text-muted-foreground">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between border-b border-border/40 pb-3.5 gap-3">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <div className="size-8 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary shadow-2xs">
+              <BarChart2 className="size-4" />
+            </div>
+            <h3 className="text-sm sm:text-base font-bold text-foreground tracking-tight">
+              Class Digest & AI Insights
+            </h3>
+            <Badge variant="outline" className="text-[10px] font-semibold border-primary/30 text-primary bg-primary/5">
+              Cohort Telemetry
+            </Badge>
+          </div>
+          <p className="text-xs text-muted-foreground leading-relaxed max-w-2xl">
             Grounded statistical narration of cohort performance aggregates, identifying weak topics and actionable interventions.
           </p>
         </div>
@@ -134,7 +142,7 @@ export function ClassDigest({ workspaceId }: ClassDigestProps) {
             variant="outline"
             size="sm"
             onClick={() => setIsSelectorCollapsed(!isSelectorCollapsed)}
-            className="h-8 text-xs gap-1.5 border-border/60 hover:bg-muted/50"
+            className="h-8 text-xs gap-1.5 border-border/60 hover:bg-muted/50 cursor-pointer"
             title={isSelectorCollapsed ? "Show Assessment Target" : "Collapse Selector to Focus Insights"}
           >
             {isSelectorCollapsed ? (
@@ -156,7 +164,7 @@ export function ClassDigest({ workspaceId }: ClassDigestProps) {
                 variant="outline"
                 size="sm"
                 onClick={handleCopyDigest}
-                className="h-8 text-xs gap-1"
+                className="h-8 text-xs gap-1 cursor-pointer"
               >
                 {copied ? <Check className="size-3.5 text-emerald-500" /> : <Copy className="size-3.5" />}
                 <span>{copied ? "Copied" : "Copy Digest"}</span>
@@ -166,7 +174,7 @@ export function ClassDigest({ workspaceId }: ClassDigestProps) {
                 size="sm"
                 onClick={() => handleFetchInsights(true)}
                 disabled={isLoading}
-                className="h-8 text-xs gap-1.5 font-semibold bg-primary text-primary-foreground shadow-xs"
+                className="h-8 text-xs gap-1.5 font-semibold bg-primary text-primary-foreground shadow-xs cursor-pointer hover:bg-primary/90"
               >
                 <RefreshCw className={cn("size-3.5", isLoading && "animate-spin")} />
                 <span>Regenerate AI Narrative</span>
@@ -178,7 +186,7 @@ export function ClassDigest({ workspaceId }: ClassDigestProps) {
 
       {/* Assessment Selector Bar */}
       {!isSelectorCollapsed ? (
-        <Card className="p-4 bg-muted/20 border-border/60 rounded-2xl shadow-xs transition-all">
+        <Card className="p-4 sm:p-5 bg-card border border-border/70 rounded-2xl shadow-xs transition-all">
           <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
             <div className="space-y-1.5 flex-1 w-full md:w-auto">
               <Label className="text-xs font-semibold text-foreground">
@@ -277,7 +285,7 @@ export function ClassDigest({ workspaceId }: ClassDigestProps) {
         <div className="space-y-4">
           {/* Key Metrics Grid */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <Card className="p-3.5 bg-card border-border/60 space-y-1">
+            <Card className="p-4 bg-card border border-border/70 rounded-2xl space-y-1.5 shadow-xs hover:border-primary/30 transition-colors">
               <div className="flex items-center justify-between text-muted-foreground text-[11px]">
                 <span>Class Average</span>
                 <TrendingUp className="size-3.5 text-primary" />
@@ -288,7 +296,7 @@ export function ClassDigest({ workspaceId }: ClassDigestProps) {
               <p className="text-[10px] text-muted-foreground">Mean score across cohort</p>
             </Card>
 
-            <Card className="p-3.5 bg-card border-border/60 space-y-1">
+            <Card className="p-4 bg-card border border-border/70 rounded-2xl space-y-1.5 shadow-xs hover:border-primary/30 transition-colors">
               <div className="flex items-center justify-between text-muted-foreground text-[11px]">
                 <span>Pass Rate</span>
                 <CheckCircle2 className="size-3.5 text-emerald-600" />
@@ -299,7 +307,7 @@ export function ClassDigest({ workspaceId }: ClassDigestProps) {
               <p className="text-[10px] text-muted-foreground">Students meeting pass criteria</p>
             </Card>
 
-            <Card className="p-3.5 bg-card border-border/60 space-y-1">
+            <Card className="p-4 bg-card border border-border/70 rounded-2xl space-y-1.5 shadow-xs hover:border-primary/30 transition-colors">
               <div className="flex items-center justify-between text-muted-foreground text-[11px]">
                 <span>Score Range</span>
                 <Target className="size-3.5 text-amber-600" />
@@ -312,7 +320,7 @@ export function ClassDigest({ workspaceId }: ClassDigestProps) {
               <p className="text-[10px] text-muted-foreground">Min to Max score</p>
             </Card>
 
-            <Card className="p-3.5 bg-card border-border/60 space-y-1">
+            <Card className="p-4 bg-card border border-border/70 rounded-2xl space-y-1.5 shadow-xs hover:border-primary/30 transition-colors">
               <div className="flex items-center justify-between text-muted-foreground text-[11px]">
                 <span>Submissions</span>
                 <Users className="size-3.5 text-primary" />
@@ -325,7 +333,7 @@ export function ClassDigest({ workspaceId }: ClassDigestProps) {
           </div>
 
           {/* AI Narrative Commentary */}
-          <Card className="p-5 border-border/70 bg-card space-y-4">
+          <Card className="p-5 sm:p-6 border-border/70 bg-card rounded-2xl space-y-4 shadow-sm">
             <div className="flex items-center justify-between border-b border-border/40 pb-2">
               <h4 className="text-xs font-semibold text-foreground flex items-center gap-1.5">
                 <Sparkles className="size-4 text-primary" /> Executive Narrative Commentary
@@ -343,7 +351,7 @@ export function ClassDigest({ workspaceId }: ClassDigestProps) {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2">
               {/* Weak Topics */}
               {insights.weak_topics && insights.weak_topics.length > 0 && (
-                <div className="p-3.5 rounded-xl border border-amber-500/30 bg-amber-500/5 space-y-2">
+                <div className="p-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 dark:bg-amber-950/20 space-y-2">
                   <div className="flex items-center gap-1.5 text-xs font-semibold text-amber-800 dark:text-amber-300">
                     <AlertTriangle className="size-3.5 text-amber-600" />
                     <span>Areas Requiring Reinforcement</span>
@@ -361,7 +369,7 @@ export function ClassDigest({ workspaceId }: ClassDigestProps) {
 
               {/* Recommended Interventions */}
               {insights.recommended_interventions && insights.recommended_interventions.length > 0 && (
-                <div className="p-3.5 rounded-xl border border-primary/30 bg-primary/5 space-y-2">
+                <div className="p-4 rounded-2xl border border-primary/30 bg-primary/10 dark:bg-primary/15 space-y-2">
                   <div className="flex items-center gap-1.5 text-xs font-semibold text-primary">
                     <Lightbulb className="size-3.5" />
                     <span>Recommended Teaching Interventions</span>
@@ -380,7 +388,7 @@ export function ClassDigest({ workspaceId }: ClassDigestProps) {
 
             {/* General Insights */}
             {insights.insights && insights.insights.length > 0 && (
-              <div className="p-3.5 rounded-xl border border-border/60 bg-muted/20 space-y-1.5">
+              <div className="p-4 rounded-2xl border border-border/60 bg-muted/30 space-y-2">
                 <span className="text-[11px] font-semibold text-foreground uppercase tracking-wider block">
                   Key Statistical Observations
                 </span>

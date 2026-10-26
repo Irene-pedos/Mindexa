@@ -5,6 +5,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from app.schemas.chat import ChatHistory
+
 
 class StudentSupportContextRequest(BaseModel):
     """Approved context snippet supplied by the service layer or client workflow."""
@@ -31,9 +33,11 @@ class StudentSupportRequest(BaseModel):
         description="Originating UI surface for scoping logs and history isolation",
     )
     conversation_id: uuid.UUID | None = Field(default=None, description="Conversation / thread ID")
-    conversation_history: list[dict] = Field(default_factory=list)
+    conversation_history: ChatHistory = Field(default_factory=list)
     selected_resource_id: uuid.UUID | None = Field(default=None, description="Scope query to single resource")
-    selected_resource_ids: list[uuid.UUID] = Field(default_factory=list, description="Scope query to multiple resources")
+    selected_resource_ids: list[uuid.UUID] = Field(
+        default_factory=list, max_length=20, description="Scope query to multiple resources"
+    )
     teaching_workspace_id: uuid.UUID | None = Field(default=None, description="Scope RAG retrieval to specific course workspace")
     thinking_mode: bool = Field(default=False, description="Enable Chain-of-Thought deep reasoning with larger token budget")
     deep_search_mode: bool = Field(default=False, description="Enable expanded RAG search (top_k=16 multi-chunk retrieval)")

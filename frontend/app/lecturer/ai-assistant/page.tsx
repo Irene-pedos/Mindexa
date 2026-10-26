@@ -10,6 +10,7 @@ import React, {
   Suspense,
 } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -50,6 +51,8 @@ import {
   Loader2,
   PanelLeftClose,
   PanelLeftOpen,
+  ArrowLeft,
+  History,
 } from "lucide-react";
 import { AIChatInput, type Attachment } from "@/components/ui/ai-chat-input";
 import { ChatMessage } from "@/lib/api/gemini";
@@ -59,6 +62,7 @@ import {
   WorkspaceDetail,
   LecturerMaterialResponse,
 } from "@/lib/api/lecturer";
+import { escapeHtml } from "@/lib/escape-html";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { Separator } from "@/components/ui/separator";
@@ -534,9 +538,9 @@ function LecturerAIAssistantContent() {
     let bodyHtml = `
       <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 24px; color: #0f172a; line-height: 1.6;">
         <div style="border-bottom: 2px solid #e2e8f0; padding-bottom: 16px; margin-bottom: 24px;">
-          <h1 style="font-size: 20px; font-weight: 700; margin: 0 0 6px 0; color: #0f172a;">${title}</h1>
+          <h1 style="font-size: 20px; font-weight: 700; margin: 0 0 6px 0; color: #0f172a;">${escapeHtml(title)}</h1>
           <p style="font-size: 12px; color: #64748b; margin: 0;">
-            <strong>Course Workspace:</strong> ${activeWorkspaceName} &bull; <strong>Generated:</strong> ${new Date().toLocaleString()}
+            <strong>Course Workspace:</strong> ${escapeHtml(activeWorkspaceName)} &bull; <strong>Generated:</strong> ${new Date().toLocaleString()}
           </p>
         </div>
     `;
@@ -552,7 +556,7 @@ function LecturerAIAssistantContent() {
               <div style="font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; color: ${isUser ? "#475569" : "#2563eb"};">
                 ${isUser ? "Lecturer Prompt" : "AI Academic Copilot"}
               </div>
-              <div style="font-size: 13px; white-space: pre-wrap; word-break: break-word;">${m.content}</div>
+              <div style="font-size: 13px; white-space: pre-wrap; word-break: break-word;">${escapeHtml(m.content)}</div>
             </div>
           `;
         });
@@ -561,7 +565,7 @@ function LecturerAIAssistantContent() {
       const content = generatedContent || "No generated content available.";
       bodyHtml += `
         <div style="font-size: 13px; white-space: pre-wrap; word-break: break-word; background: #ffffff; padding: 20px; border: 1px solid #e2e8f0; border-radius: 10px;">
-          ${content}
+          ${escapeHtml(content)}
         </div>
       `;
     }
@@ -830,7 +834,7 @@ function LecturerAIAssistantContent() {
             <Label className="text-[10px] font-semibold uppercase text-muted-foreground tracking-wider">
               Workspace Handouts ({workspaceMaterials.length})
             </Label>
-            <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1 border border-border/60 rounded-xl p-2.5 bg-background">
+            <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1 border border-border/60 rounded-xl p-2.5 bg-background narrow-scrollbar-dark">
               {workspaceMaterials.map((mat) => (
                 <label
                   key={mat.id}
@@ -873,7 +877,7 @@ function LecturerAIAssistantContent() {
             </Button>
           </div>
 
-          <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+          <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1 narrow-scrollbar-dark">
             {sortedSessions.length === 0 ? (
               <div className="text-xs text-muted-foreground py-4 text-center italic">No saved sessions.</div>
             ) : (
@@ -938,179 +942,414 @@ function LecturerAIAssistantContent() {
         isFullScreen && "fixed inset-0 z-[9999] h-screen w-screen p-0 m-0 bg-background"
       )}
     >
-      {/* Sleek Top Header Bar */}
-      <header className="h-12 px-3 sm:px-4 border-b border-border/40 bg-background flex items-center justify-between shrink-0 z-20">
-        {/* Left Side */}
-        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => setIsMobileMenuOpen(true)}
-            className="md:hidden h-8 w-8 text-muted-foreground hover:text-foreground shrink-0 rounded-lg"
-            title="Open navigation modules"
-          >
-            <Menu className="size-4" />
-          </Button>
-
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-            className="hidden md:flex h-8 w-8 text-muted-foreground hover:text-foreground shrink-0 rounded-lg"
-            title={isSidebarCollapsed ? "Expand module rail" : "Collapse module rail"}
-          >
-            {isSidebarCollapsed ? <PanelLeftOpen className="size-4 text-primary" /> : <PanelLeftClose className="size-4" />}
-          </Button>
-
-          <div className="flex items-center gap-2 shrink-0">
-            <div className="size-7 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center">
-              <Sparkles className="size-3.5 text-primary" />
-            </div>
-            <span className="text-xs sm:text-sm font-semibold tracking-tight text-foreground truncate">
-              Academic AI Copilot
-            </span>
-          </div>
-
-          <Separator orientation="vertical" className="hidden sm:block h-4 bg-border/50" />
-
-          {/* Active Workspace Pill */}
-          <button
-            type="button"
-            onClick={() => setIsContextSheetOpen(true)}
-            className="hidden sm:flex items-center gap-1 px-2.5 py-1 rounded-lg border border-border/60 bg-muted/20 hover:bg-muted/40 text-xs font-medium text-foreground transition-colors max-w-[220px]"
-            title="Click to view or switch workspace"
-          >
-            <Folder className="size-3 text-primary shrink-0" />
-            <span className="truncate">{activeWorkspaceName}</span>
-          </button>
-        </div>
-
-        {/* Right Side */}
-        <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setShareModalOpen(true)}
-            className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground gap-1"
-            title="Share session"
-          >
-            <Share2 className="size-3.5" />
-            <span className="hidden sm:inline">Share</span>
-          </Button>
-
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setExportModalOpen(true)}
-            className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground gap-1"
-            title="Export session"
-          >
-            <Download className="size-3.5" />
-            <span className="hidden sm:inline">Export</span>
-          </Button>
-
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setIsContextSheetOpen(true)}
-            className="h-8 px-2.5 text-xs font-medium rounded-lg border-border/70 gap-1"
-          >
-            <Folder className="size-3.5 text-primary" />
-            <span className="hidden xs:inline">Context</span>
-          </Button>
-
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8 text-muted-foreground hover:text-foreground rounded-lg"
-            onClick={toggleFullScreen}
-            title={isFullScreen ? "Exit Full Screen" : "Full Screen"}
-          >
-            {isFullScreen ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
-          </Button>
-        </div>
-      </header>
+      {/* ── Mobile Floating Menu Trigger ── */}
+      <button
+        type="button"
+        onClick={() => setIsMobileMenuOpen(true)}
+        className="md:hidden absolute left-3 top-3 z-30 size-8 rounded-xl bg-card/90 backdrop-blur-md border border-border/80 shadow-md flex items-center justify-center text-foreground hover:bg-muted transition-all cursor-pointer"
+        title="Open navigation modules"
+      >
+        <Menu className="size-4" />
+      </button>
 
       {/* Main Viewport */}
-      <div className="flex-1 flex flex-row overflow-hidden min-h-0">
-        {/* Desktop Sidebar */}
+      <div className="flex-1 flex flex-row overflow-hidden min-h-0 relative">
+        {/* ── Desktop & Tablet Collapsible Rail ── */}
         <aside
           className={cn(
-            "hidden md:flex flex-col border-r border-border/40 bg-muted/10 transition-all duration-300 shrink-0 z-20 overflow-hidden",
-            isSidebarCollapsed ? "w-[56px]" : "w-[200px]"
+            "hidden md:flex flex-col border-r border-border/40 bg-muted/15 transition-all duration-300 ease-in-out shrink-0 z-20 h-full overflow-hidden",
+            isSidebarCollapsed ? "w-14 lg:w-16" : "w-[260px] sm:w-[280px]"
           )}
         >
-          <div className="p-2 border-b border-border/40 flex items-center justify-between">
-            {!isSidebarCollapsed && (
-              <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider pl-1.5">
-                Modules
-              </span>
-            )}
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-              className="h-6 w-6 text-muted-foreground hover:text-foreground rounded-md ml-auto"
-              title={isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-            >
-              <ChevronDown
-                className={cn(
-                  "size-3.5 transition-transform duration-300",
-                  isSidebarCollapsed ? "-rotate-90" : "rotate-90"
-                )}
-              />
-            </Button>
-          </div>
+          {!isSidebarCollapsed ? (
+            /* ── Expanded Sidebar Content ── */
+            <div className="flex flex-col h-full w-[260px] sm:w-[280px]">
+              {/* Rail Header with Back to Dashboard & Collapse */}
+              <div className="p-2.5 sm:p-3 border-b border-border/40 flex items-center justify-between shrink-0">
+                <Link
+                  href="/lecturer/dashboard"
+                  className="flex items-center gap-1.5 px-2 py-1 rounded-xl hover:bg-muted text-xs font-semibold text-muted-foreground hover:text-foreground transition-all group"
+                  title="Back to Lecturer Dashboard"
+                >
+                  <ArrowLeft className="size-3.5 transition-transform group-hover:-translate-x-0.5" />
+                  <span>Dashboard</span>
+                </Link>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setIsSidebarCollapsed(true)}
+                  className="size-7 rounded-xl text-muted-foreground hover:text-foreground"
+                  title="Collapse sidebar"
+                >
+                  <PanelLeftClose className="size-4" />
+                </Button>
+              </div>
 
-          <div className="flex-1 p-1.5 space-y-0.5 overflow-y-auto">
-            {moduleTabs.map((tab) => {
-              const Icon = tab.icon;
-              const isTabActive = activeTab === tab.id;
-              return (
-                <UITooltipProvider key={tab.id} delayDuration={0}>
+              {/* New Session Action */}
+              <div className="p-2 border-b border-border/30 shrink-0">
+                <Button
+                  onClick={() => startNewSession("chat")}
+                  className="w-full h-8 gap-2 text-xs font-bold rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 shadow-2xs"
+                  type="button"
+                >
+                  <Plus className="size-3.5" />
+                  <span>New Session</span>
+                </Button>
+              </div>
+
+              {/* Active Course Workspace Picker Pill */}
+              <div className="p-2 border-b border-border/30 shrink-0">
+                <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-1 pb-1">
+                  Active Course Workspace
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsContextSheetOpen(true)}
+                  className="w-full flex items-center justify-between p-2 rounded-lg border border-border/60 bg-background/60 hover:bg-muted/40 transition-colors text-left text-xs font-medium text-foreground group cursor-pointer"
+                  title="Click to view course context or switch workspace"
+                >
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <Folder className="size-3.5 text-primary shrink-0" />
+                    <span className="truncate text-xs font-semibold">{activeWorkspaceName}</span>
+                  </div>
+                  <ChevronDown className="size-3 text-muted-foreground shrink-0 group-hover:text-foreground transition-colors" />
+                </button>
+              </div>
+
+              {/* Module Switcher Tabs */}
+              <div className="p-2 border-b border-border/30 shrink-0 space-y-0.5">
+                <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-1 pb-1">
+                  AI Modules
+                </div>
+                {moduleTabs.map((tab) => {
+                  const Icon = tab.icon;
+                  const isTabActive = activeTab === tab.id;
+                  return (
+                    <button
+                      key={tab.id}
+                      onClick={() => {
+                        setActiveTab(tab.id as AIModule);
+                        setGeneratedContent("");
+                      }}
+                      className={cn(
+                        "w-full flex items-center gap-2 px-2.5 py-1.5 text-xs font-medium rounded-lg transition-all text-left cursor-pointer",
+                        isTabActive
+                          ? "bg-primary/10 text-primary font-bold border border-primary/20 shadow-2xs"
+                          : "text-muted-foreground hover:text-foreground hover:bg-muted/40"
+                      )}
+                    >
+                      <Icon className="size-3.5 shrink-0" />
+                      <span className="truncate">{tab.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Recent Sessions History (with Pin & Delete) */}
+              <div className="flex-1 overflow-y-auto p-2 space-y-1 min-h-0 narrow-scrollbar-dark">
+                <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-2 py-1 flex items-center justify-between">
+                  <span>Recent Sessions</span>
+                  <History className="size-3" />
+                </div>
+
+                {sortedSessions.length === 0 ? (
+                  <div className="p-4 text-center text-xs text-muted-foreground font-medium bg-muted/30 rounded-lg border border-dashed border-border/40 my-2">
+                    No session history yet.
+                  </div>
+                ) : (
+                  sortedSessions.map((s) => {
+                    const isPinned = pinnedSessionIds.has(s.id);
+                    const isCurrent = currentSessionId === s.id;
+                    const sessionDate = new Date(s.created_at).toLocaleDateString(undefined, {
+                      month: "short",
+                      day: "numeric",
+                    });
+
+                    return (
+                      <div
+                        key={s.id}
+                        onClick={() => loadSession(s)}
+                        className={cn(
+                          "group flex items-center justify-between gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium cursor-pointer transition-all border border-transparent",
+                          isCurrent
+                            ? "bg-muted text-foreground border-border/50 font-semibold"
+                            : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                        )}
+                        title={s.title}
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          {isPinned ? (
+                            <Pin className="size-3 text-primary fill-primary shrink-0" />
+                          ) : (
+                            <Sparkles className="size-3 text-muted-foreground shrink-0 opacity-60 group-hover:opacity-100" />
+                          )}
+                          <div className="truncate">
+                            <span className="truncate block text-xs">{s.title}</span>
+                            <span className="text-[10px] text-muted-foreground/60 block">{sessionDate}</span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                          <button
+                            type="button"
+                            onClick={(e) => togglePinSession(s.id, e)}
+                            className="size-5 rounded flex items-center justify-center hover:bg-muted-foreground/10 text-muted-foreground hover:text-foreground cursor-pointer"
+                            title={isPinned ? "Unpin session" : "Pin session"}
+                          >
+                            <Pin className={cn("size-3", isPinned && "text-primary fill-primary")} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSessionToDelete(s.id);
+                            }}
+                            className="size-5 rounded flex items-center justify-center hover:bg-muted-foreground/10 text-muted-foreground hover:text-destructive cursor-pointer"
+                            title="Delete session"
+                          >
+                            <Trash2 className="size-3" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+
+              {/* Sidebar Footer Action Tools */}
+              <div className="p-2 border-t border-border/40 shrink-0 bg-background/50 flex items-center justify-between gap-1">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShareModalOpen(true)}
+                  className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground gap-1 flex-1 cursor-pointer"
+                  title="Share session"
+                >
+                  <Share2 className="size-3.5" />
+                  <span>Share</span>
+                </Button>
+
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setExportModalOpen(true)}
+                  className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground gap-1 flex-1 cursor-pointer"
+                  title="Export session"
+                >
+                  <Download className="size-3.5" />
+                  <span>Export</span>
+                </Button>
+
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setIsContextSheetOpen(true)}
+                  className="h-8 w-8 text-muted-foreground hover:text-foreground shrink-0 rounded-lg cursor-pointer"
+                  title="Course Context & Sources"
+                >
+                  <Folder className="size-3.5 text-primary" />
+                </Button>
+
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 text-muted-foreground hover:text-foreground shrink-0 rounded-lg cursor-pointer"
+                  onClick={toggleFullScreen}
+                  title={isFullScreen ? "Exit Fullscreen" : "Fullscreen"}
+                >
+                  {isFullScreen ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
+                </Button>
+              </div>
+            </div>
+          ) : (
+            /* ── Collapsed Sidebar Icon Rail ── */
+            <div className="flex flex-col h-full items-center py-2.5 justify-between w-full">
+              {/* Top Icons */}
+              <div className="flex flex-col items-center gap-2 w-full px-1">
+                <UITooltipProvider delayDuration={0}>
                   <UITooltip>
                     <UITooltipTrigger asChild>
-                      <button
-                        onClick={() => {
-                          setActiveTab(tab.id as AIModule);
-                          setGeneratedContent("");
-                        }}
-                        className={cn(
-                          "w-full flex items-center gap-2.5 px-2.5 py-2 text-xs font-medium rounded-lg transition-all text-left",
-                          isTabActive
-                            ? "bg-primary/10 text-primary font-semibold border border-primary/20"
-                            : "text-muted-foreground hover:text-foreground hover:bg-muted/40",
-                          isSidebarCollapsed && "justify-center px-0 gap-0"
-                        )}
+                      <Link
+                        href="/lecturer/dashboard"
+                        className="size-8 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
                       >
-                        <Icon className="size-4 shrink-0" />
-                        {!isSidebarCollapsed && <span className="truncate">{tab.label}</span>}
-                      </button>
+                        <ArrowLeft className="size-4" />
+                      </Link>
                     </UITooltipTrigger>
-                    {isSidebarCollapsed && (
-                      <UITooltipContent side="right" className="px-2 py-1 text-xs font-semibold">
-                        {tab.label}
-                      </UITooltipContent>
-                    )}
+                    <UITooltipContent side="right">Back to Dashboard</UITooltipContent>
+                  </UITooltip>
+
+                  <UITooltip>
+                    <UITooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => setIsSidebarCollapsed(false)}
+                        className="size-8 rounded-lg text-primary hover:text-primary hover:bg-primary/10 transition-all cursor-pointer"
+                      >
+                        <PanelLeftOpen className="size-4" />
+                      </Button>
+                    </UITooltipTrigger>
+                    <UITooltipContent side="right">Expand sidebar</UITooltipContent>
+                  </UITooltip>
+
+                  <UITooltip>
+                    <UITooltipTrigger asChild>
+                      <Button
+                        size="icon"
+                        onClick={() => startNewSession("chat")}
+                        className="size-8 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-all cursor-pointer"
+                      >
+                        <Plus className="size-4" />
+                      </Button>
+                    </UITooltipTrigger>
+                    <UITooltipContent side="right">New Session</UITooltipContent>
+                  </UITooltip>
+
+                  <UITooltip>
+                    <UITooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => setIsContextSheetOpen(true)}
+                        className="size-8 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-all cursor-pointer"
+                      >
+                        <Folder className="size-4 text-primary" />
+                      </Button>
+                    </UITooltipTrigger>
+                    <UITooltipContent side="right">Course Context: {activeWorkspaceName}</UITooltipContent>
                   </UITooltip>
                 </UITooltipProvider>
-              );
-            })}
-          </div>
+
+                <Separator className="w-8 my-1 bg-border/40" />
+
+                {/* Module Icons */}
+                <UITooltipProvider delayDuration={0}>
+                  {moduleTabs.map((tab) => {
+                    const Icon = tab.icon;
+                    const isTabActive = activeTab === tab.id;
+                    return (
+                      <UITooltip key={tab.id}>
+                        <UITooltipTrigger asChild>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setActiveTab(tab.id as AIModule);
+                              setGeneratedContent("");
+                            }}
+                            className={cn(
+                              "size-8 rounded-lg flex items-center justify-center transition-all cursor-pointer",
+                              isTabActive
+                                ? "bg-primary text-primary-foreground shadow-2xs"
+                                : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                            )}
+                          >
+                            <Icon className="size-4" />
+                          </button>
+                        </UITooltipTrigger>
+                        <UITooltipContent side="right">{tab.label}</UITooltipContent>
+                      </UITooltip>
+                    );
+                  })}
+                </UITooltipProvider>
+              </div>
+
+              {/* Bottom Action Icons */}
+              <div className="flex flex-col items-center gap-1.5 w-full px-1">
+                <Separator className="w-8 my-1 bg-border/40" />
+                <UITooltipProvider delayDuration={0}>
+                  <UITooltip>
+                    <UITooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => setShareModalOpen(true)}
+                        className="size-8 rounded-lg text-muted-foreground hover:text-foreground cursor-pointer"
+                      >
+                        <Share2 className="size-4" />
+                      </Button>
+                    </UITooltipTrigger>
+                    <UITooltipContent side="right">Share session</UITooltipContent>
+                  </UITooltip>
+
+                  <UITooltip>
+                    <UITooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => setExportModalOpen(true)}
+                        className="size-8 rounded-lg text-muted-foreground hover:text-foreground cursor-pointer"
+                      >
+                        <Download className="size-4" />
+                      </Button>
+                    </UITooltipTrigger>
+                    <UITooltipContent side="right">Export session</UITooltipContent>
+                  </UITooltip>
+
+                  <UITooltip>
+                    <UITooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={toggleFullScreen}
+                        className="size-8 rounded-lg text-muted-foreground hover:text-foreground cursor-pointer"
+                      >
+                        {isFullScreen ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+                      </Button>
+                    </UITooltipTrigger>
+                    <UITooltipContent side="right">{isFullScreen ? "Exit Fullscreen" : "Fullscreen"}</UITooltipContent>
+                  </UITooltip>
+                </UITooltipProvider>
+              </div>
+            </div>
+          )}
         </aside>
 
         {/* Mobile Navigation Drawer */}
         <Sheet open={isMobileMenuOpen} onOpenChange={setIsMobileMenuOpen}>
-          <SheetContent side="left" className="w-[260px] p-0 flex flex-col">
-            <SheetHeader className="p-4 border-b border-border/40 text-left">
-              <SheetTitle className="text-sm font-semibold flex items-center gap-2">
-                <Sparkles className="size-4 text-primary" /> Assistant Modules
+          <SheetContent side="left" className="w-[280px] p-0 flex flex-col narrow-scrollbar-dark">
+            <SheetHeader className="p-3 border-b border-border/40 text-left">
+              <div className="flex items-center justify-between">
+                <Link
+                  href="/lecturer/dashboard"
+                  onClick={() => setIsMobileMenuOpen(false)}
+                  className="flex items-center gap-1.5 px-2 py-1 rounded-xl hover:bg-muted text-xs font-semibold text-muted-foreground hover:text-foreground transition-all group"
+                >
+                  <ArrowLeft className="size-3.5 transition-transform group-hover:-translate-x-0.5" />
+                  <span>Dashboard</span>
+                </Link>
+                <div className="size-7 rounded-lg bg-primary/10 flex items-center justify-center">
+                  <Sparkles className="size-3.5 text-primary" />
+                </div>
+              </div>
+              <SheetTitle className="text-sm font-semibold pt-1">
+                Academic Copilot
               </SheetTitle>
               <SheetDescription className="text-xs text-muted-foreground">
-                Select your academic workflow module.
+                Grounded teaching and assessment assistant.
               </SheetDescription>
             </SheetHeader>
-            <div className="flex-1 p-2 space-y-1 overflow-y-auto">
+
+            {/* Mobile Actions */}
+            <div className="p-2 border-b border-border/30">
+              <Button
+                onClick={() => {
+                  startNewSession("chat");
+                  setIsMobileMenuOpen(false);
+                }}
+                className="w-full h-8 gap-2 text-xs font-bold rounded-lg bg-primary text-primary-foreground"
+                type="button"
+              >
+                <Plus className="size-3.5" />
+                <span>New Session</span>
+              </Button>
+            </div>
+
+            {/* Mobile Module list */}
+            <div className="p-2 border-b border-border/30 space-y-0.5">
+              <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-1 pb-1">
+                Modules
+              </div>
               {moduleTabs.map((tab) => {
                 const Icon = tab.icon;
                 const isTabActive = activeTab === tab.id;
@@ -1123,9 +1362,9 @@ function LecturerAIAssistantContent() {
                       setIsMobileMenuOpen(false);
                     }}
                     className={cn(
-                      "w-full flex items-center gap-2.5 px-3 py-2.5 text-xs font-medium rounded-lg transition-all text-left",
+                      "w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium rounded-lg transition-all text-left",
                       isTabActive
-                        ? "bg-primary/10 text-primary font-semibold border border-primary/20"
+                        ? "bg-primary/10 text-primary font-bold border border-primary/20"
                         : "text-muted-foreground hover:text-foreground hover:bg-muted/40"
                     )}
                   >
@@ -1135,6 +1374,65 @@ function LecturerAIAssistantContent() {
                 );
               })}
             </div>
+
+            {/* Mobile Recent Sessions */}
+            <div className="flex-1 overflow-y-auto p-2 space-y-1 min-h-0 narrow-scrollbar-dark">
+              <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-2 py-1 flex items-center justify-between">
+                <span>Recent Sessions</span>
+                <History className="size-3" />
+              </div>
+              {sortedSessions.map((s) => (
+                <div
+                  key={s.id}
+                  onClick={() => {
+                    loadSession(s);
+                    setIsMobileMenuOpen(false);
+                  }}
+                  className="flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-medium cursor-pointer text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                >
+                  <span className="truncate">{s.title}</span>
+                </div>
+              ))}
+            </div>
+
+            {/* Mobile Footer Tools */}
+            <div className="p-2 border-t border-border/40 bg-background/50 flex items-center justify-between gap-1">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setShareModalOpen(true);
+                  setIsMobileMenuOpen(false);
+                }}
+                className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground gap-1 flex-1"
+              >
+                <Share2 className="size-3.5" />
+                <span>Share</span>
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setExportModalOpen(true);
+                  setIsMobileMenuOpen(false);
+                }}
+                className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground gap-1 flex-1"
+              >
+                <Download className="size-3.5" />
+                <span>Export</span>
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => {
+                  setIsContextSheetOpen(true);
+                  setIsMobileMenuOpen(false);
+                }}
+                className="size-8"
+              >
+                <Folder className="size-3.5 text-primary" />
+              </Button>
+            </div>
           </SheetContent>
         </Sheet>
 
@@ -1142,207 +1440,231 @@ function LecturerAIAssistantContent() {
         <main className="flex-1 flex flex-col min-w-0 overflow-hidden bg-background">
           {/* TOOL 1: General Assistant Chat */}
           {activeTab === "chat" && (
-            <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+            <div className="flex-1 flex flex-col min-h-0 relative overflow-hidden">
               <MessageScrollerProvider scrollPreviousItemPeek={64} scrollMargin={24}>
-                <div className="flex-1 relative min-h-0 overflow-hidden">
+                <div className="flex-1 relative min-h-0 overflow-hidden flex flex-col">
                   {history.length === 0 && !isGenerating ? (
-                    <div className="h-full flex flex-col items-center justify-center text-center p-4 sm:p-6 max-w-xl mx-auto space-y-4">
-                      <div className="size-10 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center shadow-2xs">
-                        <Sparkles className="size-5 text-primary" />
-                      </div>
-                      <div className="space-y-1">
-                        <h2 className="text-sm sm:text-base font-semibold text-foreground">
-                          Lecturer Academic Copilot
-                        </h2>
-                        <p className="text-xs text-muted-foreground max-w-sm mx-auto">
-                          Grounded assistant for curriculum synthesis, exam item drafting, Learning-Unit slide creation, and rubric refinement.
-                        </p>
-                      </div>
+                    /* ── New Session View: Centered Input & Inspiring Teaching Reminder ── */
+                    <div className="flex-1 overflow-y-auto flex flex-col justify-center items-center p-4 sm:p-6 md:p-8 narrow-scrollbar-dark">
+                      <div className="w-full max-w-2xl lg:max-w-3xl flex flex-col items-center text-center space-y-4 my-auto animate-in fade-in-50 duration-300">
+                        <div className="size-12 rounded-2xl bg-primary/10 flex items-center justify-center text-primary shadow-2xs border border-primary/20">
+                          <Sparkles className="size-6" />
+                        </div>
+                        <div className="space-y-1.5 max-w-lg">
+                          <h1 className="text-xl sm:text-2xl md:text-3xl font-bold tracking-tight text-foreground">
+                            What would you like to prepare today?
+                          </h1>
+                          <p className="text-xs sm:text-sm text-muted-foreground leading-relaxed">
+                            Your dedicated academic copilot to design curriculum assessments, generate pedagogical lecture slides, draft criterion-referenced rubrics, and synthesize student mastery.
+                          </p>
+                        </div>
 
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 w-full text-left pt-1">
-                        {essentialQuickActions.map((act, idx) => {
-                          const Icon = act.icon;
-                          return (
-                            <button
-                              key={idx}
-                              onClick={act.onClick}
-                              className="p-3 border border-border/50 rounded-xl bg-card hover:bg-muted/30 hover:border-primary/30 text-left transition-all space-y-1 group cursor-pointer"
-                            >
-                              <div className="flex items-center gap-1.5 font-medium text-xs text-foreground group-hover:text-primary transition-colors">
-                                <Icon className="size-3.5 text-primary shrink-0" />
-                                <span>{act.title}</span>
-                              </div>
-                              <p className="text-[11px] text-muted-foreground leading-snug">
-                                {act.description}
-                              </p>
-                            </button>
-                          );
-                        })}
+                        {/* Floating Center AI Input */}
+                        <div className="w-full pt-2">
+                          <AIChatInput
+                            value={prompt}
+                            onChange={setPrompt}
+                            onSend={handleChatSendMessage}
+                            isGenerating={isGenerating}
+                            onStop={() => setIsGenerating(false)}
+                            attachments={attachments}
+                            setAttachments={setAttachments}
+                            disabled={isRwandaBlocked}
+                            placeholder={
+                              isRwandaBlocked
+                                ? "AI Assistant disabled for Kinyarwanda workspaces"
+                                : "Ask about curriculum design, exam questions, teaching methods..."
+                            }
+                          />
+                        </div>
+
+                        {/* Suggested Start Buttons Directly Below Input */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 w-full pt-1">
+                          {essentialQuickActions.map((act, idx) => {
+                            const Icon = act.icon;
+                            return (
+                              <button
+                                key={idx}
+                                onClick={act.onClick}
+                                className="p-3 text-left border rounded-xl text-xs hover:bg-muted/40 transition-colors font-medium space-y-1 bg-card shadow-2xs border-border/60 group cursor-pointer"
+                              >
+                                <div className="flex items-center gap-1.5 text-primary font-bold text-[11px] uppercase tracking-wide group-hover:underline">
+                                  <Icon className="size-3.5 shrink-0" />
+                                  <span>{act.title}</span>
+                                </div>
+                                <div className="text-muted-foreground text-[11px] truncate">
+                                  {act.description}
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
                       </div>
                     </div>
                   ) : (
-                    <MessageScroller className="h-full">
-                      <MessageScrollerViewport className="scroll-fade">
-                        <MessageScrollerContent
-                          aria-busy={isGenerating}
-                          className={cn(
-                            "mx-auto py-3 sm:py-4 px-3 sm:px-4 space-y-3 sm:space-y-4 transition-all duration-300 w-full",
-                            isSidebarCollapsed ? "max-w-4xl lg:max-w-5xl" : "max-w-3xl"
-                          )}
-                        >
-                          {history.map((msg, index) => {
-                            const isLatestUserTurn =
-                              msg.role === "user" &&
-                              (index === history.length - 1 || index === history.length - 2);
+                    /* ── Dialogue Mode: Full-Width Stream + Floating Bottom Composer ── */
+                    <div className="flex-1 min-h-0 flex flex-col relative overflow-hidden">
+                      <MessageScroller className="h-full">
+                        <MessageScrollerViewport className="scroll-fade narrow-scrollbar-dark">
+                          <MessageScrollerContent
+                            aria-busy={isGenerating}
+                            className="max-w-4xl lg:max-w-5xl 2xl:max-w-6xl mx-auto py-4 px-3 sm:px-6 md:px-8 space-y-4 pb-36"
+                          >
+                            {history.map((msg, index) => {
+                              const isLatestUserTurn =
+                                msg.role === "user" &&
+                                (index === history.length - 1 || index === history.length - 2);
 
-                            return (
-                              <MessageScrollerItem
-                                key={index}
-                                scrollAnchor={isLatestUserTurn}
-                                className="w-full"
-                              >
-                                {msg.role === "user" ? (
-                                  <div className="flex flex-col items-end max-w-[88%] sm:max-w-[85%] ml-auto group space-y-1">
-                                    <div className="bg-primary text-primary-foreground px-3.5 py-2 rounded-2xl rounded-tr-xs shadow-2xs text-xs font-medium leading-relaxed">
-                                      {msg.attachments && msg.attachments.length > 0 && (
-                                        <div className="flex flex-wrap gap-1.5 pb-1">
-                                          {msg.attachments.map((att: any, aIdx: number) => (
-                                            <div
-                                              key={aIdx}
-                                              className="flex items-center gap-1 px-2 py-0.5 rounded-lg border border-primary-foreground/30 bg-primary-foreground/15 text-primary-foreground text-[11px] font-medium"
-                                            >
-                                              <FileText className="size-3 shrink-0" />
-                                              <span className="truncate max-w-[140px]">{att.name}</span>
-                                            </div>
-                                          ))}
-                                        </div>
-                                      )}
-                                      {msg.content && <div className="whitespace-pre-wrap">{msg.content}</div>}
-                                    </div>
-
-                                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground pr-1">
-                                      <button
-                                        type="button"
-                                        onClick={() => handleCopyText(msg.content, `user-copy-${index}`)}
-                                        className="p-1 hover:text-foreground text-muted-foreground/80 hover:bg-muted/50 rounded transition-colors"
-                                        title="Copy prompt"
-                                      >
-                                        {copiedActionId === `user-copy-${index}` ? (
-                                          <Check className="size-3 text-emerald-500" />
-                                        ) : (
-                                          <Copy className="size-3" />
+                              return (
+                                <MessageScrollerItem
+                                  key={index}
+                                  scrollAnchor={isLatestUserTurn}
+                                  className="w-full"
+                                >
+                                  {msg.role === "user" ? (
+                                    <div className="flex flex-col items-end max-w-[85%] sm:max-w-[80%] ml-auto group space-y-1">
+                                      <div className="bg-primary text-primary-foreground px-4 py-2.5 rounded-2xl rounded-tr-xs shadow-2xs text-xs sm:text-sm font-medium leading-relaxed">
+                                        {msg.attachments && msg.attachments.length > 0 && (
+                                          <div className="flex flex-wrap gap-1.5 pb-1.5">
+                                            {msg.attachments.map((att: any, aIdx: number) => (
+                                              <div
+                                                key={aIdx}
+                                                className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg border border-primary-foreground/30 bg-primary-foreground/15 text-primary-foreground text-[11px] font-medium"
+                                              >
+                                                <FileText className="size-3 shrink-0" />
+                                                <span className="truncate max-w-[160px]">{att.name}</span>
+                                              </div>
+                                            ))}
+                                          </div>
                                         )}
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => handleEditUserMessage(msg.content)}
-                                        className="p-1 hover:text-foreground text-muted-foreground/80 hover:bg-muted/50 rounded transition-colors"
-                                        title="Edit prompt in composer"
-                                      >
-                                        <Edit2 className="size-3" />
-                                      </button>
-                                    </div>
-                                  </div>
-                                ) : (
-                                  <div className="group relative flex flex-col max-w-[92%] sm:max-w-[88%] space-y-2 p-3 sm:p-3.5 rounded-2xl bg-card border border-border/70 text-foreground mr-auto rounded-tl-xs text-left shadow-2xs leading-relaxed whitespace-pre-wrap animate-in fade-in slide-in-from-bottom-2 duration-300">
-                                    <RichMessageRenderer content={msg.content} />
+                                        {msg.content && <div className="whitespace-pre-wrap">{msg.content}</div>}
+                                      </div>
 
-                                    <div className="pt-1.5 border-t border-border/30 flex items-center justify-between text-muted-foreground">
-                                      <div className="flex items-center gap-1">
-                                        <Button
-                                          variant="ghost"
-                                          size="sm"
-                                          onClick={() => handleCopyText(msg.content, `ai-copy-${index}`)}
-                                          className="h-6 px-2 text-[10px] gap-1 text-muted-foreground hover:text-foreground"
+                                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground pr-1">
+                                        <button
+                                          type="button"
+                                          onClick={() => handleCopyText(msg.content, `user-copy-${index}`)}
+                                          className="p-1 hover:text-foreground text-muted-foreground/80 hover:bg-muted/50 rounded transition-colors"
+                                          title="Copy prompt"
                                         >
-                                          {copiedActionId === `ai-copy-${index}` ? (
-                                            <>
-                                              <Check className="size-3 text-emerald-500" />
-                                              <span>Copied</span>
-                                            </>
+                                          {copiedActionId === `user-copy-${index}` ? (
+                                            <Check className="size-3 text-emerald-500" />
                                           ) : (
-                                            <>
-                                              <Copy className="size-3" />
-                                              <span>Copy</span>
-                                            </>
+                                            <Copy className="size-3" />
                                           )}
-                                        </Button>
-                                        {index === history.length - 1 && (
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleEditUserMessage(msg.content)}
+                                          className="p-1 hover:text-foreground text-muted-foreground/80 hover:bg-muted/50 rounded transition-colors"
+                                          title="Edit prompt in composer"
+                                        >
+                                          <Edit2 className="size-3" />
+                                        </button>
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <div className="group relative flex flex-col max-w-[92%] sm:max-w-[88%] space-y-2 p-3.5 sm:p-4 rounded-2xl bg-card border border-border/70 text-foreground mr-auto rounded-tl-xs text-left shadow-2xs leading-relaxed whitespace-pre-wrap animate-in fade-in slide-in-from-bottom-2 duration-300">
+                                      <RichMessageRenderer content={msg.content} />
+
+                                      <div className="pt-2 border-t border-border/30 flex items-center justify-between text-muted-foreground">
+                                        <div className="flex items-center gap-1">
                                           <Button
                                             variant="ghost"
                                             size="sm"
-                                            onClick={() => handleChatSendMessage(history[index - 1]?.content || "")}
-                                            className="h-6 px-2 text-[10px] gap-1 text-muted-foreground hover:text-foreground"
-                                            title="Regenerate explanation"
+                                            onClick={() => handleCopyText(msg.content, `ai-copy-${index}`)}
+                                            className="h-6 px-2 text-[10px] gap-1 text-muted-foreground hover:text-foreground rounded-lg"
                                           >
-                                            <RotateCcw className="size-3" />
-                                            <span>Try Again</span>
+                                            {copiedActionId === `ai-copy-${index}` ? (
+                                              <>
+                                                <Check className="size-3 text-emerald-500" />
+                                                <span>Copied</span>
+                                              </>
+                                            ) : (
+                                              <>
+                                                <Copy className="size-3" />
+                                                <span>Copy</span>
+                                              </>
+                                            )}
                                           </Button>
-                                        )}
+                                          {index === history.length - 1 && (
+                                            <Button
+                                              variant="ghost"
+                                              size="sm"
+                                              onClick={() => handleChatSendMessage(history[index - 1]?.content || "")}
+                                              className="h-6 px-2 text-[10px] gap-1 text-muted-foreground hover:text-foreground rounded-lg"
+                                              title="Regenerate explanation"
+                                            >
+                                              <RotateCcw className="size-3" />
+                                              <span>Try Again</span>
+                                            </Button>
+                                          )}
+                                        </div>
                                       </div>
                                     </div>
-                                  </div>
-                                )}
-                              </MessageScrollerItem>
-                            );
-                          })}
+                                  )}
+                                </MessageScrollerItem>
+                              );
+                            })}
 
-                          {isGenerating && (
-                            <div className="max-w-[92%] sm:max-w-[88%] mr-auto py-1">
-                              <Marker role="status" className="bg-card border border-border/70 rounded-2xl p-3 shadow-2xs">
-                                <MarkerIcon>
-                                  <Spinner />
-                                </MarkerIcon>
-                                <MarkerContent className="shimmer text-xs font-medium">
-                                  AI Copilot is formulating curriculum explanation...
-                                </MarkerContent>
-                              </Marker>
+                            {isGenerating && (
+                              <div className="py-2 mr-auto max-w-[95%] sm:max-w-[90%]">
+                                <Marker role="status" className="bg-card border border-border/70 rounded-2xl p-3 shadow-2xs">
+                                  <MarkerIcon>
+                                    <Spinner />
+                                  </MarkerIcon>
+                                  <MarkerContent className="shimmer text-xs font-medium">
+                                    AI Copilot is formulating curriculum explanation...
+                                  </MarkerContent>
+                                </Marker>
+                              </div>
+                            )}
+                          </MessageScrollerContent>
+                        </MessageScrollerViewport>
+                        <MessageScrollerButton className="bottom-24 sm:bottom-28 right-4 sm:right-6 md:right-8" />
+                      </MessageScroller>
+
+                      {/* Gradient Scrim */}
+                      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-32 bg-gradient-to-t from-background via-background/80 to-transparent z-10" />
+
+                      {/* Floating Bottom Composer */}
+                      <div className="absolute inset-x-0 bottom-0 pointer-events-none p-3 sm:p-4 md:p-5 z-20">
+                        <div className="max-w-4xl lg:max-w-5xl 2xl:max-w-6xl mx-auto w-full pointer-events-auto space-y-1.5">
+                          {isRwandaBlocked && (
+                            <div className="p-3 mb-2 rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-900 dark:text-amber-200 text-xs flex items-start gap-2 shadow-lg backdrop-blur-md">
+                              <AlertTriangle className="size-4 text-amber-600 shrink-0 mt-0.5" />
+                              <div>
+                                <strong className="block font-semibold">AI Assistant Disabled for Kinyarwanda</strong>
+                                <span className="opacity-90">
+                                  Per institutional policies, automated AI support is disabled for Kinyarwanda workspaces.
+                                </span>
+                              </div>
                             </div>
                           )}
-                        </MessageScrollerContent>
-                      </MessageScrollerViewport>
-                      <MessageScrollerButton />
-                    </MessageScroller>
+                          <AIChatInput
+                            value={prompt}
+                            onChange={setPrompt}
+                            onSend={handleChatSendMessage}
+                            isGenerating={isGenerating}
+                            onStop={() => setIsGenerating(false)}
+                            attachments={attachments}
+                            setAttachments={setAttachments}
+                            disabled={isRwandaBlocked}
+                            placeholder={
+                              isRwandaBlocked
+                                ? "AI Assistant disabled for Kinyarwanda workspaces"
+                                : "Ask about curriculum design, exam questions, teaching methods..."
+                            }
+                          />
+                        </div>
+                      </div>
+                    </div>
                   )}
                 </div>
               </MessageScrollerProvider>
-
-              {/* Composer */}
-              <div className={cn(
-                "p-2 sm:p-3 border-t border-border/40 bg-background shrink-0 mx-auto w-full transition-all duration-300",
-                isSidebarCollapsed ? "max-w-4xl lg:max-w-5xl" : "max-w-3xl"
-              )}>
-                {isRwandaBlocked && (
-                  <div className="p-2.5 mb-2 rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-900 dark:text-amber-200 text-xs flex items-start gap-2">
-                    <AlertTriangle className="size-4 text-amber-600 shrink-0 mt-0.5" />
-                    <div>
-                      <strong className="block font-semibold">AI Assistant Disabled for Kinyarwanda</strong>
-                      <span className="opacity-90">
-                        Per institutional policies, automated AI support is disabled for Kinyarwanda workspaces.
-                      </span>
-                    </div>
-                  </div>
-                )}
-                <AIChatInput
-                  value={prompt}
-                  onChange={setPrompt}
-                  onSend={handleChatSendMessage}
-                  isGenerating={isGenerating}
-                  onStop={() => setIsGenerating(false)}
-                  attachments={attachments}
-                  setAttachments={setAttachments}
-                  disabled={isRwandaBlocked}
-                  placeholder={
-                    isRwandaBlocked
-                      ? "AI Assistant disabled for Kinyarwanda workspaces"
-                      : "Ask about curriculum design, exam questions, teaching methods..."
-                  }
-                />
-              </div>
             </div>
           )}
-
-          {/* TOOL 2: Question Generator */}
+{/* TOOL 2: Question Generator */}
           {activeTab === "questions" && (
             <QuestionGeneratorLauncher
               workspaceId={selectedWorkspaceId}

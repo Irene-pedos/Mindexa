@@ -115,6 +115,8 @@ _DEFAULT_TIER = "default"
 # high-volume tier (batch grading), so they are recognised first and kept in the strict tier.
 _AI_PATH_MARKERS = (
     "/ai-summary",
+    "/review-grade",
+    "/review-attempt",
     "/draft-feedback",
     "/suggest-changes",
     "/process-ai",

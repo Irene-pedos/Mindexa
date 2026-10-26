@@ -269,73 +269,12 @@ class RAGService:
             student_id, teaching_workspace_id=teaching_workspace_id
         )
 
-        # Combine single resource ID into list
-        resource_id_list: list[uuid.UUID] = []
-        if selected_resource_id:
-            resource_id_list.append(selected_resource_id)
-        if selected_resource_ids:
-            for rid in selected_resource_ids:
-                if rid not in resource_id_list:
-                    resource_id_list.append(rid)
-
-        if resource_id_list:
-            resolved_ids = set()
-            for rid in resource_id_list:
-                res_id = None
-                # 1. Student personal resource
-                stmt_own = select(StudentResource.academic_resource_id).where(
-                    and_(
-                        StudentResource.id == rid,
-                        StudentResource.student_id == student_id,
-                        StudentResource.is_deleted == False,
-                    )
-                )
-                res_id = (await self.db.execute(stmt_own)).scalar_one_or_none()
-
-                # 2. Lecturer material by ID
-                if not res_id:
-                    stmt_lecturer = select(LecturerMaterial.academic_resource_id).where(
-                        and_(
-                            LecturerMaterial.id == rid,
-                            LecturerMaterial.is_student_visible == True,
-                            LecturerMaterial.is_deleted == False,
-                        )
-                    )
-                    res_id = (await self.db.execute(stmt_lecturer)).scalar_one_or_none()
-
-                # 3. Direct academic resource ID
-                if not res_id:
-                    stmt_ar = select(AcademicResource.id).where(
-                        and_(
-                            AcademicResource.id == rid,
-                            AcademicResource.is_deleted == False,
-                        )
-                    )
-                    res_id = (await self.db.execute(stmt_ar)).scalar_one_or_none()
-
-                # 4. Teaching workspace ID (if passed as selected_resource_id)
-                if not res_id:
-                    stmt_ws_mat = select(LecturerMaterial.academic_resource_id).where(
-                        and_(
-                            LecturerMaterial.teaching_workspace_id == rid,
-                            LecturerMaterial.is_student_visible == True,
-                            LecturerMaterial.is_deleted == False,
-                        )
-                    )
-                    ws_res = await self.db.execute(stmt_ws_mat)
-                    for ws_ar_id in ws_res.scalars().all():
-                        if ws_ar_id:
-                            resolved_ids.add(ws_ar_id)
-
-                if res_id:
-                    resolved_ids.add(res_id)
-
-            if resolved_ids:
-                if allowed_resource_ids:
-                    valid_intersect = [rid for rid in resolved_ids if rid in allowed_resource_ids]
-                    allowed_resource_ids = valid_intersect if valid_intersect else list(resolved_ids)
-                else:
-                    allowed_resource_ids = list(resolved_ids)
+        allowed_resource_ids = await self._narrow_to_selection(
+            student_id,
+            allowed_resource_ids,
+            selected_resource_id,
+            selected_resource_ids,
+        )
 
         if not allowed_resource_ids:
             logger.warning(
@@ -481,73 +420,12 @@ class RAGService:
             student_id, teaching_workspace_id=teaching_workspace_id
         )
 
-        # Combine single resource ID into list
-        resource_id_list: list[uuid.UUID] = []
-        if selected_resource_id:
-            resource_id_list.append(selected_resource_id)
-        if selected_resource_ids:
-            for rid in selected_resource_ids:
-                if rid not in resource_id_list:
-                    resource_id_list.append(rid)
-
-        if resource_id_list:
-            resolved_ids = set()
-            for rid in resource_id_list:
-                res_id = None
-                # 1. Student personal resource
-                stmt_own = select(StudentResource.academic_resource_id).where(
-                    and_(
-                        StudentResource.id == rid,
-                        StudentResource.student_id == student_id,
-                        StudentResource.is_deleted == False,
-                    )
-                )
-                res_id = (await self.db.execute(stmt_own)).scalar_one_or_none()
-
-                # 2. Lecturer material by ID
-                if not res_id:
-                    stmt_lecturer = select(LecturerMaterial.academic_resource_id).where(
-                        and_(
-                            LecturerMaterial.id == rid,
-                            LecturerMaterial.is_student_visible == True,
-                            LecturerMaterial.is_deleted == False,
-                        )
-                    )
-                    res_id = (await self.db.execute(stmt_lecturer)).scalar_one_or_none()
-
-                # 3. Direct academic resource ID
-                if not res_id:
-                    stmt_ar = select(AcademicResource.id).where(
-                        and_(
-                            AcademicResource.id == rid,
-                            AcademicResource.is_deleted == False,
-                        )
-                    )
-                    res_id = (await self.db.execute(stmt_ar)).scalar_one_or_none()
-
-                # 4. Teaching workspace ID (if passed as selected_resource_id)
-                if not res_id:
-                    stmt_ws_mat = select(LecturerMaterial.academic_resource_id).where(
-                        and_(
-                            LecturerMaterial.teaching_workspace_id == rid,
-                            LecturerMaterial.is_student_visible == True,
-                            LecturerMaterial.is_deleted == False,
-                        )
-                    )
-                    ws_res = await self.db.execute(stmt_ws_mat)
-                    for ws_ar_id in ws_res.scalars().all():
-                        if ws_ar_id:
-                            resolved_ids.add(ws_ar_id)
-
-                if res_id:
-                    resolved_ids.add(res_id)
-
-            if resolved_ids:
-                if allowed_resource_ids:
-                    valid_intersect = [rid for rid in resolved_ids if rid in allowed_resource_ids]
-                    allowed_resource_ids = valid_intersect if valid_intersect else list(resolved_ids)
-                else:
-                    allowed_resource_ids = list(resolved_ids)
+        allowed_resource_ids = await self._narrow_to_selection(
+            student_id,
+            allowed_resource_ids,
+            selected_resource_id,
+            selected_resource_ids,
+        )
 
         if not allowed_resource_ids:
             logger.warning(
@@ -715,6 +593,89 @@ class RAGService:
         if not embeddings:
             raise Exception("Failed to generate query embedding")
         return embeddings[0]
+
+    async def _narrow_to_selection(
+        self,
+        student_id: uuid.UUID,
+        allowed_resource_ids: List[uuid.UUID],
+        selected_resource_id: Optional[uuid.UUID],
+        selected_resource_ids: Optional[List[uuid.UUID]],
+    ) -> List[uuid.UUID]:
+        """
+        Restrict the student's allowed resources to the ones they explicitly selected.
+
+        Selected IDs may be a StudentResource, LecturerMaterial, AcademicResource or
+        TeachingWorkspace ID. They are only *translated* to academic_resource_ids here;
+        access is decided exclusively by the pre-vetted ``allowed_resource_ids`` set, so a
+        forged or foreign ID can never widen retrieval. An empty result means "no context".
+        """
+        requested: list[uuid.UUID] = []
+        if selected_resource_id:
+            requested.append(selected_resource_id)
+        for rid in selected_resource_ids or []:
+            if rid not in requested:
+                requested.append(rid)
+        if not requested:
+            return allowed_resource_ids
+
+        allowed = set(allowed_resource_ids)
+        resolved: set[uuid.UUID] = set()
+        for rid in requested:
+            candidates = await self._resolve_selected_id(student_id, rid)
+            resolved.update(candidates)
+
+        narrowed = [rid for rid in resolved if rid in allowed]
+        if len(narrowed) != len(resolved):
+            logger.warning(
+                "RAG selection contained resources outside the student's allowed set",
+                student_id=str(student_id),
+                requested=len(resolved),
+                kept=len(narrowed),
+            )
+        return narrowed
+
+    async def _resolve_selected_id(
+        self, student_id: uuid.UUID, rid: uuid.UUID
+    ) -> List[uuid.UUID]:
+        """Translate one client-supplied ID into candidate academic_resource_ids (no access decision)."""
+        stmt_own = select(StudentResource.academic_resource_id).where(
+            and_(
+                StudentResource.id == rid,
+                StudentResource.student_id == student_id,
+                StudentResource.is_deleted == False,
+            )
+        )
+        res_id = (await self.db.execute(stmt_own)).scalar_one_or_none()
+        if res_id:
+            return [res_id]
+
+        stmt_lecturer = select(LecturerMaterial.academic_resource_id).where(
+            and_(
+                LecturerMaterial.id == rid,
+                LecturerMaterial.is_student_visible == True,
+                LecturerMaterial.is_deleted == False,
+            )
+        )
+        res_id = (await self.db.execute(stmt_lecturer)).scalar_one_or_none()
+        if res_id:
+            return [res_id]
+
+        stmt_ar = select(AcademicResource.id).where(
+            and_(AcademicResource.id == rid, AcademicResource.is_deleted == False)
+        )
+        res_id = (await self.db.execute(stmt_ar)).scalar_one_or_none()
+        if res_id:
+            return [res_id]
+
+        stmt_ws_mat = select(LecturerMaterial.academic_resource_id).where(
+            and_(
+                LecturerMaterial.teaching_workspace_id == rid,
+                LecturerMaterial.is_student_visible == True,
+                LecturerMaterial.is_deleted == False,
+            )
+        )
+        ws_res = await self.db.execute(stmt_ws_mat)
+        return [ar_id for ar_id in ws_res.scalars().all() if ar_id]
 
     async def _get_allowed_resource_ids(
         self, student_id: uuid.UUID, teaching_workspace_id: Optional[uuid.UUID] = None

@@ -847,3 +847,32 @@ async def test_generate_page_check_page_bounds_guard():
 
 
 
+
+
+@pytest.mark.asyncio
+async def test_get_authorized_page_text_denies_inaccessible_source():
+    """A source the student cannot open must never yield its page text."""
+    from app.core.exceptions import AuthorizationError, NotFoundError
+
+    service = StudyReaderService(AsyncMock())
+    service.assert_access = AsyncMock(
+        side_effect=[AuthorizationError("no"), NotFoundError("missing")]
+    )
+    service.extract_exact_page_text = AsyncMock(return_value="SECRET")
+
+    result = await service.get_authorized_page_text(uuid.uuid4(), uuid.uuid4(), 2)
+
+    assert result == ""
+    service.extract_exact_page_text.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_get_authorized_page_text_reads_when_access_granted():
+    service = StudyReaderService(AsyncMock())
+    service.assert_access = AsyncMock(return_value=("Title", {}))
+    service.extract_exact_page_text = AsyncMock(return_value="page text")
+
+    result = await service.get_authorized_page_text(uuid.uuid4(), uuid.uuid4(), 2)
+
+    assert result == "page text"
+    assert service.extract_exact_page_text.call_args[0][0] == "lecturer_material"

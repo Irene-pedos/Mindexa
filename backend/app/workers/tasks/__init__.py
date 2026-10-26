@@ -180,6 +180,7 @@ async def _auto_submit_expired_attempts_async() -> dict[str, Any]:
     now = _utcnow()
     submitted_count = 0
     error_count = 0
+    submitted_ids: list[Any] = []
 
     async with AsyncSessionLocal() as session:
         # Find all expired IN_PROGRESS attempts
@@ -230,10 +231,7 @@ async def _auto_submit_expired_attempts_async() -> dict[str, Any]:
                     attempt_id, student_id,
                 )
 
-                # Dispatch background grading
-                from app.workers.tasks.grading import \
-                    trigger_grading_for_attempt
-                trigger_grading_for_attempt.delay(str(attempt_id))
+                submitted_ids.append(attempt_id)
             except Exception as exc:
                 error_count += 1
                 logger.error(
@@ -244,6 +242,19 @@ async def _auto_submit_expired_attempts_async() -> dict[str, Any]:
                 continue
 
         await session.commit()
+
+    # Dispatch grading only after the commit: a worker that starts first would
+    # otherwise see an attempt that is not yet submitted.
+    from app.workers.tasks.grading import trigger_grading_for_attempt
+
+    for attempt_id in submitted_ids:
+        try:
+            trigger_grading_for_attempt.delay(str(attempt_id))
+        except Exception as exc:
+            logger.error(
+                "auto_submit: could not enqueue grading for attempt %s: %s",
+                attempt_id, str(exc),
+            )
 
     return {"submitted": submitted_count, "errors": error_count}
 

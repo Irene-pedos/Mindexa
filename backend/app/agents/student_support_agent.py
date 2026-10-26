@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional
 
 from app.agents.base import BaseAgent
 from app.core.ai.gateway import AIGateway
+from app.core.ai.prompt_render import untrusted_block
 from app.core.ai.providers import AICompletionRequest, AIMessage
 from app.core.logging import get_logger
 from app.db.enums import AIActionType
@@ -191,9 +192,9 @@ class StudySupportAgent(BaseAgent):
             try:
                 from app.services.study_reader_service import StudyReaderService
                 reader_svc = StudyReaderService(db)
-                grounded_page_text = await reader_svc.extract_exact_page_text("lecturer_material", selected_resource_id, current_page)
-                if not grounded_page_text:
-                    grounded_page_text = await reader_svc.extract_exact_page_text("student_resource", selected_resource_id, current_page)
+                grounded_page_text = await reader_svc.get_authorized_page_text(
+                    student_id, selected_resource_id, current_page
+                )
             except Exception as exc:
                 logger.debug("Failed to extract grounded page text for tutor: %s", exc)
 
@@ -311,12 +312,13 @@ class StudySupportAgent(BaseAgent):
         if grounded_page_text:
             page_label = f"Page {current_page}" if current_page else "Current Page"
             prompt_parts.append(
-                f"[GROUNDED {page_label} TEXT CONTENT]:\n\"\"\"\n{grounded_page_text[:3000]}\n\"\"\"\n"
+                f"[GROUNDED {page_label} TEXT CONTENT]:\n"
+                f"{untrusted_block('study_page', grounded_page_text[:3000])}\n"
             )
 
         if not fallback:
             prompt_parts.append(
-                f"Retrieved Course Material Context:\n{context}\n\n"
+                f"Retrieved Course Material Context:\n{untrusted_block('course_materials', context)}\n\n"
                 "Instructions: Answer the student's question directly and concisely. "
                 + ("If an excerpt was highlighted above, address that excerpt first, then explain the concept and reference the surrounding page context. " if selected_text else "")
                 + "Use clean Markdown styling (### headings, bold terms, bullet points). "

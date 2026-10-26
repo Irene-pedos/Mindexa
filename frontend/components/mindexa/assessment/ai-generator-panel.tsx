@@ -661,19 +661,17 @@ export function AIGeneratorPanel({
               </p>
             </div>
 
-            {/* Warning if no assessment saved yet */}
+            {/* Standalone question generation indicator */}
             {!hasAssessment && (
-              <Alert className="border-amber-200 bg-amber-50">
-                <AlertCircle className="size-4 text-amber-600" />
-                <AlertDescription className="text-amber-700 text-xs">
-                  Save the assessment draft first before generating questions. The AI needs an assessment ID to link questions to.
-                </AlertDescription>
-              </Alert>
+              <div className="p-3 bg-muted/30 border border-border/50 rounded-xl text-xs text-muted-foreground flex items-center gap-2">
+                <Info className="size-4 text-primary shrink-0" />
+                <span>Standalone mode: Generated questions will be saved to your Question Bank upon approval.</span>
+              </div>
             )}
 
             <Button
               type="submit"
-              disabled={loading || polling || !hasAssessment}
+              disabled={loading || polling}
               className="w-full"
             >
               {loading ? (

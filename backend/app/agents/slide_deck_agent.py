@@ -5,6 +5,7 @@ from typing import Any, List, Optional
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.agents.base import BaseAgent
+from app.core.ai.prompt_render import render_prompt, untrusted_block
 from app.core.ai.providers import AICompletionRequest, AIMessage
 from app.db.enums import AIActionType
 
@@ -70,10 +71,14 @@ class SlideDeckAgent(BaseAgent):
         if selected_outcomes:
             outcomes_text = "\nPrioritized Learning Outcomes to cover:\n- " + "\n- ".join(selected_outcomes) + "\n"
 
-        system_content = (
-            prompt_template.replace("{{unit_title}}", unit_title)
-            .replace("{{estimated_minutes}}", str(estimated_minutes))
-            .replace("{{chunk_content}}", (chunk_content.strip() + outcomes_text) or "No additional source chunk text provided.")
+        source_text = chunk_content.strip() or "No additional source chunk text provided."
+        system_content = render_prompt(
+            prompt_template,
+            {
+                "unit_title": unit_title,
+                "estimated_minutes": str(estimated_minutes),
+                "chunk_content": untrusted_block("learning_unit", source_text + outcomes_text),
+            },
         )
 
         request = AICompletionRequest(

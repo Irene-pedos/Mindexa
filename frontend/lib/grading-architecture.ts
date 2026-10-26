@@ -89,20 +89,23 @@ export function isOpenQuestionType(
 ): boolean {
   if (!value) return false;
   if (typeof value === "object") {
+    // The question type is authoritative, exactly as on the backend
+    // (QuestionType.is_open_ended). `grading_mode` defaults to AUTO on every
+    // question, including essays and short answers, so it cannot override a
+    // known type. It is only a fallback when the type is missing.
+    const typeStr = value.type ?? value.question_type;
+    if (typeStr) return isOpenQuestionType(typeStr);
     if (value.grading_mode) {
       const mode = value.grading_mode.trim().toUpperCase();
       if (mode === "AUTO" || mode === "AUTOMATIC") return false;
-      if (
+      return (
         mode === "MANUAL" ||
         mode === "SEMI" ||
         mode === "AI_ASSISTED" ||
         mode === "RUBRIC"
-      ) {
-        return true;
-      }
+      );
     }
-    const typeStr = value.type ?? value.question_type;
-    return isOpenQuestionType(typeStr);
+    return false;
   }
   const normalized = normalizeQuestionType(value);
   return OPEN_QUESTION_TYPES.has(normalized);
@@ -128,21 +131,16 @@ export function isQuestionAutoGraded(
   if (typeof q === "string") {
     return isClosedQuestionType(q);
   }
+  // Type first: the backend queues open-ended types for manual grading no matter
+  // what `grading_mode` says, so an AUTO mode on an essay or short answer must
+  // not hide the grading controls.
+  const typeStr = q.type ?? q.question_type;
+  if (typeStr) return isClosedQuestionType(typeStr);
   if (q.grading_mode) {
     const mode = q.grading_mode.trim().toUpperCase();
-    if (mode === "AUTO" || mode === "AUTOMATIC") return true;
-    if (
-      mode === "MANUAL" ||
-      mode === "SEMI" ||
-      mode === "AI_ASSISTED" ||
-      mode === "RUBRIC"
-    ) {
-      return false;
-    }
+    return mode === "AUTO" || mode === "AUTOMATIC";
   }
-  const typeStr = q.type ?? q.question_type;
-  if (!typeStr) return false;
-  return isClosedQuestionType(typeStr);
+  return false;
 }
 
 /**

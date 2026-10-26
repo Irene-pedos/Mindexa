@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
-from app.dependencies.auth import require_lecturer, require_verified_email
+from app.dependencies.auth import require_lecturer, require_student, require_verified_email
 from app.db.schemas.resource import (
     LecturerMaterialResponse, 
     LecturerMaterialCreate,
@@ -186,7 +186,7 @@ async def delete_material(
 async def upload_student_resource(
     subject_tag: str = Form(None),
     file: UploadFile = File(...),
-    current_user=Depends(require_verified_email),
+    current_user=Depends(require_student),
     db: AsyncSession = Depends(get_db),
 ) -> StudentResourceResponse:
     """
@@ -206,7 +206,7 @@ async def upload_student_resource(
     summary="List your personal study resources",
 )
 async def list_student_resources(
-    current_user=Depends(require_verified_email),
+    current_user=Depends(require_student),
     db: AsyncSession = Depends(get_db),
 ) -> List[StudentResourceResponse]:
     """

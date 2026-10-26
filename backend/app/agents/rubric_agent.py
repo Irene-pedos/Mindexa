@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import uuid
-from typing import Any, List, Optional
-from pydantic import BaseModel, Field, field_validator
+from typing import List, Optional
+from pydantic import BaseModel, Field
 
 from app.agents.base import BaseAgent
+from app.core.ai.prompt_render import render_prompt, untrusted_block
 from app.core.ai.providers import AICompletionRequest, AIMessage
 from app.db.enums import AIActionType
 
@@ -22,14 +23,14 @@ class RubricCriterionDraft(BaseModel):
     description: Optional[str] = Field(default=None, max_length=1000)
     max_marks: int = Field(..., ge=1)
     order_index: int = Field(default=1, ge=1)
-    levels: List[RubricCriterionLevelDraft] = Field(default_factory=list)
+    levels: List[RubricCriterionLevelDraft] = Field(default_factory=list, max_length=8)
 
 
 class RubricDraftOutput(BaseModel):
     """Validated structured output for a drafted grading rubric."""
     title: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = Field(default=None, max_length=2000)
-    criteria: List[RubricCriterionDraft] = Field(default_factory=list)
+    criteria: List[RubricCriterionDraft] = Field(default_factory=list, max_length=15)
 
 
 class RubricAgent(BaseAgent):
@@ -53,11 +54,18 @@ class RubricAgent(BaseAgent):
         """
         prompt_template = self._get_prompt()
 
-        system_content = (
-            prompt_template.replace("{{question_type}}", question_type)
-            .replace("{{max_marks}}", str(max_marks))
-            .replace("{{question_content}}", question_content.strip() or "Standard assessment item.")
-            .replace("{{existing_rubric}}", existing_rubric.strip() if existing_rubric else "None provided — create new rubric from scratch.")
+        system_content = render_prompt(
+            prompt_template,
+            {
+                "question_type": question_type,
+                "max_marks": str(max_marks),
+                "question_content": untrusted_block(
+                    "question", question_content.strip() or "Standard assessment item."
+                ),
+                "existing_rubric": untrusted_block("existing_rubric", existing_rubric.strip())
+                if existing_rubric
+                else "None provided — create new rubric from scratch.",
+            },
         )
 
         request = AICompletionRequest(

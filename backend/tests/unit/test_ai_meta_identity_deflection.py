@@ -141,8 +141,8 @@ async def test_student_ai_service_deflects_meta_identity_deterministically() -> 
             assert response.explanation == STUDENT_META_IDENTITY_DEFLECTION
             assert response.citations == []
             assert response.fallback_used is False
-            assert response.model == "deterministic_evaluator"
-            assert response.provider == "deterministic_rule_engine"
+            assert response.model is None
+            assert response.provider is None
 
             # Assert log_action was called and complete was NEVER called
             mock_gw_instance.log_action.assert_called_once()
@@ -188,8 +188,8 @@ async def test_lecturer_ai_service_deflects_meta_identity_deterministically() ->
             assert "Mindexa Lecturer AI Assistant" in response.answer
             assert "underlying AI system" in response.answer
             assert response.citations == []
-            assert response.model == "deterministic_evaluator"
-            assert response.provider == "deterministic_rule_engine"
+            assert response.model is None
+            assert response.provider is None
 
             mock_gw_instance.log_action.assert_called_once()
             mock_gw_instance.complete.assert_not_called()

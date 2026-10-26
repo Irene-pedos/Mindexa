@@ -81,9 +81,10 @@ async def test_get_release_readiness_queue_with_null_display_name(mock_sec, mock
 
 
 @pytest.mark.asyncio
+@patch("app.api.v1.routes.result.GradingRepository.list_unreviewed_ai_acceptances", new_callable=AsyncMock, return_value=[])
 @patch("app.api.v1.routes.result.ResultService.assert_lecturer_assessment_access", new_callable=AsyncMock)
 @patch("app.api.v1.routes.result.ResultService.assert_class_section_belongs_to_assessment", new_callable=AsyncMock)
-async def test_unsubmitted_student_does_not_block_graded_student_release(mock_sec, mock_access):
+async def test_unsubmitted_student_does_not_block_graded_student_release(mock_sec, mock_access, mock_unreviewed):
     """Verify that absent/unsubmitted students do not block graded students from being released."""
     db = AsyncMock()
     s1_id = uuid.uuid4()  # Completed & graded student
@@ -161,3 +162,34 @@ async def test_unsubmitted_student_does_not_block_graded_student_release(mock_se
     # All submitted students (1 out of 1) are fully graded
     assert response.class_fully_graded is True
 
+
+
+@pytest.mark.asyncio
+@patch("app.api.v1.routes.result.GradingRepository.list_unreviewed_ai_acceptances", new_callable=AsyncMock)
+@patch("app.api.v1.routes.result.ResultService.assert_lecturer_assessment_access", new_callable=AsyncMock)
+@patch("app.api.v1.routes.result.ResultService.assert_class_section_belongs_to_assessment", new_callable=AsyncMock)
+async def test_student_with_unreviewed_ai_grades_needs_review_not_ready(mock_sec, mock_access, mock_unreviewed):
+    """The queue must not offer Publish for a student the release gate will refuse."""
+    student_id, attempt_id, question_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    mock_unreviewed.return_value = [question_id]
+
+    attempt = MagicMock(id=attempt_id, student_id=student_id)
+    results = [
+        MagicMock(all=MagicMock(return_value=[(student_id, "s@example.com", "Sam", "Sam", "Lee")])),
+        MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[attempt])))),
+        MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))),
+        MagicMock(all=MagicMock(return_value=[(attempt_id, 2)])),   # responses per attempt
+        MagicMock(all=MagicMock(return_value=[(attempt_id, 2)])),   # final grades per attempt
+    ]
+    db = AsyncMock()
+    db.execute.side_effect = results
+
+    response = await get_release_readiness_queue(
+        assessment_id=uuid.uuid4(), class_section_id=uuid.uuid4(),
+        current_user=MagicMock(), db=db,
+    )
+
+    item = response.items[0]
+    assert item.status == "NEEDS_REVIEW"
+    assert item.can_release is False
+    assert item.unreviewed_question_ids == [question_id]

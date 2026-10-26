@@ -42,14 +42,14 @@ import { getAssessmentCategory } from "@/lib/grading-architecture";
 
 const mainNav = [
   { title: "Dashboard", url: "/student/dashboard", icon: LayoutDashboard, tourId: "student-dashboard" },
-  { title: "My Courses", url: "/student/courses", icon: BookOpen },
+  { title: "My Courses", url: "/student/courses", icon: BookOpen, tourId: "student-courses" },
   { title: "Assessments", url: "/student/assessments", icon: FileText, tourId: "student-assessments" },
   { title: "Schedule", url: "/student/schedule", icon: Calendar },
 ];
 
 const toolsNav = [
   { title: "Results & Feedback", url: "/student/results", icon: Trophy, tourId: "student-results" },
-  { title: "Eligibility & Requests", url: "/student/requests", icon: ClipboardList },
+  { title: "Eligibility & Requests", url: "/student/requests", icon: ClipboardList, tourId: "student-requests" },
   { title: "Study Support", url: "/student/study", icon: Brain, tourId: "student-study" },
   { title: "Upload Resources", url: "/student/resources", icon: Upload },
 ];

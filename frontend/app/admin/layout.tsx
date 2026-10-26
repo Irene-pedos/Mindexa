@@ -94,9 +94,9 @@ export default function AdminLayout({
   return (
     <SidebarProvider>
       <AdminSidebar />
-      <SidebarInset>
+      <SidebarInset className="min-w-0 transition-[margin,width] duration-300 ease-in-out">
         <SiteHeader />
-        <main className="flex-1 p-6 bg-muted/30 min-h-[calc(100vh-3.5rem)]">
+        <main className="flex-1 w-full min-w-0 p-4 sm:p-6 lg:p-8 bg-muted/20 min-h-[calc(100vh-3.5rem)] transition-all duration-300 ease-in-out">
           {children}
         </main>
       </SidebarInset>

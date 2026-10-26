@@ -280,6 +280,25 @@ export async function apiClient(endpoint: string, options: FetchOptions = {}) {
       errorData = { message: response.statusText };
     }
 
+    const errorCode: string | undefined = errorData?.error?.code || errorData?.code;
+
+    // Rate limiting carries `details: { limit, tier, retry_after_seconds }`, which are not field errors.
+    if (response.status === 429) {
+      const retryAfter = Number(
+        errorData?.error?.details?.retry_after_seconds ??
+          errorData?.details?.retry_after_seconds ??
+          response.headers.get("Retry-After"),
+      );
+      const wait =
+        Number.isFinite(retryAfter) && retryAfter > 0
+          ? ` Try again in ${retryAfter >= 90 ? `${Math.ceil(retryAfter / 60)} minutes` : `${Math.ceil(retryAfter)} seconds`}.`
+          : " Please wait a moment and try again.";
+      const err = new Error(`You're sending requests too quickly.${wait}`);
+      (err as any).status = 429;
+      (err as any).code = errorCode;
+      throw err;
+    }
+
     // Format Pydantic validation errors nicely
     const validationDetails = errorData?.error?.details || errorData?.details;
     if (
@@ -312,7 +331,6 @@ export async function apiClient(endpoint: string, options: FetchOptions = {}) {
     if (
       lowerMsg.includes("getaddrinfo failed") ||
       lowerMsg.includes("errno 11001") ||
-      lowerMsg.includes("all configured ai providers failed") ||
       lowerMsg.includes("connecterror") ||
       lowerMsg.includes("enotfound") ||
       lowerMsg.includes("econnrefused") ||
@@ -325,6 +343,7 @@ export async function apiClient(endpoint: string, options: FetchOptions = {}) {
 
     const err = new Error(msgStr);
     (err as any).status = response.status;
+    (err as any).code = errorCode;
     throw err;
   }
 

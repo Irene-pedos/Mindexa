@@ -45,7 +45,7 @@ const mainNav = [
   { title: "Assessment Rules", url: "/admin/approval-policies", icon: ShieldCheck },
   { title: "Exam Entry Rules", url: "/admin/eligibility", icon: UserCheck },
   { title: "Institutions", url: "/admin/institutions", icon: Building2 },
-  { title: "Academic Structure", url: "/admin/academic/structure", icon: GraduationCap },
+  { title: "Academic Structure", url: "/admin/academic/structure", icon: GraduationCap, tourId: "admin-academic" },
   { title: "Academic Periods", url: "/admin/academic/periods", icon: Calendar },
   { title: "Academic Assignments", url: "/admin/academic/assignments", icon: Users },
   { title: "Courses & Classes", url: "/admin/courses", icon: BookOpen, tourId: "admin-courses" },
@@ -55,7 +55,7 @@ const mainNav = [
 const examOfficeNavItem = { title: "Exam Office & Seals", url: "/admin/exam-office", icon: Lock };
 
 const oversightNav = [
-  { title: "Integrity & Security", url: "/admin/integrity", icon: Shield },
+  { title: "Integrity & Security", url: "/admin/integrity", icon: Shield, tourId: "admin-integrity" },
   { title: "Platform Analytics", url: "/admin/analytics", icon: BarChart3 },
   { title: "System Settings", url: "/admin/settings", icon: Settings },
 ];
@@ -133,7 +133,7 @@ export function AdminSidebar({
                         : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
                     )}
                   >
-                    <Link href={item.url} data-tour={item.tourId} className="relative flex items-center w-full">
+                    <Link href={item.url} data-tour={(item as { tourId?: string }).tourId} className="relative flex items-center w-full">
                       <item.icon className="size-4.5 shrink-0" />
                       <span className="truncate">{item.title}</span>
                     </Link>
@@ -165,7 +165,7 @@ export function AdminSidebar({
                         : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
                     )}
                   >
-                    <Link href={item.url} className="relative flex items-center w-full">
+                    <Link href={item.url} data-tour={(item as { tourId?: string }).tourId} className="relative flex items-center w-full">
                       <item.icon className="size-4.5 shrink-0" />
                       <span className="truncate">{item.title}</span>
                     </Link>

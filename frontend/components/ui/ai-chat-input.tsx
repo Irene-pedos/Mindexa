@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { useState, useEffect, useRef } from "react";
-import { Lightbulb, Mic, Globe, Paperclip, Send, Square, X, FileText } from "lucide-react";
+import { Paperclip, Send, X, FileText } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -22,8 +22,8 @@ const DEFAULT_PLACEHOLDERS = [
   "Ask anything or upload study materials...",
   "Summarize key concepts from course slides",
   "Explain Database Normalization step-by-step",
-  "Draft an assessment question or rubric",
-  "Analyze performance trends across quizzes",
+  "Generate practice questions for upcoming quiz",
+  "Break down algorithmic time complexity",
 ];
 
 interface AIChatInputProps {
@@ -56,10 +56,6 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
   onSend,
   isGenerating = false,
   onStop,
-  thinkActive: externalThinkActive,
-  setThinkActive: externalSetThinkActive,
-  deepSearchActive: externalDeepSearchActive,
-  setDeepSearchActive: externalSetDeepSearchActive,
   attachments: externalAttachments,
   setAttachments: externalSetAttachments,
   placeholders = DEFAULT_PLACEHOLDERS,
@@ -72,25 +68,18 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
   const [placeholderIndex, setPlaceholderIndex] = useState(0);
   const [showPlaceholder, setShowPlaceholder] = useState(true);
   const [isActive, setIsActive] = useState(false);
-  const [internalThinkActive, setInternalThinkActive] = useState(false);
-  const [internalDeepSearchActive, setInternalDeepSearchActive] = useState(false);
   const [internalAttachments, setInternalAttachments] = useState<Attachment[]>([]);
-  const [isReadingFile, setIsReadingFile] = useState(false);
+  const [, setIsReadingFile] = useState(false);
 
   const wrapperRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   const inputValue = externalValue !== undefined ? externalValue : internalValue;
   const setInputValue = (val: string) => {
     if (externalOnChange) externalOnChange(val);
     else setInternalValue(val);
   };
-
-  const thinkActive = externalThinkActive !== undefined ? externalThinkActive : internalThinkActive;
-  const setThinkActive = externalSetThinkActive || setInternalThinkActive;
-
-  const deepSearchActive = externalDeepSearchActive !== undefined ? externalDeepSearchActive : internalDeepSearchActive;
-  const setDeepSearchActive = externalSetDeepSearchActive || setInternalDeepSearchActive;
 
   const attachments = externalAttachments !== undefined ? externalAttachments : internalAttachments;
   const setAttachments = externalSetAttachments || setInternalAttachments;
@@ -104,13 +93,13 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
       setTimeout(() => {
         setPlaceholderIndex((prev) => (prev + 1) % placeholders.length);
         setShowPlaceholder(true);
-      }, 400);
-    }, 3200);
+      }, 350);
+    }, 3600);
 
     return () => clearInterval(interval);
   }, [isActive, inputValue, placeholders.length]);
 
-  // Close input expansion when clicking outside
+  // Click outside listener
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (
@@ -125,7 +114,10 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [inputValue, attachments.length]);
 
-  const handleActivate = () => setIsActive(true);
+  const handleActivate = () => {
+    setIsActive(true);
+    inputRef.current?.focus();
+  };
 
   // File Picker & Reading Handler
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -140,7 +132,7 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
       let extractedText = "";
       let resourceId = "";
 
-      // 1. If custom upload callback provided (e.g. backend resource upload)
+      // 1. If custom upload callback provided
       if (onUploadFile) {
         try {
           const result = await onUploadFile(file);
@@ -168,7 +160,6 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
           ) {
             extractedText = await file.text();
           } else {
-            // For PDF, DOCX, and other binary documents: use backend PyMuPDF / docx text extraction endpoint
             const formData = new FormData();
             formData.append("file", file);
             const res = await apiClient("/resources/extract-text", {
@@ -212,8 +203,6 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
       onSend({
         input: inputValue,
         attachments,
-        isThinking: thinkActive,
-        isDeepSearch: deepSearchActive,
       });
     }
 
@@ -228,45 +217,32 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
     }
   };
 
-  const containerVariants = {
-    collapsed: {
-      height: attachments.length > 0 ? 104 : 68,
-      boxShadow: "0 2px 8px 0 rgba(0,0,0,0.06)",
-      transition: { type: "spring", stiffness: 140, damping: 20 },
-    },
-    expanded: {
-      height: attachments.length > 0 ? 164 : 128,
-      boxShadow: "0 8px 32px 0 rgba(0,0,0,0.12)",
-      transition: { type: "spring", stiffness: 140, damping: 20 },
-    },
-  } as const;
-
   const placeholderContainerVariants = {
     initial: {},
-    animate: { transition: { staggerChildren: 0.02 } },
+    animate: { transition: { staggerChildren: 0.015 } },
     exit: { transition: { staggerChildren: 0.01, staggerDirection: -1 } },
   } as const;
 
   const letterVariants = {
-    initial: { opacity: 0, filter: "blur(10px)", y: 8 },
+    initial: { opacity: 0, filter: "blur(6px)", y: 6 },
     animate: {
       opacity: 1,
       filter: "blur(0px)",
       y: 0,
       transition: {
-        opacity: { duration: 0.2 },
-        filter: { duration: 0.3 },
-        y: { type: "spring", stiffness: 90, damping: 18 },
+        opacity: { duration: 0.18 },
+        filter: { duration: 0.25 },
+        y: { type: "spring", stiffness: 100, damping: 20 },
       },
     },
     exit: {
       opacity: 0,
-      filter: "blur(10px)",
-      y: -8,
+      filter: "blur(6px)",
+      y: -6,
       transition: {
-        opacity: { duration: 0.15 },
-        filter: { duration: 0.25 },
-        y: { type: "spring", stiffness: 90, damping: 18 },
+        opacity: { duration: 0.12 },
+        filter: { duration: 0.2 },
+        y: { type: "spring", stiffness: 100, damping: 20 },
       },
     },
   } as const;
@@ -282,66 +258,70 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
         accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.json,.png,.jpg,.jpeg,.svg,.webp"
       />
 
-      <motion.div
+      <div
         ref={wrapperRef}
-        className="w-full max-w-3xl rounded-3xl border border-border/80 bg-card overflow-hidden"
-        variants={containerVariants}
-        animate={isActive || inputValue || attachments.length > 0 ? "expanded" : "collapsed"}
-        initial="collapsed"
         onClick={handleActivate}
+        className={cn(
+          "w-full rounded-2xl sm:rounded-3xl border border-border/70 bg-card/90 dark:bg-card/95 backdrop-blur-md shadow-lg shadow-black/5 dark:shadow-black/25 overflow-hidden transition-all duration-200",
+          isActive || inputValue || attachments.length > 0
+            ? "border-primary/50 ring-2 ring-primary/10 shadow-xl"
+            : "hover:border-border"
+        )}
       >
-        <div className="flex flex-col items-stretch w-full h-full p-2">
-          
+        <div className="flex flex-col items-stretch w-full p-2 sm:p-2.5">
           {/* Attachment Previews */}
           {attachments.length > 0 && (
-            <div className="flex items-center gap-2 px-3 pt-1 pb-1 overflow-x-auto">
+            <div className="flex items-center gap-1.5 px-2 pt-1 pb-2 overflow-x-auto">
               {attachments.map((att, idx) => (
                 <div
                   key={idx}
-                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-border bg-muted/30 text-xs text-foreground shrink-0"
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-muted/60 border border-border/60 text-xs shrink-0 max-w-[200px]"
                 >
-                  <FileText className="size-3.5 text-primary" />
-                  <span className="max-w-[140px] truncate font-medium text-[11px]">{att.name}</span>
+                  <FileText className="size-3.5 text-primary shrink-0" />
+                  <span className="truncate text-[11px] font-medium">{att.name}</span>
                   <button
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
                       handleRemoveAttachment(idx);
                     }}
-                    className="p-0.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
+                    className="size-4 rounded-full flex items-center justify-center hover:bg-muted-foreground/20 text-muted-foreground transition-colors ml-0.5 shrink-0"
+                    title="Remove attachment"
                   >
-                    <X className="size-3" />
+                    <X className="size-2.5" />
                   </button>
                 </div>
               ))}
             </div>
           )}
 
-          {/* Input Row */}
-          <div className="flex items-center gap-2 px-2 py-1 bg-card w-full">
+          {/* Main Input Row */}
+          <div className="flex items-center gap-2 w-full">
+            {/* Attachment Button */}
             <button
               onClick={(e) => {
                 e.stopPropagation();
                 if (!disabled) fileInputRef.current?.click();
               }}
-              className="p-2.5 rounded-full hover:bg-muted text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-              title="Attach file (PDF, Word, Excel, CSV, Images)"
+              disabled={disabled}
+              className="p-2 sm:p-2.5 rounded-full hover:bg-muted/70 text-muted-foreground hover:text-foreground transition-colors shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
+              title="Attach study material or notes"
               type="button"
-              disabled={disabled || isReadingFile}
             >
-              <Paperclip className={cn("size-4.5", isReadingFile && "animate-spin text-primary")} />
+              <Paperclip className="size-4" />
             </button>
 
-            {/* Text Input & Animated Placeholder */}
-            <div className="relative flex-1">
+            {/* Input field with dynamic animated placeholder */}
+            <div className="flex-1 relative flex items-center min-w-0">
               <input
+                ref={inputRef}
                 type="text"
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
                 onKeyDown={handleKeyDown}
                 disabled={disabled}
                 placeholder={disabled ? (placeholder || "AI Assistant disabled for this workspace policy") : undefined}
-                className="flex-1 border-0 outline-none py-2 px-1 text-sm bg-transparent w-full font-normal text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
+                className="flex-1 border-0 outline-none py-2 px-1 text-xs sm:text-sm bg-transparent w-full font-normal text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
                 style={{ position: "relative", zIndex: 1 }}
                 onFocus={() => {
                   if (!disabled) handleActivate();
@@ -353,7 +333,7 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
                     {showPlaceholder && !isActive && !inputValue && (
                       <motion.span
                         key={placeholderIndex}
-                        className="absolute left-1 top-1/2 -translate-y-1/2 text-muted-foreground/70 text-xs select-none pointer-events-none"
+                        className="absolute left-1 top-1/2 -translate-y-1/2 text-muted-foreground/70 text-xs sm:text-sm select-none pointer-events-none truncate pr-2"
                         style={{
                           whiteSpace: "nowrap",
                           overflow: "hidden",
@@ -390,11 +370,18 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
                   e.stopPropagation();
                   if (onStop) onStop();
                 }}
-                className="p-2.5 rounded-full bg-destructive text-destructive-foreground hover:bg-destructive/90 transition-colors shadow-xs"
+                className="size-8 sm:size-9 rounded-full bg-foreground text-background hover:bg-foreground/85 active:scale-95 transition-all flex items-center justify-center shadow-xs shrink-0 group relative cursor-pointer"
                 title="Stop generating"
+                aria-label="Stop generating"
                 type="button"
               >
-                <Square className="size-4 fill-current" />
+                <span className="sr-only">Stop generating</span>
+                <svg
+                  className="size-3 sm:size-3.5 fill-current transition-transform duration-150 group-hover:scale-90"
+                  viewBox="0 0 24 24"
+                >
+                  <rect x="5" y="5" width="14" height="14" rx="3" ry="3" />
+                </svg>
               </button>
             ) : (
               <button
@@ -404,83 +391,21 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
                 }}
                 disabled={disabled || (!inputValue.trim() && attachments.length === 0)}
                 className={cn(
-                  "p-2.5 rounded-full transition-all font-medium justify-center shadow-xs",
+                  "size-8 sm:size-9 rounded-full transition-all flex items-center justify-center font-medium shadow-xs shrink-0 active:scale-95",
                   !disabled && (inputValue.trim() || attachments.length > 0)
-                    ? "bg-primary text-primary-foreground hover:bg-primary/90"
-                    : "bg-muted text-muted-foreground/50 cursor-not-allowed"
+                    ? "bg-primary text-primary-foreground hover:bg-primary/90 cursor-pointer"
+                    : "bg-muted text-muted-foreground/40 cursor-not-allowed"
                 )}
                 title="Send message"
+                aria-label="Send message"
                 type="button"
               >
-                <Send className="size-4" />
+                <Send className="size-3.5 sm:size-4" />
               </button>
             )}
           </div>
-
-          {/* Expanded Controls Row */}
-          <motion.div
-            className="w-full flex justify-start px-2 items-center text-xs"
-            variants={{
-              hidden: {
-                opacity: 0,
-                y: 12,
-                pointerEvents: "none" as const,
-                transition: { duration: 0.2 },
-              },
-              visible: {
-                opacity: 1,
-                y: 0,
-                pointerEvents: "auto" as const,
-                transition: { duration: 0.25, delay: 0.05 },
-              },
-            }}
-            initial="hidden"
-            animate={isActive || inputValue || attachments.length > 0 ? "visible" : "hidden"}
-            style={{ marginTop: 4 }}
-          >
-            <div className="flex gap-2 items-center">
-              {/* Think Toggle */}
-              <button
-                className={cn(
-                  "flex items-center gap-1.5 px-3 py-1 rounded-full transition-all font-medium text-xs group border",
-                  thinkActive
-                    ? "bg-primary/10 border-primary/40 text-primary font-semibold"
-                    : "bg-muted/40 border-border/50 text-muted-foreground hover:bg-muted hover:text-foreground"
-                )}
-                title="Enable Reasoning Mode"
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setThinkActive((a) => !a);
-                }}
-              >
-                <Lightbulb className={cn("size-3.5", thinkActive && "text-amber-500 fill-amber-400")} />
-                Think
-              </button>
-
-              {/* Deep Search Toggle */}
-              <button
-                className={cn(
-                  "flex items-center gap-1.5 px-3 py-1 rounded-full transition-all font-medium text-xs border",
-                  deepSearchActive
-                    ? "bg-primary/10 border-primary/40 text-primary font-semibold"
-                    : "bg-muted/40 border-border/50 text-muted-foreground hover:bg-muted hover:text-foreground"
-                )}
-                title="Enable Deep Context Search"
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setDeepSearchActive((a) => !a);
-                }}
-              >
-                <Globe className="size-3.5" />
-                Deep Search
-              </button>
-            </div>
-          </motion.div>
-
         </div>
-      </motion.div>
+      </div>
     </div>
   );
 };

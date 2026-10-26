@@ -64,17 +64,18 @@ const mainNav = [
     icon: Briefcase,
     badge: true,
   },
-  { title: "My Workspaces", url: "/lecturer/courses", icon: BookOpen },
+  { title: "My Workspaces", url: "/lecturer/courses", icon: BookOpen, tourId: "lecturer-courses" },
   { title: "Assessments", url: "/lecturer/assessments", icon: FileText, tourId: "lecturer-create-assessment" },
   {
     title: "Question Bank",
     url: "/lecturer/question-bank",
     icon: ClipboardList,
+    tourId: "lecturer-bank",
   },
 ];
 
 const gradingNav = [
-  { title: "Review Queue", url: "/lecturer/grading", icon: Users },
+  { title: "Review Queue", url: "/lecturer/grading", icon: Users, tourId: "lecturer-grading" },
   {
     title: "Batch Review",
     url: "/lecturer/grading/batch",
@@ -94,6 +95,7 @@ const managementNav = [
     title: "Integrity Alerts",
     url: "/lecturer/integrity",
     icon: AlertTriangle,
+    tourId: "lecturer-integrity",
   },
 ];
 
@@ -313,7 +315,7 @@ export function LecturerSidebar({
                                 : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
                             )}
                           >
-                            <Link href={subItem.url} className="flex items-center gap-2 w-full">
+                            <Link href={subItem.url} data-tour={subItem.tourId} className="flex items-center gap-2 w-full">
                               <subItem.icon
                                 className={cn(
                                   "size-3.5 shrink-0 transition-colors",
@@ -416,7 +418,7 @@ export function LecturerSidebar({
                         : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
                     )}
                   >
-                    <Link href={item.url} className="relative flex items-center w-full">
+                    <Link href={item.url} data-tour={item.tourId} className="relative flex items-center w-full">
                       <item.icon className="size-4.5 shrink-0" aria-hidden="true" />
                       <span className="truncate">{item.title}</span>
                     </Link>

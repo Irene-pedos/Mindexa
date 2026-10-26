@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from app.agents.base import BaseAgent
 from app.core.ai.gateway import AIGateway
 from app.core.ai.prompt_registry import get_prompt
+from app.core.ai.prompt_render import render_prompt, untrusted_block
 from app.core.ai.providers import AICompletionRequest, AIMessage
 from app.db.enums import AIActionType
 from app.schemas.study_reader import (
@@ -64,9 +65,9 @@ class StudyReaderAgent(BaseAgent):
         )
 
         template = get_prompt("study_reader_skim", "v1")
-        prompt = (
-            template.replace("{{title}}", title)
-            .replace("{{chunks}}", combined_context)
+        prompt = render_prompt(
+            template,
+            {"title": title, "chunks": untrusted_block("study_material", combined_context)},
         )
 
         request = AICompletionRequest(
@@ -162,10 +163,13 @@ class StudyReaderAgent(BaseAgent):
             )
 
         template = get_prompt("study_reader_page_check", "v1")
-        prompt = (
-            template.replace("{{title}}", title)
-            .replace("{{page_number}}", str(page_number))
-            .replace("{{page_context}}", context_payload)
+        prompt = render_prompt(
+            template,
+            {
+                "title": title,
+                "page_number": str(page_number),
+                "page_context": untrusted_block("study_page", context_payload),
+            },
         )
 
         request = AICompletionRequest(

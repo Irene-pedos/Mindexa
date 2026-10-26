@@ -207,14 +207,22 @@ export function SlideDeckGenerator({
   const selectedLu = learningUnits.find((u) => u.id === selectedLuId);
 
   return (
-    <div className="flex-1 p-3 sm:p-5 lg:p-6 overflow-y-auto space-y-4 w-full max-w-full">
+    <div className="flex-1 p-3 sm:p-5 lg:p-6 overflow-y-auto space-y-4 w-full max-w-full narrow-scrollbar-dark">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between border-b border-border/40 pb-3 gap-3">
-        <div className="space-y-0.5">
-          <h3 className="text-sm sm:text-base font-semibold text-foreground flex items-center gap-2">
-            <BookOpen className="size-4 text-primary" /> Slide Deck from Learning Unit
-          </h3>
-          <p className="text-xs text-muted-foreground">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between border-b border-border/40 pb-3.5 gap-3">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <div className="size-8 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary shadow-2xs">
+              <BookOpen className="size-4" />
+            </div>
+            <h3 className="text-sm sm:text-base font-bold text-foreground tracking-tight">
+              Slide Deck Studio
+            </h3>
+            <Badge variant="outline" className="text-[10px] font-semibold border-primary/30 text-primary bg-primary/5">
+              Learning Unit Grounded
+            </Badge>
+          </div>
+          <p className="text-xs text-muted-foreground leading-relaxed max-w-2xl">
             Generate pedagogical 8–15 slide presentations grounded directly in a bounded 30–60 minute Learning Unit.
           </p>
         </div>
@@ -224,7 +232,7 @@ export function SlideDeckGenerator({
             variant="outline"
             size="sm"
             onClick={() => setIsControlsCollapsed(!isControlsCollapsed)}
-            className="h-8 text-xs gap-1.5 border-border/60 hover:bg-muted/50"
+            className="h-8 text-xs gap-1.5 border-border/60 hover:bg-muted/50 cursor-pointer"
             title={isControlsCollapsed ? "Expand target unit controls" : "Collapse panel to focus on slide deck"}
           >
             {isControlsCollapsed ? (
@@ -246,7 +254,7 @@ export function SlideDeckGenerator({
                 variant="outline"
                 size="sm"
                 onClick={handleCopyOutline}
-                className="h-8 text-xs gap-1.5"
+                className="h-8 text-xs gap-1.5 cursor-pointer"
               >
                 {copied ? <Check className="size-3.5 text-emerald-500" /> : <Copy className="size-3.5" />}
                 <span>{copied ? "Copied" : "Copy Outline"}</span>
@@ -256,7 +264,7 @@ export function SlideDeckGenerator({
                 size="sm"
                 onClick={handleDownloadPptx}
                 disabled={isExporting}
-                className="h-8 text-xs gap-1.5 font-semibold bg-primary text-primary-foreground shadow-xs"
+                className="h-8 text-xs gap-1.5 font-semibold bg-primary text-primary-foreground shadow-xs cursor-pointer hover:bg-primary/90"
               >
                 {isExporting ? <Loader2 className="size-3.5 animate-spin" /> : <Download className="size-3.5" />}
                 <span>Download .PPTX</span>
@@ -282,7 +290,7 @@ export function SlideDeckGenerator({
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
         {/* Left Column: Learning Unit Selection & Parameters */}
         {!isControlsCollapsed && (
-          <Card className="lg:col-span-4 p-4 space-y-4 bg-muted/20 border-border/60 rounded-2xl shadow-xs transition-all">
+          <Card className="lg:col-span-4 p-4 sm:p-5 space-y-4 bg-card border border-border/70 rounded-2xl shadow-xs transition-all">
             <div className="flex items-center justify-between">
               <Label className="text-xs font-semibold text-foreground">Target Learning Unit</Label>
               <Button
@@ -600,7 +608,7 @@ export function SlideDeckGenerator({
               )}
 
               {/* Slide Thumbnail Strip */}
-              <div className="flex gap-2 overflow-x-auto pb-1 pt-1 scroll-fade">
+              <div className="flex gap-2 overflow-x-auto pb-2 pt-1 scroll-fade narrow-scrollbar-dark">
                 {generatedDeck.slides.map((slide, sIdx) => (
                   <button
                     key={sIdx}

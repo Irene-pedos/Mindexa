@@ -26,6 +26,7 @@ from typing import Any
 from app.db.models.assessment import Assessment
 from app.db.models.attempt import AssessmentAttempt
 from app.db.models.auth import User
+from app.services.ai_exam_gate import assert_student_ai_allowed
 from app.schemas.student_ai import (
     RevisionGuideOutput,
     RevisionGuideRequest,
@@ -65,8 +66,10 @@ class StudentAIService:
 
         await self._assert_student_support_allowed(current_user.id)
 
-        # Determine conversation_id
+        # Determine conversation_id (a client-supplied one must not belong to another student)
         conversation_id = body.conversation_id or uuid.uuid4()
+        if body.conversation_id:
+            await self._assert_conversation_not_foreign(body.conversation_id, current_user.id)
 
         # 1. Deterministic meta / identity question pre-filter (audit without calling LLM)
         if _META_IDENTITY_PATTERN.search(body.question):
@@ -94,8 +97,6 @@ class StudentAIService:
                 conversation_id=conversation_id,
                 citations=[],
                 fallback_used=False,
-                model="deterministic_evaluator",
-                provider="deterministic_rule_engine",
             )
 
         # Validate question & injected context for safety against prohibited exam materials.
@@ -177,7 +178,7 @@ class StudentAIService:
         output = await agent.answer(
             question=body.question,
             student_id=current_user.id,
-            conversation_history=body.conversation_history if hasattr(body, 'conversation_history') else [],
+            conversation_history=[turn.model_dump() for turn in body.conversation_history],
             selected_resource_id=body.selected_resource_id,
             selected_resource_ids=getattr(body, "selected_resource_ids", []),
             teaching_workspace_id=getattr(body, "teaching_workspace_id", None),
@@ -198,8 +199,6 @@ class StudentAIService:
             conversation_id=conversation_id,
             citations=[c.model_dump() for c in output.citations],
             fallback_used=output.fallback_used,
-            model=chat_provider.default_model,
-            provider=chat_provider.name,
         )
 
     async def get_conversations(
@@ -374,11 +373,13 @@ class StudentAIService:
         if getattr(body, "learning_unit_id", None):
             from app.db.models.learning_unit import LearningUnit
             lu = await self.db.get(LearningUnit, body.learning_unit_id)
-            if lu:
+            if lu and not lu.is_deleted:
+                await self._assert_enrolled_in_workspace(student_id, lu.teaching_workspace_id)
                 resolved_topic = lu.title
                 workspace_id = workspace_id or lu.teaching_workspace_id
 
         if workspace_id:
+            await self._assert_enrolled_in_workspace(student_id, workspace_id)
             from app.db.models.academic import TeachingWorkspace
             ws = await self.db.get(TeachingWorkspace, workspace_id)
             if ws and getattr(ws, "language", None) and str(ws.language).upper() == "RW":
@@ -399,38 +400,39 @@ class StudentAIService:
             db=self.db,
         )
 
-    async def _assert_student_support_allowed(self, student_id) -> None:
-        """Block student support while the student has an active exam-style attempt."""
+    async def _assert_enrolled_in_workspace(
+        self, student_id: uuid.UUID, workspace_id: uuid.UUID
+    ) -> None:
+        from app.db.repositories.workspace_repo import WorkspaceRepository
 
-        now = datetime.now(UTC)
+        if not await WorkspaceRepository(self.db).is_student_enrolled(student_id, workspace_id):
+            raise PermissionDeniedError(
+                "You are not enrolled in this course workspace.",
+                code="WORKSPACE_NOT_ENROLLED",
+            )
+
+    async def _assert_conversation_not_foreign(
+        self, conversation_id: uuid.UUID, student_id: uuid.UUID
+    ) -> None:
+        from app.db.models.study_support_session import StudySupportSession
+
         stmt = (
-            select(AssessmentAttempt.id)
-            .join(Assessment, AssessmentAttempt.assessment_id == Assessment.id)
+            select(StudySupportSession.id)
             .where(
-                AssessmentAttempt.student_id == student_id,
-                AssessmentAttempt.is_deleted == False,
-                AssessmentAttempt.status.in_(
-                    [AttemptStatus.IN_PROGRESS, AttemptStatus.PAUSED]
-                ),
-                or_(
-                    Assessment.assessment_type.in_(
-                        [AssessmentType.CAT, AssessmentType.SUMMATIVE]
-                    ),
-                    Assessment.is_supervised == True,
-                ),
-                Assessment.status.in_(
-                    [AssessmentStatus.PUBLISHED, AssessmentStatus.ACTIVE]
-                ),
-                or_(Assessment.window_end.is_(None), Assessment.window_end >= now),
+                StudySupportSession.conversation_id == conversation_id,
+                StudySupportSession.student_id != student_id,
             )
             .limit(1)
         )
-        active_attempt_id = (await self.db.execute(stmt)).scalar_one_or_none()
-        if active_attempt_id:
+        if (await self.db.execute(stmt)).scalar_one_or_none():
             raise PermissionDeniedError(
-                "Student AI support is unavailable during an active CAT, summative, or supervised assessment attempt.",
-                code="AI_BLOCKED_DURING_ACTIVE_ASSESSMENT",
+                "This conversation does not belong to you.",
+                code="CONVERSATION_OWNERSHIP_VIOLATION",
             )
+
+    async def _assert_student_support_allowed(self, student_id) -> None:
+        """Block student support while an open attempt forbids AI (see ``ai_exam_gate``)."""
+        await assert_student_ai_allowed(self.db, student_id)
 
     async def _assert_contexts_are_safe(
         self,

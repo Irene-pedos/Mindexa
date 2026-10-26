@@ -284,6 +284,96 @@ class GradingQueueListResponse(BaseModel):
     total: int
     page: int
     page_size: int
+    has_more: bool = False
+
+
+class ReviewGradeRequest(BaseModel):
+    """The grade as currently typed in the grader, saved or not."""
+    score: float = Field(..., ge=0)
+    feedback: str | None = Field(default=None, max_length=5000)
+    rubric_scores: list[dict[str, Any]] | None = None
+
+
+class GradeCheckIssueResponse(BaseModel):
+    type: str
+    message: str
+    evidence_quote: str | None = None
+
+
+class GradeCheckResponse(BaseModel):
+    """Advisory second-marker review; never changes the grade."""
+    verdict: str
+    expected_min: float
+    expected_max: float
+    issues: list[GradeCheckIssueResponse]
+    suggested_feedback: str | None = None
+    confidence: float
+
+
+class AttemptReviewQuestion(BaseModel):
+    question_id: uuid.UUID
+    response_id: uuid.UUID | None = None
+    number: int
+    question_text: str
+    score: float | None = None
+    max_score: float
+    is_final: bool = False
+    # CHECKED | NOT_GRADED | SKIPPED | NOT_CHECKED (over the per-review cap or no model answer)
+    status: str
+    check: GradeCheckResponse | None = None
+
+
+class AttemptReviewResponse(BaseModel):
+    """AI second-marker review of every open-ended grade in one attempt. Advisory only."""
+    questions: list[AttemptReviewQuestion]
+    agree_count: int
+    review_count: int
+    disagree_count: int
+    not_graded_count: int
+    unreviewed_ai_question_ids: list[uuid.UUID]
+    overall_notes: list[str]
+    truncated: bool = False
+
+
+class SimilarGradedAnswer(BaseModel):
+    """An already-graded answer that closely resembles the one being marked."""
+    attempt_id: uuid.UUID
+    label: str
+    similarity: float
+    score: float
+    max_score: float
+
+
+class GradingBias(BaseModel):
+    """How the lecturer's finalized scores compare with the AI suggestions."""
+    samples: int
+    mean_diff_ratio: float
+
+
+class ConsistencyResponse(BaseModel):
+    similar_answers: list[SimilarGradedAnswer]
+    bias: GradingBias | None = None
+
+
+class GradingActivityStats(BaseModel):
+    """Submission activity for one assessment or workspace."""
+    latest_submission_at: datetime | None = None
+    submitted_count: int = 0
+    pending_count: int = 0
+
+
+class AssessmentActivity(GradingActivityStats):
+    assessment_id: uuid.UUID
+    workspace_id: uuid.UUID | None = None
+
+
+class WorkspaceActivity(GradingActivityStats):
+    workspace_id: uuid.UUID
+
+
+class GradingOverviewResponse(BaseModel):
+    assessments: list[AssessmentActivity]
+    workspaces: list[WorkspaceActivity]
 
 
 class AttemptGradingSummary(BaseModel):
@@ -438,6 +528,9 @@ class VerifyMarksResponse(BaseModel):
     ungraded_count: int
     unreviewed_bulk_count: int
     errors: list[str] = []
+    # Structured form of `errors` so the grader can mark the exact questions.
+    ungraded_question_ids: list[uuid.UUID] = []
+    unreviewed_question_ids: list[uuid.UUID] = []
 
 
 class AIGradeFeedbackRequest(BaseModel):

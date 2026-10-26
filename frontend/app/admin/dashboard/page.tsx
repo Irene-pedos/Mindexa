@@ -180,13 +180,27 @@ export default function AdminDashboard() {
             description="Institutional oversight: Submissions and Security Alerts"
             data={data?.chart_data || []}
             config={{
-              submissions: { label: "Submissions", color: "var(--primary)" },
-              alerts: { label: "Security Alerts", color: "#ef4444" },
+              submissions: {
+                label: "Submissions",
+                theme: {
+                  light: "#2563eb",
+                  dark: "#60a5fa",
+                },
+              },
+              alerts: {
+                label: "Security Alerts",
+                theme: {
+                  light: "#e11d48",
+                  dark: "#f43f5e",
+                },
+              },
             }}
             areaKeys={[
-              { key: "submissions", fill: "var(--primary)", stroke: "var(--primary)" },
-              { key: "alerts", fill: "#ef4444", stroke: "#ef4444" },
+              { key: "submissions", label: "Submissions", stroke: "#2563eb", fill: "#2563eb" },
+              { key: "alerts", label: "Security Alerts", stroke: "#e11d48", fill: "#e11d48" },
             ]}
+            emptyActionHref="/admin/assessments"
+            emptyActionLabel="View Assessments"
           />
         </div>
 

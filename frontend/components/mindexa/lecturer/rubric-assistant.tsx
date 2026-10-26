@@ -192,14 +192,22 @@ export function RubricAssistant({
   const totalAllocatedMarks = criteria.reduce((sum, c) => sum + (c.max_marks || 0), 0);
 
   return (
-    <div className="flex-1 p-3 sm:p-5 lg:p-6 overflow-y-auto space-y-4 w-full max-w-full">
+    <div className="flex-1 p-3 sm:p-5 lg:p-6 overflow-y-auto space-y-4 w-full max-w-full narrow-scrollbar-dark">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between border-b border-border/40 pb-3 gap-3">
-        <div className="space-y-0.5">
-          <h3 className="text-sm sm:text-base font-semibold text-foreground flex items-center gap-2">
-            <Award className="size-4 text-primary" /> Rubric Assistant
-          </h3>
-          <p className="text-xs text-muted-foreground">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between border-b border-border/40 pb-3.5 gap-3">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <div className="size-8 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary shadow-2xs">
+              <Award className="size-4" />
+            </div>
+            <h3 className="text-sm sm:text-base font-bold text-foreground tracking-tight">
+              Rubric Assistant
+            </h3>
+            <Badge variant="outline" className="text-[10px] font-semibold border-primary/30 text-primary bg-primary/5">
+              Criterion-Referenced
+            </Badge>
+          </div>
+          <p className="text-xs text-muted-foreground leading-relaxed max-w-2xl">
             Grounded directly to a specific Question entity. Draft, customize, and save transparent criterion-referenced marking schemes.
           </p>
         </div>
@@ -209,7 +217,7 @@ export function RubricAssistant({
             variant="outline"
             size="sm"
             onClick={() => setIsPickerCollapsed(!isPickerCollapsed)}
-            className="h-8 text-xs gap-1.5 border-border/60 hover:bg-muted/50"
+            className="h-8 text-xs gap-1.5 border-border/60 hover:bg-muted/50 cursor-pointer"
             title={isPickerCollapsed ? "Show Question Picker" : "Collapse Question Picker to Focus Editor"}
           >
             {isPickerCollapsed ? (
@@ -230,7 +238,7 @@ export function RubricAssistant({
               onClick={handleSaveRubric}
               disabled={isSaving}
               size="sm"
-              className="h-8 text-xs gap-1.5 font-semibold bg-primary text-primary-foreground shadow-xs"
+              className="h-8 text-xs gap-1.5 font-semibold bg-primary text-primary-foreground shadow-xs cursor-pointer hover:bg-primary/90"
             >
               {isSaving ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}
               <span>Save to Question</span>
@@ -253,7 +261,7 @@ export function RubricAssistant({
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
         {/* Left Column: Question Picker & Config */}
         {!isPickerCollapsed && (
-          <Card className="lg:col-span-4 p-4 space-y-4 bg-muted/20 border-border/60 rounded-2xl shadow-xs transition-all">
+          <Card className="lg:col-span-4 p-4 sm:p-5 space-y-4 bg-card border border-border/70 rounded-2xl shadow-xs transition-all">
             <div className="flex items-center justify-between">
               <Label className="text-xs font-semibold text-foreground">Select Target Question</Label>
               <Button
@@ -277,7 +285,7 @@ export function RubricAssistant({
               />
             </div>
 
-            <div className="space-y-1 max-h-44 overflow-y-auto pr-1 pt-1">
+            <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1 pt-1 narrow-scrollbar-dark">
               {loadingQuestions ? (
                 <div className="text-xs text-muted-foreground py-2 text-center animate-pulse">
                   Searching questions...
@@ -433,7 +441,7 @@ export function RubricAssistant({
           ) : (
             <div className="space-y-3">
               {/* Header & Marks Balancer */}
-              <div className="p-3.5 bg-card border border-border/60 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+              <div className="p-4 sm:p-5 bg-card border border-border/70 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs">
                 <div className="space-y-0.5">
                   <Input
                     value={rubricTitle}

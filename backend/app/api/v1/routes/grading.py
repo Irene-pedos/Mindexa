@@ -34,6 +34,11 @@ from app.schemas.grading import (
     AttemptGradingSummary,
     ClassAiSummaryResponse,
     GradingQueueItemResponse,
+    AttemptReviewResponse,
+    ConsistencyResponse,
+    GradeCheckResponse,
+    GradingOverviewResponse,
+    ReviewGradeRequest,
     GradingQueueListResponse,
     GroupGradingQueueListResponse,
     ManualGradeRequest,
@@ -89,6 +94,36 @@ async def get_assessment_classes_stats(
         lecturer_id=current_user.id,
     )
     return AssessmentClassStatsResponse.model_validate(data)
+
+
+@router.get(
+    "/overview",
+    response_model=GradingOverviewResponse,
+    summary="Submission activity per workspace and assessment for the current lecturer",
+)
+async def get_grading_overview(
+    current_user=Depends(require_lecturer_or_admin),
+    db: AsyncSession = Depends(get_db),
+) -> GradingOverviewResponse:
+    """Lets the grading page order workspaces/assessments by latest submission."""
+    data = await GradingService(db).get_grading_overview(current_user.id)
+    return GradingOverviewResponse.model_validate(data)
+
+
+@router.post(
+    "/assessment/{assessment_id}/resync",
+    response_model=dict,
+    summary="Re-queue submitted attempts that never reached the grading queue",
+)
+async def resync_assessment_submissions(
+    assessment_id: uuid.UUID,
+    current_user=Depends(require_lecturer_or_admin),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    await _assert_assessment_access(db, assessment_id, current_user)
+    result = await GradingService(db).resync_assessment_submissions(assessment_id)
+    await db.commit()
+    return result
 
 
 @router.get(
@@ -437,6 +472,80 @@ async def draft_feedback(
     return SubmissionGradeResponse.model_validate(updated_grade)
 
 
+# ── CONSISTENCY CHECK ─────────────────────────────────────────────────────────
+
+
+@router.get(
+    "/response/{response_id}/consistency",
+    response_model=ConsistencyResponse,
+    summary="Similar already-graded answers and grader drift for a response",
+)
+async def get_response_consistency(
+    response_id: uuid.UUID,
+    current_user=Depends(require_lecturer_or_admin),
+    db: AsyncSession = Depends(get_db),
+) -> ConsistencyResponse:
+    response = await SubmissionRepository(db).get_response_by_id(response_id)
+    if not response:
+        raise NotFoundError("Response not found", code="RESPONSE_NOT_FOUND")
+    await _assert_attempt_access(db, response.attempt_id, current_user)
+    data = await GradingService(db).get_consistency_check(
+        response_id=response_id, lecturer_id=current_user.id
+    )
+    return ConsistencyResponse.model_validate(data)
+
+
+@router.post(
+    "/response/{response_id}/review-grade",
+    response_model=GradeCheckResponse,
+    summary="AI second-marker review of the grade being entered (advisory only)",
+)
+async def review_grade(
+    response_id: uuid.UUID,
+    body: ReviewGradeRequest,
+    current_user=Depends(require_lecturer_or_admin),
+    db: AsyncSession = Depends(get_db),
+) -> GradeCheckResponse:
+    """
+    Rate-limited with the other AI grading endpoints (see _AI_PATH_MARKERS).
+    Nothing is saved: the lecturer decides what to do with the review.
+    """
+    response = await SubmissionRepository(db).get_response_by_id(response_id)
+    if not response:
+        raise NotFoundError("Response not found", code="RESPONSE_NOT_FOUND")
+    await _assert_attempt_access(db, response.attempt_id, current_user)
+    data = await GradingService(db).review_lecturer_grade(
+        response_id=response_id,
+        lecturer_id=current_user.id,
+        score=body.score,
+        feedback=body.feedback,
+        rubric_scores=body.rubric_scores,
+    )
+    # The gateway logs the AI interaction; commit so that audit row is kept.
+    await db.commit()
+    return GradeCheckResponse.model_validate(data)
+
+
+@router.post(
+    "/attempt/{attempt_id}/review-attempt",
+    response_model=AttemptReviewResponse,
+    summary="AI second-marker review of all saved open-ended grades in an attempt (advisory only)",
+)
+async def review_attempt(
+    attempt_id: uuid.UUID,
+    current_user=Depends(require_lecturer_or_admin),
+    db: AsyncSession = Depends(get_db),
+) -> AttemptReviewResponse:
+    """Rate-limited with the other AI grading endpoints (see _AI_PATH_MARKERS)."""
+    await _assert_attempt_access(db, attempt_id, current_user)
+    data = await GradingService(db).review_attempt_grades(
+        attempt_id=attempt_id, lecturer_id=current_user.id
+    )
+    # The gateway logs each AI interaction; commit so those audit rows are kept.
+    await db.commit()
+    return AttemptReviewResponse.model_validate(data)
+
+
 # ── GET GRADE FOR RESPONSE ────────────────────────────────────────────────────
 
 
@@ -721,10 +830,12 @@ async def verify_attempt_grades(
     ungraded_count = 0
     unreviewed_bulk_count = 0
     errors = []
+    ungraded_question_ids = []
 
     for grade in manual_grades:
         if not grade.is_final:
             ungraded_count += 1
+            ungraded_question_ids.append(grade.question_id)
             errors.append(f"Question node {grade.question_id} is not graded yet.")
 
     # Same rule the release gate applies (accepted AI grade, no review evidence,
@@ -747,6 +858,8 @@ async def verify_attempt_grades(
         ungraded_count=ungraded_count,
         unreviewed_bulk_count=unreviewed_bulk_count,
         errors=errors,
+        ungraded_question_ids=ungraded_question_ids,
+        unreviewed_question_ids=unreviewed,
     )
 
 
@@ -765,7 +878,7 @@ async def list_queue(
     status: str | None = Query(default=None),
     priority: str | None = Query(default=None),
     q: str | None = Query(default=None, description="Search by student name or assessment title"),
-    sort_by: str | None = Query(default="date_asc", description="Sorting: date_asc, date_desc, ai_confidence, risk_level"),
+    sort_by: str | None = Query(default="submitted_desc", description="Sorting: submitted_desc, submitted_asc, date_asc, date_desc, ai_confidence, risk_level"),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=30, ge=1, le=100),
     current_user=Depends(require_lecturer_or_admin),
@@ -789,6 +902,7 @@ async def list_queue(
         total=total,
         page=page,
         page_size=page_size,
+        has_more=page * page_size < total,
     )
 
 

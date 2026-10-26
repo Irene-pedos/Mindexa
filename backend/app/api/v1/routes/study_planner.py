@@ -156,6 +156,7 @@ async def complete_session(
             body.confidence_rating,
             body.feedback_notes,
             body.checklist_items,
+            plan_id=plan_id,
         )
     except ValueError as err:
         raise HTTPException(
@@ -179,7 +180,12 @@ async def reschedule_session(
     service = StudyPlannerService(db)
     try:
         return await service.reschedule_session(
-            session_id, current_user.id, body.new_start, body.new_duration_minutes, force=body.force
+            session_id,
+            current_user.id,
+            body.new_start,
+            body.new_duration_minutes,
+            force=body.force,
+            plan_id=plan_id,
         )
     except ConflictError as err:
         raise HTTPException(

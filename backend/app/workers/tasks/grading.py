@@ -59,6 +59,11 @@ async def _trigger_grading_async(attempt_id: str) -> dict[str, Any]:
             student_id=attempt.student_id,
         )
 
+        # Persist the queue items and auto grades before anything else can fail:
+        # a later error must never make a submitted attempt vanish from the
+        # lecturer's grading queue.
+        await session.commit()
+
         # 2. Check if all questions are graded to calculate result
         graded_count = await grading_repo.count_final_grades(attempt_uuid)
         aq_count = await assessment_repo.count_assessment_questions(attempt.assessment_id)

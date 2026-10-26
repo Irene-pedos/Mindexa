@@ -24,6 +24,7 @@ from app.db.models.study_plan import (DEFAULT_INITIAL_READINESS_SCORE,
                                       StudyPlan, StudySession)
 from app.db.repositories.study_planner_repo import StudyPlannerRepository
 from app.db.repositories.workspace_repo import WorkspaceRepository
+from app.services.ai_exam_gate import assert_student_ai_allowed
 from app.schemas.study_planner import (CreateStudyPlanRequest,
                                        GeneratePlanFromAssessmentRequest,
                                        LearningUnitResponse,
@@ -76,6 +77,16 @@ class StudyPlannerService:
                 workspace_id=str(workspace_id),
             )
             raise AuthorizationError("You are not enrolled in this course workspace")
+
+    async def _assert_course_access(self, student_id: uuid.UUID, course_id: uuid.UUID) -> None:
+        """Reject courses in which the student has no active workspace access."""
+        if not await self.workspace_repo.is_student_in_course(student_id, course_id):
+            logger.warning(
+                "study_planner_course_access_denied",
+                student_id=str(student_id),
+                course_id=str(course_id),
+            )
+            raise AuthorizationError("You are not enrolled in this course")
 
     @staticmethod
     def _sanitize_mermaid(code: Optional[str]) -> Optional[str]:
@@ -325,6 +336,11 @@ class StudyPlannerService:
             return None
         if assessment.teaching_workspace_id:
             await self._assert_workspace_access(student_id, assessment.teaching_workspace_id)
+        elif assessment.course_id:
+            await self._assert_course_access(student_id, assessment.course_id)
+        else:
+            # Not tied to any workspace or course: nothing proves the student may see it.
+            return None
         return assessment
 
     async def _resolve_target(
@@ -379,6 +395,8 @@ class StudyPlannerService:
 
         if teaching_workspace_id:
             await self._assert_workspace_access(student_id, teaching_workspace_id)
+        elif course_id:
+            await self._assert_course_access(student_id, course_id)
 
         assessment_id: Optional[uuid.UUID] = None
         if data.assessment_id:
@@ -1020,6 +1038,8 @@ class StudyPlannerService:
         if not force_regenerate and session.quiz_questions and len(session.quiz_questions) > 0:
             return session.quiz_questions
 
+        await assert_student_ai_allowed(self.db, student_id)
+
         # Check language policy before AI quiz generation
         plan = await self.repo.get_plan_by_id(session.study_plan_id, student_id) if getattr(session, "study_plan_id", None) else None
         if plan and plan.teaching_workspace_id:
@@ -1350,9 +1370,10 @@ class StudyPlannerService:
         confidence_rating: Optional[int] = 4,
         feedback_notes: Optional[str] = None,
         checklist_items: Optional[List[Dict[str, Any]]] = None,
+        plan_id: Optional[uuid.UUID] = None,
     ) -> StudySessionResponse:
         session = await self.repo.get_session_by_id(session_id, student_id)
-        if not session:
+        if not session or (plan_id is not None and session.study_plan_id != plan_id):
             raise ValueError("Study session not found")
 
         # Ratings may be re-submitted, but streak and readiness history only move on the first completion.
@@ -1419,9 +1440,10 @@ class StudyPlannerService:
         new_start: datetime,
         new_duration: Optional[int],
         force: bool = False,
+        plan_id: Optional[uuid.UUID] = None,
     ) -> StudySessionResponse:
         session = await self.repo.get_session_by_id(session_id, student_id)
-        if not session:
+        if not session or (plan_id is not None and session.study_plan_id != plan_id):
             raise ValueError("Study session not found")
 
         new_start_utc = _ensure_utc(new_start)
@@ -1884,29 +1906,19 @@ class StudyPlannerService:
             try:
                 from app.services.rag_service import RAGService
 
+                # Student-scoped retrieval only: it enforces enrollment, student visibility and the
+                # answer-key / assessment-material exclusions that lecturer retrieval does not.
                 rag_service = RAGService(self.db)
-                if plan and getattr(plan, "teaching_workspace_id", None):
-                    rag_res = await rag_service.retrieve_context_for_lecturer(
-                        topic=topic_or_query,
-                        teaching_workspace_id=plan.teaching_workspace_id,
-                        top_k=top_k,
-                    )
-                    if rag_res and rag_res.context_string:
-                        rag_context = rag_res.context_string
-                        if hasattr(rag_res, "citations") and rag_res.citations:
-                            rag_citations = [c.model_dump() for c in rag_res.citations]
-
-                if not rag_context:
-                    rag_res = await rag_service.retrieve_context(
-                        question=topic_or_query,
-                        student_id=student_id,
-                        teaching_workspace_id=getattr(plan, "teaching_workspace_id", None) if plan else None,
-                        top_k=top_k,
-                    )
-                    if rag_res and rag_res.context_string:
-                        rag_context = rag_res.context_string
-                        if hasattr(rag_res, "citations") and rag_res.citations:
-                            rag_citations = [c.model_dump() for c in rag_res.citations]
+                rag_res = await rag_service.retrieve_context(
+                    question=topic_or_query,
+                    student_id=student_id,
+                    teaching_workspace_id=getattr(plan, "teaching_workspace_id", None) if plan else None,
+                    top_k=top_k,
+                )
+                if rag_res and rag_res.context_string:
+                    rag_context = rag_res.context_string
+                    if hasattr(rag_res, "citations") and rag_res.citations:
+                        rag_citations = [c.model_dump() for c in rag_res.citations]
             except Exception as exc:
                 logger.warning("General RAG retrieval failed for study session", error=str(exc))
 
@@ -1919,6 +1931,8 @@ class StudyPlannerService:
                     LecturerMaterial.teaching_workspace_id == plan.teaching_workspace_id,
                     LecturerMaterial.is_student_visible == True,
                     LecturerMaterial.is_deleted == False,
+                    LecturerMaterial.is_current == True,
+                    LecturerMaterial.assessment_id.is_(None),
                 )
                 if topic_keywords:
                     m_stmt = m_stmt.where(
@@ -1933,6 +1947,8 @@ class StudyPlannerService:
                         LecturerMaterial.teaching_workspace_id == plan.teaching_workspace_id,
                         LecturerMaterial.is_student_visible == True,
                         LecturerMaterial.is_deleted == False,
+                        LecturerMaterial.is_current == True,
+                        LecturerMaterial.assessment_id.is_(None),
                     ).limit(5)
                     m_res_all = await self.db.execute(m_stmt_all)
                     mats = list(m_res_all.scalars().all()) if hasattr(m_res_all, "scalars") else []
@@ -1972,6 +1988,7 @@ class StudyPlannerService:
             raise ValueError("Study session not found")
 
         if session.lesson_status == "NOT_GENERATED":
+            await assert_student_ai_allowed(self.db, student_id)
             plan = await self.repo.get_plan_by_id(session.study_plan_id, student_id) if getattr(session, "study_plan_id", None) else None
             course_id = plan.course_id if plan else None
 
@@ -2099,6 +2116,8 @@ class StudyPlannerService:
         if not session:
             raise ValueError("Study session not found")
 
+        await assert_student_ai_allowed(self.db, student_id)
+
         plan = await self.repo.get_plan_by_id(session.study_plan_id, student_id) if getattr(session, "study_plan_id", None) else None
         teaching_ws_id = plan.teaching_workspace_id if plan else None
 
@@ -2201,6 +2220,8 @@ class StudyPlannerService:
         session = await self.repo.get_session_by_id(session_id, student_id)
         if not session:
             raise ValueError("Study session not found")
+
+        await assert_student_ai_allowed(self.db, student_id)
 
         sections = session.lesson_sections_json or []
         sec_item = sections[section_index] if section_index < len(sections) else {}

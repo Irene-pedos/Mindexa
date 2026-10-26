@@ -26,6 +26,14 @@ class DocumentExtractionError(Exception):
 class EmbeddingGenerationError(Exception):
     pass
 
+def _public_processing_error(exc: Exception) -> str:
+    """User-safe summary of a processing failure (no paths, no provider response bodies)."""
+    text = str(exc).lower()
+    if any(word in text for word in ("embedding", "jina", "ai provider", "timeout", "429")):
+        return "The file was read but could not be indexed right now. Please try uploading it again later."
+    return "We couldn't read this file. Check that it isn't corrupted or password-protected, then try again."
+
+
 class DocumentProcessingService:
     def __init__(self):
         self.jina_api_key = settings.JINA_API_KEY
@@ -104,8 +112,11 @@ class DocumentProcessingService:
 
         except Exception as e:
             logger.exception("Error processing resource", resource_id=resource_id, error=str(e))
+            # The raw error can contain file paths and provider response bodies; it stays in the
+            # logs, and only a safe summary is stored (it is returned by the resource APIs).
+            public_error = _public_processing_error(e)
             resource.processing_status = ResourceProcessingStatus.FAILED
-            resource.processing_error = str(e)
+            resource.processing_error = public_error
             await db.commit()
             # Also propagate failure to parent resource
             await self._sync_parent_resource_status(
@@ -113,7 +124,7 @@ class DocumentProcessingService:
                 status=ResourceProcessingStatus.FAILED,
                 chunk_count=0,
                 db=db,
-                error=str(e),
+                error=public_error,
             )
 
     def _extract_text_pdf(self, file_path: str) -> List[Dict[str, Any]]:

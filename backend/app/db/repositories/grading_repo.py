@@ -28,6 +28,12 @@ def _utcnow() -> datetime:
     return datetime.now(UTC)
 
 
+# An accepted AI grade counts as human-reviewed only if the lecturer had the answer
+# open at least this long. Shorter is a click-through, not a review. The grader's
+# "confirm reviewed" button waits the same time (MIN_REVIEW_SECONDS in the page).
+MIN_REVIEW_SECONDS = 3
+
+
 class GradingRepository:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
@@ -267,6 +273,17 @@ class GradingRepository:
         if verified.first() is not None:
             return []
 
+        # A grade can carry several review rows (every save used to add one, and
+        # autosave records no duration). It counts as reviewed as soon as ANY of
+        # its rows has a duration; judging row by row blocked reviewed grades.
+        from sqlalchemy.orm import aliased
+
+        other_review = aliased(AIGradeReview)
+        reviewed = exists().where(
+            other_review.submission_grade_id == SubmissionGrade.id,
+            other_review.review_duration_seconds >= MIN_REVIEW_SECONDS,
+            other_review.is_deleted.is_(False),
+        )
         result = await self.db.execute(
             select(SubmissionGrade.question_id)
             .join(AIGradeReview, AIGradeReview.submission_grade_id == SubmissionGrade.id)
@@ -275,11 +292,81 @@ class GradingRepository:
                 SubmissionGrade.is_current.is_(True),
                 SubmissionGrade.is_final.is_(True),
                 SubmissionGrade.is_deleted.is_(False),
+                AIGradeReview.is_deleted.is_(False),
                 AIGradeReview.grading_decision == AIGradeDecision.ACCEPTED,
-                AIGradeReview.review_duration_seconds.is_(None),
+                or_(
+                    AIGradeReview.review_duration_seconds.is_(None),
+                    AIGradeReview.review_duration_seconds < MIN_REVIEW_SECONDS,
+                ),
+                ~reviewed,
             )
         )
         return list(dict.fromkeys(result.scalars().all()))
+
+    async def dedupe_ai_grade_reviews(self, *, apply: bool = False) -> dict[str, int]:
+        """
+        Collapse the duplicate audit rows that repeated saves used to create: several
+        AIGradeReview rows for one submission grade.
+
+        The latest row is kept (it holds the final decision); a review duration or
+        start time recorded only on an earlier row is carried onto it so the evidence
+        of review is not lost. The others are soft-deleted, never hard-deleted.
+        Groups containing a PENDING row are left alone: that row is a live item in the
+        AI review queue. Safe to re-run. With apply=False nothing is modified.
+        """
+        from app.db.enums import AIGradeDecision
+        from app.db.models.ai import AIGradeReview
+
+        rows = (
+            await self.db.execute(
+                select(AIGradeReview)
+                .where(
+                    AIGradeReview.is_deleted.is_(False),
+                    AIGradeReview.submission_grade_id.is_not(None),
+                )
+                .order_by(AIGradeReview.submission_grade_id, AIGradeReview.created_at)
+            )
+        ).scalars().all()
+
+        by_grade: dict[uuid.UUID, list[Any]] = {}
+        for row in rows:
+            by_grade.setdefault(row.submission_grade_id, []).append(row)
+
+        summary = {"groups": 0, "removed": 0, "evidence_carried": 0, "skipped_pending": 0}
+        now = datetime.now(UTC)
+        for group in by_grade.values():
+            if len(group) < 2:
+                continue
+            if any(r.grading_decision == AIGradeDecision.PENDING for r in group):
+                summary["skipped_pending"] += 1
+                continue
+
+            keeper, extras = group[-1], group[:-1]
+            summary["groups"] += 1
+            summary["removed"] += len(extras)
+
+            carried = False
+            for field in ("review_duration_seconds", "review_started_at"):
+                if getattr(keeper, field) is None:
+                    source = next(
+                        (r for r in reversed(extras) if getattr(r, field) is not None), None
+                    )
+                    if source is not None:
+                        carried = True
+                        if apply:
+                            setattr(keeper, field, getattr(source, field))
+            summary["evidence_carried"] += int(carried)
+
+            if apply:
+                for extra in extras:
+                    extra.is_deleted = True
+                    extra.deleted_at = now
+                    self.db.add(extra)
+                self.db.add(keeper)
+
+        if apply:
+            await self.db.flush()
+        return summary
 
     async def sum_final_scores(self, attempt_id: uuid.UUID) -> float:
         result = await self.db.execute(
@@ -432,6 +519,44 @@ class GradingRepository:
         )
         return result.scalar_one_or_none()
 
+    async def list_graded_peer_answers(
+        self,
+        *,
+        assessment_id: uuid.UUID,
+        question_id: uuid.UUID,
+        exclude_response_id: uuid.UUID,
+    ) -> list[Any]:
+        """
+        Finalized, human-graded answers to one question, used to compare how
+        similar answers were marked. Rows: attempt_id, answer_text, score,
+        max_score, ai_suggested_score, graded_by_id.
+        """
+        from app.db.models.attempt import StudentResponse
+
+        result = await self.db.execute(
+            select(
+                SubmissionGrade.attempt_id,
+                StudentResponse.answer_text,
+                SubmissionGrade.score,
+                SubmissionGrade.max_score,
+                SubmissionGrade.ai_suggested_score,
+                SubmissionGrade.graded_by_id,
+            )
+            .join(StudentResponse, StudentResponse.id == SubmissionGrade.response_id)
+            .where(
+                SubmissionGrade.assessment_id == assessment_id,
+                SubmissionGrade.question_id == question_id,
+                SubmissionGrade.response_id != exclude_response_id,
+                SubmissionGrade.is_current == True,  # noqa: E712
+                SubmissionGrade.is_final == True,  # noqa: E712
+                SubmissionGrade.is_deleted == False,  # noqa: E712
+                SubmissionGrade.score.is_not(None),
+                SubmissionGrade.grading_mode != "AUTO",
+                StudentResponse.is_deleted == False,  # noqa: E712
+            )
+        )
+        return list(result.all())
+
     async def list_queue(
         self,
         *,
@@ -552,7 +677,21 @@ class GradingRepository:
         )
 
         # Handle Sorting
-        if sort_by == "date_asc":
+        # Rows of one attempt stay adjacent (attempt_id tiebreaker) so the page
+        # can group them per student without splitting an attempt across pages.
+        if sort_by in (None, "submitted_desc"):
+            base_query = base_query.order_by(
+                AssessmentAttempt.submitted_at.desc().nullslast(),
+                GradingQueueItem.attempt_id,
+                GradingQueueItem.created_at.asc(),
+            )
+        elif sort_by == "submitted_asc":
+            base_query = base_query.order_by(
+                AssessmentAttempt.submitted_at.asc().nullslast(),
+                GradingQueueItem.attempt_id,
+                GradingQueueItem.created_at.asc(),
+            )
+        elif sort_by == "date_asc":
             base_query = base_query.order_by(GradingQueueItem.created_at.asc())
         elif sort_by == "date_desc":
             base_query = base_query.order_by(GradingQueueItem.created_at.desc())

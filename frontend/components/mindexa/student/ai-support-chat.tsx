@@ -46,6 +46,7 @@ import {
   CheckSquare,
   Square,
   ArrowRight,
+  ArrowLeft,
   Layers,
   Copy,
   Check,
@@ -89,6 +90,7 @@ import { Marker, MarkerContent, MarkerIcon } from "@/components/ui/marker";
 import { Spinner } from "@/components/ui/spinner";
 import { RichMessageRenderer } from "@/components/mindexa/common/rich-message-renderer";
 import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
 
 function formatHistoryDate(dateStr?: string) {
   if (!dateStr) return "";
@@ -374,8 +376,15 @@ export function AISupportChat({
       rawMessage.toLowerCase().includes("failed to fetch") ||
       rawMessage.toLowerCase().includes("networkerror");
 
+    const isInternalServerError =
+      rawMessage.toLowerCase().includes("internal server error") ||
+      errorCode === "500" ||
+      errorCode === "INTERNAL_SERVER_ERROR";
+
     const userFriendlyMessage = isInternetIssue
       ? "Internet issue: Connection to external service failed. Please check your network connection."
+      : isInternalServerError
+      ? "Our AI study service is temporarily unavailable. Please retry in a moment."
       : rawMessage || fallbackMessage;
 
     setError(userFriendlyMessage);
@@ -1058,30 +1067,31 @@ export function AISupportChat({
             : "h-full min-h-0"
         )}
       >
-        {/* ── Left Collapsible Rail (ChatGPT/Claude Style) ── */}
+        {/* ── Left Collapsible Rail (Responsive Icon & Expanded Modes) ── */}
         <aside
           className={cn(
-            "flex flex-col border-r border-border/40 bg-muted/15 transition-all duration-300 shrink-0 z-20 overflow-hidden",
-            isSidebarOpen ? "w-[280px]" : "w-0 border-r-0"
+            "flex flex-col border-r border-border/40 bg-muted/15 transition-all duration-300 ease-in-out shrink-0 z-20 h-full overflow-hidden",
+            isSidebarOpen ? "w-[260px] sm:w-[280px]" : "w-0 sm:w-14 md:w-16 border-r-0 sm:border-r"
           )}
         >
-          {isSidebarOpen && (
-            <div className="flex flex-col h-full w-[280px]">
-              {/* Left Rail Header */}
-              <div className="p-3 border-b border-border/40 flex items-center justify-between shrink-0">
-                <div className="flex items-center gap-2">
-                  <div className="size-7 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
-                    <Sparkles className="size-4" />
-                  </div>
-                  <span className="text-xs font-bold tracking-tight text-foreground">
-                    AI Study Tutor
-                  </span>
-                </div>
+          {isSidebarOpen ? (
+            /* ── Expanded Sidebar Content ── */
+            <div className="flex flex-col h-full w-[260px] sm:w-[280px]">
+              {/* Left Rail Header with Back to Study Planner & Collapse */}
+              <div className="p-2.5 sm:p-3 border-b border-border/40 flex items-center justify-between shrink-0">
+                <Link
+                  href="/student/study"
+                  className="flex items-center gap-1.5 px-2 py-1 rounded-xl hover:bg-muted text-xs font-semibold text-muted-foreground hover:text-foreground transition-all group"
+                  title="Back to Study Planner"
+                >
+                  <ArrowLeft className="size-3.5 transition-transform group-hover:-translate-x-0.5" />
+                  <span>Study Planner</span>
+                </Link>
                 <Button
                   variant="ghost"
                   size="icon"
                   onClick={() => setIsSidebarOpen(false)}
-                  className="size-7 text-muted-foreground hover:text-foreground"
+                  className="size-7 rounded-xl text-muted-foreground hover:text-foreground"
                   title="Collapse sidebar"
                 >
                   <PanelLeftClose className="size-4" />
@@ -1157,7 +1167,7 @@ export function AISupportChat({
 
                 {resourcesDropdownOpen && (
                   <div className="absolute left-2 right-2 top-full mt-1 bg-popover text-popover-foreground border rounded-xl shadow-xl p-3 z-50 animate-in fade-in slide-in-from-top-2 duration-150">
-                    <div className="space-y-3 max-h-72 overflow-y-auto pr-1 text-left">
+                    <div className="space-y-3 max-h-72 overflow-y-auto pr-1 text-left narrow-scrollbar-dark">
                       {/* General Knowledge option */}
                       <div>
                         <div
@@ -1356,7 +1366,7 @@ export function AISupportChat({
               </div>
 
               {/* Previous Chats History List (with Pin & Delete) */}
-              <div className="flex-1 overflow-y-auto p-2 space-y-1 min-h-0">
+              <div className="flex-1 overflow-y-auto p-2 space-y-1 min-h-0 narrow-scrollbar-dark">
                 <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-2 py-1 flex items-center justify-between">
                   <span>Recent Conversations</span>
                   <History className="size-3" />
@@ -1430,103 +1440,242 @@ export function AISupportChat({
                   })
                 )}
               </div>
+
+              {/* Bottom Actions Bar (Share, Export, Fullscreen) */}
+              <div className="p-2 sm:p-2.5 border-t border-border/40 bg-muted/10 shrink-0">
+                <div className="flex items-center justify-between gap-1">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={messages.length === 0 || activeTab !== "support"}
+                    onClick={() => setShareModalOpen(true)}
+                    className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground gap-1.5 flex-1 justify-center rounded-xl disabled:opacity-40"
+                    title="Share conversation"
+                  >
+                    <Share2 className="size-3.5 text-primary" />
+                    <span className="text-[11px] font-medium">Share</span>
+                  </Button>
+
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={messages.length === 0 || activeTab !== "support"}
+                    onClick={() => setExportModalOpen(true)}
+                    className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground gap-1.5 flex-1 justify-center rounded-xl disabled:opacity-40"
+                    title="Export conversation"
+                  >
+                    <Download className="size-3.5" />
+                    <span className="text-[11px] font-medium">Export</span>
+                  </Button>
+
+                  <Button
+                    variant={isFullScreen ? "default" : "ghost"}
+                    size="icon"
+                    onClick={() => setIsFullScreen(!isFullScreen)}
+                    className="size-8 rounded-xl text-muted-foreground hover:text-foreground shrink-0"
+                    title={isFullScreen ? "Exit Fullscreen" : "Fullscreen"}
+                  >
+                    {isFullScreen ? (
+                      <Minimize2 className="size-3.5" />
+                    ) : (
+                      <Maximize2 className="size-3.5" />
+                    )}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          ) : (
+            /* ── Collapsed Sidebar Icon Rail (Smooth Transition) ── */
+            <div className="hidden sm:flex flex-col h-full w-14 md:w-16 items-center justify-between py-2.5 shrink-0">
+              {/* Top: Back to Study Planner & Expand */}
+              <div className="flex flex-col items-center gap-1.5">
+                <Link
+                  href="/student/study"
+                  className="size-8 rounded-xl flex items-center justify-center hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                  title="Back to Study Planner"
+                >
+                  <ArrowLeft className="size-4" />
+                </Link>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setIsSidebarOpen(true)}
+                  className="size-8 rounded-xl text-muted-foreground hover:text-foreground"
+                  title="Expand sidebar"
+                >
+                  <PanelLeftOpen className="size-4" />
+                </Button>
+              </div>
+
+              {/* Middle: New Chat & Modes & Context */}
+              <div className="flex flex-col items-center gap-2">
+                <Button
+                  onClick={handleStartNewChat}
+                  size="icon"
+                  className="size-8 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 shadow-2xs"
+                  title="New Chat"
+                >
+                  <Plus className="size-4" />
+                </Button>
+
+                <div className="flex flex-col items-center gap-1 pt-1 border-t border-border/40 w-8">
+                  <Button
+                    variant={activeTab === "support" ? "secondary" : "ghost"}
+                    size="icon"
+                    onClick={() => handleTabChange("support")}
+                    className={cn(
+                      "size-8 rounded-xl transition-all",
+                      activeTab === "support"
+                        ? "bg-primary/10 text-primary font-bold shadow-xs"
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                    title="Study Support Chat"
+                  >
+                    <Sparkles className="size-4" />
+                  </Button>
+                  <Button
+                    variant={activeTab === "revision" ? "secondary" : "ghost"}
+                    size="icon"
+                    onClick={() => handleTabChange("revision")}
+                    className={cn(
+                      "size-8 rounded-xl transition-all",
+                      activeTab === "revision"
+                        ? "bg-primary/10 text-primary font-bold shadow-xs"
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                    title="Curriculum Revision Center"
+                  >
+                    <BookOpen className="size-4" />
+                  </Button>
+                </div>
+
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => {
+                    setIsSidebarOpen(true);
+                    setResourcesDropdownOpen(true);
+                  }}
+                  className={cn(
+                    "size-8 rounded-xl mt-1",
+                    selectedResource ? "text-primary bg-primary/10" : "text-muted-foreground hover:text-foreground"
+                  )}
+                  title={`Active Scope: ${selectedResourceName || "General Knowledge"}`}
+                >
+                  <FileText className="size-4" />
+                </Button>
+              </div>
+
+              {/* Bottom: Share, Export, Fullscreen */}
+              <div className="flex flex-col items-center gap-1.5 pt-2 border-t border-border/40 w-full px-2">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  disabled={messages.length === 0 || activeTab !== "support"}
+                  onClick={() => setShareModalOpen(true)}
+                  className="size-8 rounded-xl text-muted-foreground hover:text-foreground disabled:opacity-40"
+                  title="Share conversation"
+                >
+                  <Share2 className="size-3.5 text-primary" />
+                </Button>
+
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  disabled={messages.length === 0 || activeTab !== "support"}
+                  onClick={() => setExportModalOpen(true)}
+                  className="size-8 rounded-xl text-muted-foreground hover:text-foreground disabled:opacity-40"
+                  title="Export conversation"
+                >
+                  <Download className="size-3.5" />
+                </Button>
+
+                <Button
+                  variant={isFullScreen ? "default" : "ghost"}
+                  size="icon"
+                  onClick={() => setIsFullScreen(!isFullScreen)}
+                  className="size-8 rounded-xl text-muted-foreground hover:text-foreground"
+                  title={isFullScreen ? "Exit Fullscreen" : "Fullscreen"}
+                >
+                  {isFullScreen ? (
+                    <Minimize2 className="size-3.5" />
+                  ) : (
+                    <Maximize2 className="size-3.5" />
+                  )}
+                </Button>
+              </div>
             </div>
           )}
         </aside>
 
         {/* ── Main Content Area ── */}
         <main className="flex-1 flex flex-col min-w-0 h-full relative overflow-hidden bg-background">
-          {/* Top Navbar */}
-          <div className="h-12 border-b border-border/40 px-4 flex items-center justify-between shrink-0 z-10 bg-background/80 backdrop-blur-sm">
-            <div className="flex items-center gap-2">
-              {!isSidebarOpen && (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => setIsSidebarOpen(true)}
-                  className="size-8 text-muted-foreground hover:text-foreground mr-1"
-                  title="Open sidebar"
+          {/* Mobile Floating Sidebar Toggle */}
+          {!isSidebarOpen && (
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => setIsSidebarOpen(true)}
+              className="sm:hidden absolute left-3 top-3 z-30 size-8 rounded-xl bg-background/80 backdrop-blur-md shadow-xs border-border/60 text-muted-foreground hover:text-foreground"
+              title="Open sidebar"
+            >
+              <PanelLeftOpen className="size-4" />
+            </Button>
+          )}
+
+          {/* Floating Active Knowledge Scope Pill (Minimalist & Non-intrusive) */}
+          {selectedResourceName && activeTab === "support" && (
+            <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10 pointer-events-auto">
+              <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-background/80 backdrop-blur-md border border-primary/20 text-primary shadow-xs text-xs font-medium animate-in fade-in slide-in-from-top-1 duration-200">
+                <FileText className="size-3 text-primary shrink-0" />
+                <span className="truncate max-w-[200px] sm:max-w-xs">{selectedResourceName}</span>
+                <button
+                  type="button"
+                  onClick={() => setSelectedResource(null)}
+                  className="size-3.5 rounded-full hover:bg-primary/10 flex items-center justify-center transition-colors ml-0.5 text-primary/70 hover:text-primary"
+                  title="Clear knowledge scope"
                 >
-                  <PanelLeftOpen className="size-4" />
-                </Button>
-              )}
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold text-foreground">
-                  {activeTab === "support"
-                    ? "Study Support Chat"
-                    : "Revision Center"}
-                </span>
-                {selectedResourceName ? (
-                  <Badge
-                    variant="outline"
-                    className="text-[10px] font-medium border-primary/30 bg-primary/5 text-primary"
-                  >
-                    Context: {selectedResourceName}
-                  </Badge>
-                ) : (
-                  <Badge
-                    variant="outline"
-                    className="text-[10px] font-normal text-muted-foreground"
-                  >
-                    General Knowledge
-                  </Badge>
-                )}
+                  <X className="size-2.5" />
+                </button>
               </div>
             </div>
-
-            <div className="flex items-center gap-1.5">
-              {messages.length > 0 && activeTab === "support" && (
-                <>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 px-2 text-[11px] text-muted-foreground hover:text-foreground gap-1"
-                    onClick={() => setShareModalOpen(true)}
-                    title="Share conversation"
-                  >
-                    <Share2 className="size-3.5 text-primary" />
-                    <span className="hidden sm:inline">Share</span>
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 px-2 text-[11px] text-muted-foreground hover:text-foreground gap-1"
-                    onClick={() => setExportModalOpen(true)}
-                    title="Export conversation"
-                  >
-                    <Download className="size-3.5" />
-                    <span className="hidden sm:inline">Export</span>
-                  </Button>
-                </>
-              )}
-
-              <Button
-                variant={isFullScreen ? "default" : "ghost"}
-                size="icon"
-                className="size-8 text-muted-foreground hover:text-foreground ml-1"
-                onClick={() => setIsFullScreen(!isFullScreen)}
-                title={isFullScreen ? "Exit Fullscreen" : "Fullscreen"}
-              >
-                {isFullScreen ? (
-                  <Minimize2 className="size-4" />
-                ) : (
-                  <Maximize2 className="size-4" />
-                )}
-              </Button>
-            </div>
-          </div>
+          )}
 
           {/* Error Banner if any */}
           {error && (
-            <Alert variant="destructive" className="m-4 mb-0 rounded-xl">
-              <ShieldAlert className="size-4" />
-              <AlertTitle className="text-xs font-semibold">
-                Study Tutor Notice
-              </AlertTitle>
-              <AlertDescription className="text-xs mt-0.5">
-                {error}
-              </AlertDescription>
-            </Alert>
+            <div className="mx-3 sm:mx-6 md:mx-8 mt-3 mb-1 animate-in fade-in slide-in-from-top-2 duration-200">
+              <div className="flex items-center justify-between gap-3 p-3 sm:p-3.5 rounded-2xl border border-destructive/25 bg-destructive/10 dark:bg-rose-950/25 text-destructive-foreground dark:text-rose-200 shadow-xs backdrop-blur-md">
+                <div className="flex items-start sm:items-center gap-2.5 min-w-0">
+                  <div className="size-8 rounded-xl bg-destructive/15 text-destructive dark:text-rose-400 flex items-center justify-center shrink-0 mt-0.5 sm:mt-0">
+                    <ShieldAlert className="size-4" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-xs font-bold text-foreground flex items-center gap-2">
+                      <span>Study Tutor Notice</span>
+                      <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-destructive/15 text-destructive dark:text-rose-300">
+                        Notice
+                      </span>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">
+                      {error === "Internal Server Error"
+                        ? "The AI study service encountered a temporary error. Please try again or ask a different question."
+                        : error}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setError(null)}
+                    className="h-7 px-2.5 text-xs rounded-lg text-muted-foreground hover:text-foreground hover:bg-destructive/15 transition-colors cursor-pointer"
+                  >
+                    Dismiss
+                  </Button>
+                </div>
+              </div>
+            </div>
           )}
 
           {/* Tab 1: STUDY SUPPORT CHAT */}
@@ -1535,30 +1684,55 @@ export function AISupportChat({
               {/* Centered Chat Message Stream */}
               <div className="flex-1 min-h-0 flex flex-col relative overflow-hidden">
                 {messages.length === 0 && !isThinking ? (
-                  <div className="flex-1 overflow-y-auto">
-                    <div className="h-full flex flex-col items-center justify-center text-center p-8 max-w-xl mx-auto space-y-6">
-                      <div className="size-14 rounded-2xl bg-primary/10 flex items-center justify-center">
-                        <Sparkles className="size-7 text-primary" />
+                  /* ── New Chat View: Centered Input & Inspiring Learning Reminder ── */
+                  <div className="flex-1 overflow-y-auto flex flex-col justify-center items-center p-4 sm:p-6 md:p-8 narrow-scrollbar-dark">
+                    <div className="w-full max-w-2xl lg:max-w-3xl flex flex-col items-center text-center space-y-4 my-auto animate-in fade-in-50 duration-300">
+                      <div className="size-12 rounded-2xl bg-primary/10 flex items-center justify-center text-primary shadow-2xs">
+                        <Sparkles className="size-6" />
                       </div>
-                      <div className="space-y-2">
-                        <h2 className="text-base font-semibold tracking-tight text-foreground">
+                      <div className="space-y-1.5 max-w-lg">
+                        <h1 className="text-xl sm:text-2xl md:text-3xl font-bold tracking-tight text-foreground">
                           What would you like to study today?
-                        </h2>
-                        <p className="text-xs text-muted-foreground leading-relaxed max-w-md">
-                          Ask questions, break down complex topics, or practice
-                          active recall with grounded course materials.
+                        </h1>
+                        <p className="text-xs sm:text-sm text-muted-foreground leading-relaxed">
+                          This is your personal space to learn, master complex topics, and grow your skills. Ask anything, test your retention, or work through course materials.
                         </p>
                       </div>
 
-                      {/* Suggested Start Buttons */}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 w-full pt-2">
+                      {/* Floating Center AI Input */}
+                      <div className="w-full pt-2">
+                        <AIChatInput
+                          value={prompt}
+                          onChange={setPrompt}
+                          onSend={handleSendMessage}
+                          isGenerating={isThinking}
+                          onStop={() => setIsThinking(false)}
+                          attachments={attachments}
+                          setAttachments={setAttachments}
+                          disabled={isSelectedRwanda || isBlockedByLanguagePolicy}
+                          placeholder={
+                            isSelectedRwanda || isBlockedByLanguagePolicy
+                              ? "AI Study Tutor is disabled for Kinyarwanda courses"
+                              : "Ask your AI tutor anything..."
+                          }
+                          onUploadFile={async (file: File) => {
+                            const formData = new FormData();
+                            formData.append("file", file);
+                            const res = await studentApi.uploadPersonalResource(formData);
+                            return { id: res.id };
+                          }}
+                        />
+                      </div>
+
+                      {/* Suggested Start Buttons Directly Below Input */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 w-full pt-1">
                         {studySuggestedActions.map((act, idx) => (
                           <button
                             key={idx}
-                            onClick={() => setPrompt(act.action)}
-                            className="p-3 text-left border rounded-xl text-xs hover:bg-muted/40 transition-colors font-medium space-y-1 bg-card shadow-2xs border-border/60"
+                            onClick={() => handleSendMessage({ input: act.action, attachments: [] })}
+                            className="p-3 text-left border rounded-xl text-xs hover:bg-muted/40 transition-colors font-medium space-y-1 bg-card shadow-2xs border-border/60 group"
                           >
-                            <div className="text-primary font-bold text-[10px] uppercase tracking-wide">
+                            <div className="text-primary font-bold text-[10px] uppercase tracking-wide group-hover:underline">
                               {act.title}
                             </div>
                             <div className="text-muted-foreground text-[11px] truncate">
@@ -1570,338 +1744,252 @@ export function AISupportChat({
                     </div>
                   </div>
                 ) : (
-                  <MessageScroller className="h-full">
-                    <MessageScrollerViewport className="scroll-fade">
-                      <MessageScrollerContent
-                        aria-busy={isThinking}
-                        className="max-w-3xl mx-auto py-4 px-4 space-y-4"
-                      >
-                        {messages.map((msg, index) => {
-                          const isLatestUserTurn =
-                            msg.sender === "student" &&
-                            (index === messages.length - 1 ||
-                              index === messages.length - 2);
-                          const isExpandedCitations = expandedCitationMessageIds.has(msg.id);
-                          const visibleCitations = isExpandedCitations
-                            ? msg.citations
-                            : (msg.citations || []).slice(0, 2);
-                          const remainingCitationsCount =
-                            (msg.citations?.length || 0) - 2;
+                  /* ── Dialogue Mode: Full-Width Stream + Floating Bottom Composer ── */
+                  <div className="flex-1 min-h-0 flex flex-col relative overflow-hidden">
+                    <MessageScroller className="h-full">
+                      <MessageScrollerViewport className="scroll-fade">
+                        <MessageScrollerContent
+                          aria-busy={isThinking}
+                          className="max-w-4xl lg:max-w-5xl 2xl:max-w-6xl mx-auto py-4 px-3 sm:px-6 md:px-8 space-y-4 pb-36"
+                        >
+                          {messages.map((msg, index) => {
+                            const isLatestUserTurn =
+                              msg.sender === "student" &&
+                              (index === messages.length - 1 ||
+                                index === messages.length - 2);
+                            const isExpandedCitations = expandedCitationMessageIds.has(msg.id);
+                            const visibleCitations = isExpandedCitations
+                              ? msg.citations
+                              : (msg.citations || []).slice(0, 2);
+                            const remainingCitationsCount =
+                              (msg.citations?.length || 0) - 2;
 
-                          return (
-                            <MessageScrollerItem
-                              key={msg.id}
-                              scrollAnchor={isLatestUserTurn}
-                              className="w-full"
-                            >
-                              {/* Student Message Turn */}
-                              {msg.sender === "student" ? (
-                                <div className="flex flex-col items-end max-w-[85%] ml-auto group space-y-1">
-                                  <div className="bg-primary text-primary-foreground px-3.5 py-2 rounded-2xl rounded-tr-xs shadow-2xs text-xs font-medium leading-relaxed">
-                                    {msg.attachments &&
-                                      msg.attachments.length > 0 && (
-                                        <div className="flex flex-wrap gap-1.5 pb-1">
-                                          {msg.attachments.map(
-                                            (att: any, aIdx: number) => (
-                                              <div
-                                                key={aIdx}
-                                                className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg border border-primary-foreground/30 bg-primary-foreground/15 text-primary-foreground text-[11px] font-medium"
-                                              >
-                                                <FileText className="size-3 shrink-0" />
-                                                <span className="truncate max-w-[160px]">
-                                                  {att.name}
-                                                </span>
-                                              </div>
-                                            )
-                                          )}
-                                        </div>
-                                      )}
-                                    {msg.text && (
-                                      <div className="whitespace-pre-wrap">
-                                        {msg.text}
-                                      </div>
-                                    )}
-                                  </div>
-
-                                  {/* Student Quick Actions (Outside message bubble) */}
-                                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground pr-1">
-                                    <button
-                                      type="button"
-                                      onClick={() => handleCopyText(msg.text, `copy-${msg.id}`)}
-                                      className="p-1 hover:text-foreground text-muted-foreground/80 hover:bg-muted/50 rounded transition-colors"
-                                      title="Copy prompt"
-                                    >
-                                      {copiedActionId === `copy-${msg.id}` ? (
-                                        <Check className="size-3 text-emerald-500" />
-                                      ) : (
-                                        <Copy className="size-3" />
-                                      )}
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => handleEditUserMessage(msg.text)}
-                                      className="p-1 hover:text-foreground text-muted-foreground/80 hover:bg-muted/50 rounded transition-colors"
-                                      title="Edit prompt in composer"
-                                    >
-                                      <Edit2 className="size-3" />
-                                    </button>
-                                  </div>
-                                </div>
-                              ) : (
-                                /* AI Message Turn */
-                                <div className="group relative flex flex-col max-w-[88%] space-y-2 p-3.5 rounded-2xl bg-card border border-border text-foreground mr-auto rounded-tl-xs text-left shadow-2xs leading-relaxed whitespace-pre-wrap animate-in fade-in slide-in-from-bottom-2 duration-300">
-                                  <RichMessageRenderer content={msg.text} />
-
-                                  {/* Optimized Compact Citations Accordion */}
-                                  {msg.citations && msg.citations.length > 0 && (
-                                    <div className="pt-2 border-t border-border/40 space-y-1.5">
-                                      <div className="flex items-center justify-between text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
-                                        <span className="flex items-center gap-1">
-                                          <FileText className="size-3 text-primary" />
-                                          References ({msg.citations.length})
-                                        </span>
-                                        {remainingCitationsCount > 0 && (
-                                          <button
-                                            type="button"
-                                            onClick={() => toggleCitationExpand(msg.id)}
-                                            className="text-[10px] text-primary hover:underline font-semibold flex items-center gap-0.5 normal-case"
-                                          >
-                                            {isExpandedCitations ? (
-                                              "Show less"
-                                            ) : (
-                                              <>
-                                                <span>+{remainingCitationsCount} more</span>
-                                                <ChevronRight className="size-3 rotate-90" />
-                                              </>
-                                            )}
-                                          </button>
-                                        )}
-                                      </div>
-
-                                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                                        {visibleCitations?.map((c, cIdx) => (
-                                          <div
-                                            key={cIdx}
-                                            className="p-2 rounded-lg border border-border/60 bg-muted/20 text-[10px] space-y-1"
-                                          >
-                                            <div className="font-semibold text-foreground truncate">
-                                              {c.resource_name}
-                                              {c.page_number
-                                                ? ` (p. ${c.page_number})`
-                                                : ""}
-                                            </div>
-                                            {c.excerpt && (
-                                              <div className="text-muted-foreground italic line-clamp-2">
-                                                &ldquo;{c.excerpt}&rdquo;
-                                              </div>
+                            return (
+                              <MessageScrollerItem
+                                key={msg.id}
+                                scrollAnchor={isLatestUserTurn}
+                                className="w-full"
+                              >
+                                {/* Student Message Turn */}
+                                {msg.sender === "student" ? (
+                                  <div className="flex flex-col items-end max-w-[85%] sm:max-w-[80%] ml-auto group space-y-1">
+                                    <div className="bg-primary text-primary-foreground px-4 py-2.5 rounded-2xl rounded-tr-xs shadow-2xs text-xs sm:text-sm font-medium leading-relaxed">
+                                      {msg.attachments &&
+                                        msg.attachments.length > 0 && (
+                                          <div className="flex flex-wrap gap-1.5 pb-1.5">
+                                            {msg.attachments.map(
+                                              (att: any, aIdx: number) => (
+                                                <div
+                                                  key={aIdx}
+                                                  className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg border border-primary-foreground/30 bg-primary-foreground/15 text-primary-foreground text-[11px] font-medium"
+                                                >
+                                                  <FileText className="size-3 shrink-0" />
+                                                  <span className="truncate max-w-[160px]">
+                                                    {att.name}
+                                                  </span>
+                                                </div>
+                                              )
                                             )}
                                           </div>
-                                        ))}
-                                      </div>
-                                    </div>
-                                  )}
-
-                                  {/* AI Message Action Bar (Copy & Try Again) */}
-                                  <div className="pt-1.5 border-t border-border/30 flex items-center justify-between text-muted-foreground">
-                                    <div className="flex items-center gap-1">
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={() => handleCopyText(msg.text, `ai-copy-${msg.id}`)}
-                                        className="h-6 px-2 text-[10px] gap-1 text-muted-foreground hover:text-foreground"
-                                      >
-                                        {copiedActionId === `ai-copy-${msg.id}` ? (
-                                          <>
-                                            <Check className="size-3 text-emerald-500" />
-                                            <span>Copied</span>
-                                          </>
-                                        ) : (
-                                          <>
-                                            <Copy className="size-3" />
-                                            <span>Copy</span>
-                                          </>
                                         )}
-                                      </Button>
-                                      {index === messages.length - 1 && (
+                                      {msg.text && (
+                                        <div className="whitespace-pre-wrap">
+                                          {msg.text}
+                                        </div>
+                                      )}
+                                    </div>
+
+                                    {/* Student Quick Actions */}
+                                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground pr-1">
+                                      <button
+                                        type="button"
+                                        onClick={() => handleCopyText(msg.text, `copy-${msg.id}`)}
+                                        className="p-1 hover:text-foreground text-muted-foreground/80 hover:bg-muted/50 rounded transition-colors"
+                                        title="Copy prompt"
+                                      >
+                                        {copiedActionId === `copy-${msg.id}` ? (
+                                          <Check className="size-3 text-emerald-500" />
+                                        ) : (
+                                          <Copy className="size-3" />
+                                        )}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleEditUserMessage(msg.text)}
+                                        className="p-1 hover:text-foreground text-muted-foreground/80 hover:bg-muted/50 rounded transition-colors"
+                                        title="Edit prompt in composer"
+                                      >
+                                        <Edit2 className="size-3" />
+                                      </button>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  /* AI Message Turn */
+                                  <div className="group relative flex flex-col max-w-[95%] sm:max-w-[90%] space-y-2 p-4 rounded-2xl bg-card border border-border text-foreground mr-auto rounded-tl-xs text-left shadow-2xs leading-relaxed whitespace-pre-wrap animate-in fade-in slide-in-from-bottom-2 duration-300">
+                                    <RichMessageRenderer content={msg.text} />
+
+                                    {/* Optimized Compact Citations Accordion */}
+                                    {msg.citations && msg.citations.length > 0 && (
+                                      <div className="pt-2 border-t border-border/40 space-y-1.5">
+                                        <div className="flex items-center justify-between text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+                                          <span className="flex items-center gap-1">
+                                            <FileText className="size-3 text-primary" />
+                                            References ({msg.citations.length})
+                                          </span>
+                                          {remainingCitationsCount > 0 && (
+                                            <button
+                                              type="button"
+                                              onClick={() => toggleCitationExpand(msg.id)}
+                                              className="text-[10px] text-primary hover:underline font-semibold flex items-center gap-0.5 normal-case"
+                                            >
+                                              {isExpandedCitations ? (
+                                                "Show less"
+                                              ) : (
+                                                <>
+                                                  <span>+{remainingCitationsCount} more</span>
+                                                  <ChevronRight className="size-3 rotate-90" />
+                                                </>
+                                              )}
+                                            </button>
+                                          )}
+                                        </div>
+
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                                          {visibleCitations?.map((c, cIdx) => (
+                                            <div
+                                              key={cIdx}
+                                              className="p-2 rounded-lg border border-border/60 bg-muted/20 text-[10px] space-y-1"
+                                            >
+                                              <div className="font-semibold text-foreground truncate">
+                                                {c.resource_name}
+                                                {c.page_number
+                                                  ? ` (p. ${c.page_number})`
+                                                  : ""}
+                                              </div>
+                                              {c.excerpt && (
+                                                <div className="text-muted-foreground italic line-clamp-2">
+                                                  &ldquo;{c.excerpt}&rdquo;
+                                                </div>
+                                              )}
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    {/* AI Message Action Bar (Copy & Try Again) */}
+                                    <div className="pt-1.5 border-t border-border/30 flex items-center justify-between text-muted-foreground">
+                                      <div className="flex items-center gap-1">
                                         <Button
                                           variant="ghost"
                                           size="sm"
-                                          onClick={handleRegenerateLastMessage}
+                                          onClick={() => handleCopyText(msg.text, `ai-copy-${msg.id}`)}
                                           className="h-6 px-2 text-[10px] gap-1 text-muted-foreground hover:text-foreground"
-                                          title="Regenerate this explanation"
                                         >
-                                          <RotateCcw className="size-3" />
-                                          <span>Try Again</span>
+                                          {copiedActionId === `ai-copy-${msg.id}` ? (
+                                            <>
+                                              <Check className="size-3 text-emerald-500" />
+                                              <span>Copied</span>
+                                            </>
+                                          ) : (
+                                            <>
+                                              <Copy className="size-3" />
+                                              <span>Copy</span>
+                                            </>
+                                          )}
                                         </Button>
-                                      )}
+                                        {index === messages.length - 1 && (
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={handleRegenerateLastMessage}
+                                            className="h-6 px-2 text-[10px] gap-1 text-muted-foreground hover:text-foreground"
+                                            title="Regenerate this explanation"
+                                          >
+                                            <RotateCcw className="size-3" />
+                                            <span>Try Again</span>
+                                          </Button>
+                                        )}
+                                      </div>
                                     </div>
                                   </div>
-                                </div>
-                              )}
-                            </MessageScrollerItem>
-                          );
-                        })}
+                                )}
+                              </MessageScrollerItem>
+                            );
+                          })}
 
-                        {isThinking && (
-                          <div className="py-2 mr-auto max-w-[88%]">
-                            <Marker
-                              role="status"
-                              className="bg-card border border-border rounded-2xl p-3 shadow-2xs"
-                            >
-                              <MarkerIcon>
-                                <Spinner />
-                              </MarkerIcon>
-                              <MarkerContent className="shimmer text-xs font-medium">
-                                Study AI is formulating a tailored academic explanation...
-                              </MarkerContent>
-                            </Marker>
+                          {isThinking && (
+                            <div className="py-2 mr-auto max-w-[95%] sm:max-w-[90%]">
+                              <Marker
+                                role="status"
+                                className="bg-card border border-border rounded-2xl p-3 shadow-2xs"
+                              >
+                                <MarkerIcon>
+                                  <Spinner />
+                                </MarkerIcon>
+                                <MarkerContent className="shimmer text-xs font-medium">
+                                  Study AI is formulating a tailored academic explanation...
+                                </MarkerContent>
+                              </Marker>
+                            </div>
+                          )}
+                        </MessageScrollerContent>
+                      </MessageScrollerViewport>
+                      <MessageScrollerButton className="bottom-24 sm:bottom-28 right-4 sm:right-6 md:right-8" />
+                    </MessageScroller>
+
+                    {/* Gradient Scrim */}
+                    <div className="pointer-events-none absolute inset-x-0 bottom-0 h-32 bg-gradient-to-t from-background via-background/80 to-transparent z-10" />
+
+                    {/* Floating Bottom Composer */}
+                    <div className="absolute inset-x-0 bottom-0 pointer-events-none p-3 sm:p-4 md:p-5 z-20">
+                      <div className="max-w-4xl lg:max-w-5xl 2xl:max-w-6xl mx-auto w-full pointer-events-auto space-y-1.5">
+                        {/* Rwanda Course Warning */}
+                        {(isSelectedRwanda || isBlockedByLanguagePolicy) && (
+                          <div className="p-3 rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-900 dark:text-amber-200 text-xs flex items-start gap-2.5 shadow-lg backdrop-blur-md">
+                            <AlertTriangle className="size-4 text-amber-600 shrink-0 mt-0.5" />
+                            <div>
+                              <strong className="block font-semibold">
+                                AI Study Tutor Disabled for Course
+                              </strong>
+                              <span className="opacity-90">
+                                The selected course has Kinyarwanda set as its instruction language. AI assistance is deactivated for Kinyarwanda modules according to institutional academic policy.
+                              </span>
+                            </div>
                           </div>
                         )}
-                      </MessageScrollerContent>
-                    </MessageScrollerViewport>
-                    <MessageScrollerButton />
-                  </MessageScroller>
-                )}
-              </div>
 
-              {/* ── Pinned Bottom Composer with Collapsible Helper Chips ── */}
-              <div className="shrink-0 border-t border-border/40 bg-background/95 backdrop-blur-sm p-3 md:p-4">
-                <div className="max-w-3xl mx-auto w-full space-y-2">
-                  {/* Rwanda Course Warning */}
-                  {(isSelectedRwanda || isBlockedByLanguagePolicy) && (
-                    <div className="p-3 rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-900 dark:text-amber-200 text-xs flex items-start gap-2.5">
-                      <AlertTriangle className="size-4 text-amber-600 shrink-0 mt-0.5" />
-                      <div>
-                        <strong className="block font-semibold">
-                          AI Study Tutor Disabled for Course
-                        </strong>
-                        <span className="opacity-90">
-                          The selected course has Kinyarwanda set as its instruction language. AI assistance is deactivated for Kinyarwanda modules according to institutional academic policy.
-                        </span>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Helper Chips Row: Scope, Tips, Integrity */}
-                  <div className="flex flex-wrap items-center justify-between gap-2 px-1">
-                    {/* Active Scope Chip */}
-                    {selectedResourceName &&
-                      !isSelectedRwanda &&
-                      !isBlockedByLanguagePolicy && (
-                        <span className="text-[11px] font-medium text-primary flex items-center gap-1.5 bg-primary/5 border border-primary/20 px-2.5 py-0.5 rounded-lg">
-                          <FileText className="size-3" />
-                          Searching:{" "}
-                          <strong className="font-semibold">
-                            {selectedResourceName}
-                          </strong>
-                          <button
-                            type="button"
-                            onClick={() => setSelectedResource(null)}
-                            className="ml-1 hover:text-red-500 text-muted-foreground transition-colors"
-                            title="Clear scope and search general knowledge"
-                          >
-                            <X className="size-3" />
-                          </button>
-                        </span>
-                      )}
-
-                    {/* Collapsible Chips for Tips & Integrity (Near Composer) */}
-                    <div className="flex items-center gap-2 ml-auto">
-                      {/* Tips Popover Chip */}
-                      <div className="relative" ref={tipsRef}>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setTipsPopoverOpen(!tipsPopoverOpen);
-                            setIntegrityPopoverOpen(false);
+                        {/* Input Box */}
+                        <AIChatInput
+                          value={prompt}
+                          onChange={setPrompt}
+                          onSend={handleSendMessage}
+                          isGenerating={isThinking}
+                          onStop={() => setIsThinking(false)}
+                          attachments={attachments}
+                          setAttachments={setAttachments}
+                          disabled={isSelectedRwanda || isBlockedByLanguagePolicy}
+                          placeholder={
+                            isSelectedRwanda || isBlockedByLanguagePolicy
+                              ? "AI Study Tutor is disabled for Kinyarwanda courses"
+                              : "Ask your AI tutor anything..."
+                          }
+                          onUploadFile={async (file: File) => {
+                            const formData = new FormData();
+                            formData.append("file", file);
+                            const res = await studentApi.uploadPersonalResource(formData);
+                            return { id: res.id };
                           }}
-                          className="flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded-full border border-border/60 bg-muted/30 text-muted-foreground hover:text-foreground transition-colors"
-                        >
-                          <Lightbulb className="size-3 text-amber-500" />
-                          <span>Study Tips</span>
-                        </button>
-                        {tipsPopoverOpen && (
-                          <div className="absolute right-0 bottom-full mb-2 w-72 bg-popover text-popover-foreground border rounded-xl shadow-xl p-3 z-50 animate-in fade-in slide-in-from-bottom-2 duration-150">
-                            <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-1.5 flex items-center gap-1">
-                              <Lightbulb className="size-3.5 text-amber-500" />
-                              Active Recall Tips
-                            </div>
-                            <div className="space-y-2 text-xs text-muted-foreground leading-relaxed">
-                              <p>
-                                • Try explaining the concept in your own words
-                                first.
-                              </p>
-                              <p>
-                                • Ask for practice questions and scenarios to test
-                                retention.
-                              </p>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Integrity Popover Chip */}
-                      <div className="relative" ref={integrityRef}>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setIntegrityPopoverOpen(!integrityPopoverOpen);
-                            setTipsPopoverOpen(false);
-                          }}
-                          className="flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded-full border border-border/60 bg-muted/30 text-muted-foreground hover:text-foreground transition-colors"
-                        >
-                          <ShieldAlert className="size-3 text-red-500" />
-                          <span>Academic Integrity</span>
-                        </button>
-                        {integrityPopoverOpen && (
-                          <div className="absolute right-0 bottom-full mb-2 w-72 bg-popover text-popover-foreground border rounded-xl shadow-xl p-3 z-50 animate-in fade-in slide-in-from-bottom-2 duration-150">
-                            <div className="text-[10px] font-bold text-red-600 uppercase tracking-widest mb-1.5 flex items-center gap-1">
-                              <ShieldAlert className="size-3.5" />
-                              Honor Code Policy
-                            </div>
-                            <p className="text-xs text-muted-foreground leading-relaxed">
-                              Student AI provides concept explanations and
-                              study support. Generating cheat sheets or attempting
-                              to bypass assessment integrity checks is prohibited.
-                            </p>
-                          </div>
-                        )}
+                        />
                       </div>
                     </div>
                   </div>
-
-                  {/* Input Box */}
-                  <AIChatInput
-                    value={prompt}
-                    onChange={setPrompt}
-                    onSend={handleSendMessage}
-                    isGenerating={isThinking}
-                    onStop={() => setIsThinking(false)}
-                    attachments={attachments}
-                    setAttachments={setAttachments}
-                    disabled={isSelectedRwanda || isBlockedByLanguagePolicy}
-                    placeholder={
-                      isSelectedRwanda || isBlockedByLanguagePolicy
-                        ? "AI Study Tutor is disabled for Kinyarwanda courses"
-                        : "Ask your AI tutor anything..."
-                    }
-                    onUploadFile={async (file: File) => {
-                      const formData = new FormData();
-                      formData.append("file", file);
-                      const res = await studentApi.uploadPersonalResource(
-                        formData
-                      );
-                      return { id: res.id };
-                    }}
-                  />
-                </div>
+                )}
               </div>
             </div>
-          )}
-
-          {/* Tab 2: REVISION CENTER (Curriculum-aware Learning Units & Socratic Loop) */}
+          )}          {/* Tab 2: REVISION CENTER (Curriculum-aware Learning Units & Socratic Loop) */}
           {activeTab === "revision" && (
-            <div className="flex-1 overflow-y-auto p-4 md:p-6 max-w-4xl w-full mx-auto space-y-6">
+            <div className="flex-1 overflow-y-auto p-4 md:p-6 max-w-4xl lg:max-w-5xl 2xl:max-w-6xl w-full mx-auto space-y-6 narrow-scrollbar-dark">
               {/* Header & Course Selection */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-border/40">
                 <div>
@@ -2271,7 +2359,7 @@ export function AISupportChat({
           </DialogHeader>
 
           <div className="space-y-3 py-2">
-            <div className="p-3 bg-muted/30 rounded-xl border border-border/50 max-h-48 overflow-y-auto font-mono text-[11px] text-muted-foreground whitespace-pre-wrap">
+            <div className="p-3 bg-muted/30 rounded-xl border border-border/50 max-h-48 overflow-y-auto font-mono text-[11px] text-muted-foreground whitespace-pre-wrap narrow-scrollbar-dark">
               {buildConversationMarkdown()}
             </div>
           </div>

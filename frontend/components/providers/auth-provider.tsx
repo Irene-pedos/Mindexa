@@ -13,6 +13,8 @@ import { authApi } from "@/lib/api/auth";
 import { getToken, refreshToken, setAccessToken } from "@/lib/api/client";
 import { toast } from "sonner";
 
+import { clearAiLocalData } from "@/lib/ai-local-data";
+import { clearResumePoint, scopedStorage } from "@/lib/grading-session";
 export type AuthUser = {
   id: string;
   email: string;
@@ -86,6 +88,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       localStorage.removeItem("user");
       localStorage.removeItem("accessToken");
       localStorage.removeItem("refreshToken");
+      try {
+        clearAiLocalData(localStorage);
+      } catch {
+        // storage unavailable
+      }
     }
   }, []);
 
@@ -210,6 +217,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       await authApi.logout();
     } finally {
+      // The "continue where you left off" hint is personal; don't leave it behind on a
+      // shared machine. Unsynced grading drafts are kept (scoped to this user) so a
+      // lecturer who signs back in can still recover them.
+      if (user?.id && typeof window !== "undefined") {
+        try {
+          clearResumePoint(scopedStorage(window.localStorage, user.id));
+        } catch {
+          // storage unavailable
+        }
+      }
       clearSession();
       router.replace("/login");
       setLoading(false);

@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 from app.agents.rubric_agent import RubricCriterionDraft, RubricDraftOutput
 from app.agents.slide_deck_agent import SlideDeckOutput
 from app.db.schemas.rag import SourceCitation
+from app.schemas.chat import ChatHistory
 
 
 class LecturerSupportRequest(BaseModel):
@@ -22,9 +23,9 @@ class LecturerSupportRequest(BaseModel):
         description="Mode: 'chat', 'questions', 'slides', 'rubric', 'digest'",
     )
     selected_material_ids: Optional[List[uuid.UUID]] = Field(
-        default=None, description="Optional selected material IDs to filter RAG"
+        default=None, max_length=50, description="Optional selected material IDs to filter RAG"
     )
-    conversation_history: List[Dict[str, Any]] = Field(
+    conversation_history: ChatHistory = Field(
         default_factory=list, description="Prior conversation turns"
     )
     feature_payload: Optional[Dict[str, Any]] = Field(
@@ -64,7 +65,11 @@ class LearningUnitItemResponse(BaseModel):
 
 class SlideDeckGenerateRequest(BaseModel):
     estimated_minutes: int = Field(default=45, ge=5, le=180)
-    selected_outcomes: Optional[List[str]] = Field(default=None, description="Optional subset of learning outcomes to emphasize in the deck")
+    selected_outcomes: Optional[List[str]] = Field(
+        default=None,
+        max_length=50,
+        description="Optional subset of learning outcomes to emphasize in the deck",
+    )
 
 
 class SlideDeckGenerateResponse(BaseModel):
@@ -94,7 +99,7 @@ class RubricSaveRequest(BaseModel):
     question_id: uuid.UUID
     title: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = Field(default=None, max_length=2000)
-    criteria: List[RubricCriterionDraft] = Field(..., min_length=1)
+    criteria: List[RubricCriterionDraft] = Field(..., min_length=1, max_length=15)
 
 
 class RubricSaveResponse(BaseModel):

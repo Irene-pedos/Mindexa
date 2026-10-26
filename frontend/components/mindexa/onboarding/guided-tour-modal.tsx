@@ -27,6 +27,11 @@ import {
   Check,
   HelpCircle,
   Loader2,
+  BookOpen,
+  ClipboardList,
+  GraduationCap,
+  Calendar,
+  Briefcase,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -50,6 +55,11 @@ const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
   Accessibility,
   Activity,
   Compass,
+  BookOpen,
+  ClipboardList,
+  GraduationCap,
+  Calendar,
+  Briefcase,
 };
 
 interface TargetRect {
@@ -72,6 +82,7 @@ export function GuidedTourModal() {
   const [isNavigating, setIsNavigating] = useState(false);
   const [targetRect, setTargetRect] = useState<TargetRect | null>(null);
   const [windowSize, setWindowSize] = useState({ width: 1200, height: 800 });
+  const [actualCardHeight, setActualCardHeight] = useState(420);
 
   const tooltipRef = useRef<HTMLDivElement>(null);
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -104,6 +115,16 @@ export function GuidedTourModal() {
       return () => window.removeEventListener("resize", handleResize);
     }
   }, []);
+
+  // Measure actual card height dynamically to prevent any off-screen positioning
+  useEffect(() => {
+    if (tooltipRef.current) {
+      const measured = tooltipRef.current.offsetHeight;
+      if (measured > 0 && Math.abs(measured - actualCardHeight) > 5) {
+        setActualCardHeight(measured);
+      }
+    }
+  }, [currentStepIndex, isOpen, isNavigating, actualCardHeight]);
 
   // Initialize step from user's persisted state or listen for explicit trigger
   useEffect(() => {
@@ -152,24 +173,57 @@ export function GuidedTourModal() {
     const selector = currentStep.targetSelector;
     const fallback = currentStep.fallbackSelector;
 
-    let el = selector ? document.querySelector(selector) : null;
+    let el: Element | null = null;
+
+    if (selector) {
+      try {
+        el = document.querySelector(selector);
+      } catch {
+        el = null;
+      }
+    }
+
     if (!el && fallback) {
-      el = document.querySelector(fallback);
+      try {
+        // Handle comma-separated fallback selectors
+        const fallbacks = fallback.split(",").map((s) => s.trim());
+        for (const fb of fallbacks) {
+          if (fb.includes(":has-text(")) {
+            // Text matching helper
+            const match = fb.match(/:has-text\('([^']+)'\)/);
+            if (match && match[1]) {
+              const tag = fb.split(":")[0] || "h1";
+              const candidates = Array.from(document.querySelectorAll(tag));
+              el = candidates.find((c) => c.textContent?.includes(match[1])) || null;
+              if (el) break;
+            }
+          } else {
+            el = document.querySelector(fb);
+            if (el) break;
+          }
+        }
+      } catch {
+        el = null;
+      }
     }
 
     if (el) {
       const rect = el.getBoundingClientRect();
-      setTargetRect({
-        top: rect.top,
-        left: rect.left,
-        width: rect.width,
-        height: rect.height,
-        bottom: rect.bottom,
-        right: rect.right,
-      });
-    } else {
-      setTargetRect(null);
+      // Ensure element has non-zero dimensions or is in the layout
+      if (rect.width > 0 && rect.height > 0) {
+        setTargetRect({
+          top: rect.top,
+          left: rect.left,
+          width: rect.width,
+          height: rect.height,
+          bottom: rect.bottom,
+          right: rect.right,
+        });
+        return;
+      }
     }
+
+    setTargetRect(null);
   }, [isOpen, currentStep]);
 
   // Handle route matching, target polling, and smooth scrolling
@@ -181,29 +235,59 @@ export function GuidedTourModal() {
     }
 
     let attempts = 0;
-    const maxAttempts = 30; // 30 * 80ms = 2.4s max wait
+    const maxAttempts = 35; // 35 * 70ms = 2.45s max wait
 
     const findAndScrollElement = () => {
       const selector = currentStep.targetSelector;
       const fallback = currentStep.fallbackSelector;
 
-      let el = selector ? document.querySelector(selector) : null;
+      let el: Element | null = null;
+      if (selector) {
+        try {
+          el = document.querySelector(selector);
+        } catch {
+          el = null;
+        }
+      }
+
       if (!el && fallback) {
-        el = document.querySelector(fallback);
+        try {
+          const fallbacks = fallback.split(",").map((s) => s.trim());
+          for (const fb of fallbacks) {
+            if (fb.includes(":has-text(")) {
+              const match = fb.match(/:has-text\('([^']+)'\)/);
+              if (match && match[1]) {
+                const tag = fb.split(":")[0] || "h1";
+                const candidates = Array.from(document.querySelectorAll(tag));
+                el = candidates.find((c) => c.textContent?.includes(match[1])) || null;
+                if (el) break;
+              }
+            } else {
+              el = document.querySelector(fb);
+              if (el) break;
+            }
+          }
+        } catch {
+          el = null;
+        }
       }
 
       if (el) {
         setIsNavigating(false);
+        // Scroll element into view smoothly and center it
         el.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
+
         const rect = el.getBoundingClientRect();
-        setTargetRect({
-          top: rect.top,
-          left: rect.left,
-          width: rect.width,
-          height: rect.height,
-          bottom: rect.bottom,
-          right: rect.right,
-        });
+        if (rect.width > 0 && rect.height > 0) {
+          setTargetRect({
+            top: rect.top,
+            left: rect.left,
+            width: rect.width,
+            height: rect.height,
+            bottom: rect.bottom,
+            right: rect.right,
+          });
+        }
         if (pollIntervalRef.current) {
           clearInterval(pollIntervalRef.current);
         }
@@ -223,7 +307,7 @@ export function GuidedTourModal() {
     findAndScrollElement();
 
     // Start polling in case of route transition or async component render
-    pollIntervalRef.current = setInterval(findAndScrollElement, 80);
+    pollIntervalRef.current = setInterval(findAndScrollElement, 70);
 
     // Track layout shifts via scroll & resize
     const handleScrollOrResize = () => {
@@ -308,80 +392,136 @@ export function GuidedTourModal() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isOpen, handleDismiss, handleNext, handlePrevious]);
 
-  // Tooltip position calculation with collision-aware auto-flipping
+  // Smart Tooltip position calculation ensuring next/back buttons are NEVER pushed off-screen
   const tooltipStyle = useMemo(() => {
     const isMobile = windowSize.width < 768;
+    const isTablet = windowSize.width >= 768 && windowSize.width < 1024;
+    const padding = 14;
+    const gap = 12;
 
-    if (isMobile) {
-      return {
-        position: "fixed" as const,
-        bottom: 16,
-        left: 16,
-        right: 16,
-        maxWidth: "calc(100vw - 32px)",
-        zIndex: 101,
-      };
-    }
+    const cardWidth = isMobile
+      ? Math.max(300, windowSize.width - padding * 2)
+      : Math.min(420, windowSize.width - padding * 2);
 
-    const cardWidth = Math.min(420, windowSize.width - 32);
-    const cardHeight = 360; // estimated max height
-    const gap = 14;
-    const padding = 16;
+    // Guaranteed clamped height so card never exceeds screen height
+    const cardHeight = Math.min(actualCardHeight || 420, windowSize.height - padding * 2);
 
+    // Fallback: When target element is not found yet or navigating
     if (!targetRect) {
-      // Fallback: center in viewport
       return {
         position: "fixed" as const,
         top: Math.max(padding, (windowSize.height - cardHeight) / 2),
         left: Math.max(padding, (windowSize.width - cardWidth) / 2),
         width: cardWidth,
+        maxHeight: `calc(100dvh - ${padding * 2}px)`,
         zIndex: 101,
       };
     }
 
+    // ── MOBILE SCREENS (< 768px): Smart Top or Bottom Docking ──
+    // If the spotlighted target is in the lower half of the screen, dock at top.
+    // If the spotlighted target is in the upper half of the screen, dock at bottom.
+    // This leaves the highlighted element visible without modal overlap!
+    if (isMobile) {
+      const targetCenterY = targetRect.top + targetRect.height / 2;
+      if (targetCenterY > windowSize.height * 0.5) {
+        return {
+          position: "fixed" as const,
+          top: padding,
+          left: padding,
+          right: padding,
+          width: "auto",
+          maxWidth: `calc(100vw - ${padding * 2}px)`,
+          maxHeight: `calc(100dvh - ${padding * 2}px)`,
+          zIndex: 101,
+        };
+      }
+      return {
+        position: "fixed" as const,
+        bottom: padding,
+        left: padding,
+        right: padding,
+        width: "auto",
+        maxWidth: `calc(100vw - ${padding * 2}px)`,
+        maxHeight: `calc(100dvh - ${padding * 2}px)`,
+        zIndex: 101,
+      };
+    }
+
+    // ── TABLETS & IPADS (768px - 1024px) ──
+    if (isTablet) {
+      const spaceBelow = windowSize.height - targetRect.bottom - gap - padding;
+      const spaceAbove = targetRect.top - gap - padding;
+
+      let top = 0;
+      if (spaceBelow >= cardHeight || spaceBelow >= spaceAbove) {
+        top = targetRect.bottom + gap;
+      } else {
+        top = targetRect.top - gap - cardHeight;
+      }
+
+      // Center horizontally relative to target element, strictly clamped inside viewport
+      const centerX = targetRect.left + targetRect.width / 2;
+      let left = centerX - cardWidth / 2;
+      left = Math.max(padding, Math.min(windowSize.width - cardWidth - padding, left));
+      top = Math.max(padding, Math.min(windowSize.height - cardHeight - padding, top));
+
+      return {
+        position: "fixed" as const,
+        top,
+        left,
+        width: cardWidth,
+        maxHeight: `calc(100dvh - ${padding * 2}px)`,
+        zIndex: 101,
+      };
+    }
+
+    // ── DESKTOP SCREENS (>= 1024px) ──
     const preferred = currentStep?.placement || "bottom";
     const centerX = targetRect.left + targetRect.width / 2;
     const centerY = targetRect.top + targetRect.height / 2;
+
+    const spaceBelow = windowSize.height - targetRect.bottom - gap - padding;
+    const spaceAbove = targetRect.top - gap - padding;
+    const spaceRight = windowSize.width - targetRect.right - gap - padding;
+    const spaceLeft = targetRect.left - gap - padding;
 
     let computedTop = 0;
     let computedLeft = 0;
 
     if (preferred.startsWith("bottom")) {
-      const bottomSpace = windowSize.height - targetRect.bottom - gap;
-      if (bottomSpace >= 280 || targetRect.top < 280) {
-        // Fits below
+      if (spaceBelow >= cardHeight || spaceBelow >= spaceAbove) {
         computedTop = targetRect.bottom + gap;
       } else {
-        // Flip to top
         computedTop = targetRect.top - gap - cardHeight;
       }
       computedLeft = preferred === "bottom-start" ? targetRect.left : centerX - cardWidth / 2;
     } else if (preferred.startsWith("top")) {
-      const topSpace = targetRect.top - gap;
-      if (topSpace >= 280 || windowSize.height - targetRect.bottom < 280) {
-        // Fits above
+      if (spaceAbove >= cardHeight || spaceAbove >= spaceBelow) {
         computedTop = targetRect.top - gap - cardHeight;
       } else {
-        // Flip to bottom
         computedTop = targetRect.bottom + gap;
       }
       computedLeft = preferred === "top-start" ? targetRect.left : centerX - cardWidth / 2;
     } else if (preferred === "right") {
-      const rightSpace = windowSize.width - targetRect.right - gap;
-      if (rightSpace >= cardWidth) {
+      if (spaceRight >= cardWidth || spaceRight >= spaceLeft) {
         computedLeft = targetRect.right + gap;
         computedTop = centerY - cardHeight / 2;
       } else {
-        // Flip to left or bottom
         computedLeft = targetRect.left - gap - cardWidth;
         computedTop = centerY - cardHeight / 2;
       }
     } else {
-      computedLeft = targetRect.left - gap - cardWidth;
-      computedTop = centerY - cardHeight / 2;
+      if (spaceLeft >= cardWidth || spaceLeft >= spaceRight) {
+        computedLeft = targetRect.left - gap - cardWidth;
+        computedTop = centerY - cardHeight / 2;
+      } else {
+        computedLeft = targetRect.right + gap;
+        computedTop = centerY - cardHeight / 2;
+      }
     }
 
-    // Clamp inside viewport
+    // Strictly clamp inside viewport bounds so footer buttons are ALWAYS 100% visible
     const finalLeft = Math.max(padding, Math.min(windowSize.width - cardWidth - padding, computedLeft));
     const finalTop = Math.max(padding, Math.min(windowSize.height - cardHeight - padding, computedTop));
 
@@ -390,9 +530,10 @@ export function GuidedTourModal() {
       top: finalTop,
       left: finalLeft,
       width: cardWidth,
+      maxHeight: `calc(100dvh - ${padding * 2}px)`,
       zIndex: 101,
     };
-  }, [windowSize, targetRect, currentStep]);
+  }, [windowSize, targetRect, currentStep, actualCardHeight]);
 
   if (!isOpen || !currentStep) return null;
 
@@ -414,12 +555,19 @@ export function GuidedTourModal() {
               position: "fixed",
               top: Math.max(0, targetRect.top - spotlightPadding),
               left: Math.max(0, targetRect.left - spotlightPadding),
-              width: targetRect.width + spotlightPadding * 2,
-              height: targetRect.height + spotlightPadding * 2,
-              boxShadow: "0 0 0 9999px rgba(15, 23, 42, 0.65)",
+              width: Math.min(windowSize.width, targetRect.width + spotlightPadding * 2),
+              height: Math.min(windowSize.height, targetRect.height + spotlightPadding * 2),
+              boxShadow: "0 0 0 9999px rgba(15, 23, 42, 0.72)",
             }}
-            className="rounded-xl ring-2 ring-primary/80 ring-offset-2 ring-offset-background pointer-events-none transition-all duration-300 ease-out z-[100]"
-          />
+            className="rounded-xl ring-2 ring-primary ring-offset-2 ring-offset-background pointer-events-none transition-all duration-300 ease-out z-[100]"
+          >
+            {/* Subtle animated indicator beacon on the spotlight ring */}
+            <span className="absolute -top-1.5 -right-1.5 flex size-3">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
+              <span className="relative inline-flex rounded-full size-3 bg-primary" />
+            </span>
+          </div>
+
           {/* Clickable backdrop overlay to capture outside clicks */}
           <div
             onClick={handleDismiss}
@@ -430,37 +578,38 @@ export function GuidedTourModal() {
       ) : (
         <div
           onClick={handleDismiss}
-          className="fixed inset-0 z-[99] bg-slate-950/60 backdrop-blur-[2px] transition-opacity duration-300"
+          className="fixed inset-0 z-[99] bg-slate-950/70 backdrop-blur-[2px] transition-opacity duration-300 cursor-pointer"
+          aria-label="Click to dismiss tour"
         />
       )}
 
-      {/* Anchored Tooltip Card */}
+      {/* Anchored Tooltip Card: Flex column with strictly pinned header & footer */}
       <div
         ref={tooltipRef}
         style={tooltipStyle}
-        className="pointer-events-auto rounded-2xl border border-border/80 bg-card text-card-foreground shadow-2xl overflow-hidden transition-all duration-300 ease-out animate-in fade-in zoom-in-95"
+        className="pointer-events-auto rounded-xl sm:rounded-2xl border border-border/80 bg-card text-card-foreground shadow-2xl overflow-hidden transition-all duration-300 ease-out animate-in fade-in zoom-in-95 flex flex-col"
       >
-        {/* Header Strip */}
-        <div className="bg-muted/40 px-5 py-4 border-b border-border/60">
+        {/* Header Strip (Pinned at Top) */}
+        <div className="shrink-0 bg-muted/40 px-4 sm:px-5 py-3 sm:py-3.5 border-b border-border/60">
           <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <div className="flex size-9 items-center justify-center rounded-xl bg-primary/10 text-primary border border-primary/20 shadow-sm shrink-0">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="flex size-8 sm:size-9 items-center justify-center rounded-xl bg-primary/10 text-primary border border-primary/20 shadow-xs shrink-0">
                 {isNavigating ? (
                   <Loader2 className="size-4 animate-spin" />
                 ) : (
                   <StepIcon className="size-4" />
                 )}
               </div>
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="text-[11px] font-bold uppercase tracking-wider text-primary">
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-primary">
                     {tourConfig.roleName} Tour
                   </span>
-                  <Badge variant="outline" className="text-[10px] font-medium h-4 px-1.5 bg-background/80">
+                  <Badge variant="outline" className="text-[9px] font-medium h-4 px-1.5 bg-background/80">
                     {currentStep.badge}
                   </Badge>
                 </div>
-                <h2 id="tour-title" className="text-sm sm:text-base font-bold text-foreground truncate">
+                <h2 id="tour-title" className="text-xs sm:text-sm md:text-base font-bold text-foreground truncate">
                   {currentStep.title}
                 </h2>
               </div>
@@ -468,7 +617,7 @@ export function GuidedTourModal() {
 
             <button
               onClick={handleDismiss}
-              className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground shrink-0"
               aria-label="Close tour"
             >
               <X className="size-4" />
@@ -476,18 +625,18 @@ export function GuidedTourModal() {
           </div>
 
           {/* Progress Line */}
-          <div className="mt-3 flex items-center gap-2.5">
+          <div className="mt-2.5 flex items-center gap-2">
             <Progress value={progressPercent} className="h-1 flex-1 bg-muted" />
-            <span className="text-[11px] font-semibold text-muted-foreground whitespace-nowrap">
-              {currentStepIndex + 1}/{totalSteps}
+            <span className="text-[10px] sm:text-[11px] font-semibold text-muted-foreground tabular-nums whitespace-nowrap">
+              {currentStepIndex + 1} / {totalSteps}
             </span>
           </div>
         </div>
 
-        {/* Body Content */}
-        <div className="p-5 space-y-3.5 max-h-[50vh] sm:max-h-[380px] overflow-y-auto">
+        {/* Body Content (Flex-1 with Internal Scroll if height is restricted) */}
+        <div className="flex-1 min-h-0 overflow-y-auto px-4 sm:px-5 py-3 sm:py-3.5 space-y-3">
           <div>
-            <p className="text-xs font-semibold text-primary/90">{currentStep.subtitle}</p>
+            <p className="text-xs font-semibold text-primary">{currentStep.subtitle}</p>
             <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
               {currentStep.description}
             </p>
@@ -495,11 +644,11 @@ export function GuidedTourModal() {
 
           {/* Key Takeaways Card */}
           {currentStep.highlights && currentStep.highlights.length > 0 && (
-            <div className="rounded-xl border border-border/70 bg-muted/25 p-3 space-y-1.5">
+            <div className="rounded-lg sm:rounded-xl border border-border/70 bg-muted/25 p-2.5 sm:p-3 space-y-1.5">
               <span className="text-[10px] font-bold text-foreground uppercase tracking-wider block">
                 Key Highlights
               </span>
-              <ul className="space-y-1.5">
+              <ul className="space-y-1">
                 {currentStep.highlights.map((highlight, idx) => (
                   <li key={idx} className="flex items-start gap-2 text-xs text-foreground/90 leading-snug">
                     <div className="mt-0.5 flex size-3.5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
@@ -514,7 +663,7 @@ export function GuidedTourModal() {
 
           {/* Contextual Tip */}
           {currentStep.tip && (
-            <div className="flex items-start gap-2 rounded-xl border border-border/60 bg-muted/30 p-2.5 text-xs text-muted-foreground">
+            <div className="flex items-start gap-2 rounded-lg sm:rounded-xl border border-border/60 bg-muted/30 p-2 sm:p-2.5 text-xs text-muted-foreground">
               <HelpCircle className="size-3.5 shrink-0 text-primary mt-0.5" />
               <span className="leading-relaxed">
                 <strong className="font-semibold text-foreground">Tip:</strong> {currentStep.tip}
@@ -523,9 +672,9 @@ export function GuidedTourModal() {
           )}
         </div>
 
-        {/* Footer Navigation Bar */}
-        <div className="flex items-center justify-between gap-3 border-t border-border/60 bg-muted/30 px-5 py-3">
-          <div className="flex items-center gap-2">
+        {/* Footer Navigation Bar (Strictly Pinned at Bottom - NEVER pushed off-screen) */}
+        <div className="shrink-0 flex items-center justify-between gap-2 border-t border-border/60 bg-muted/30 px-4 sm:px-5 py-2.5 sm:py-3">
+          <div className="flex items-center gap-1.5">
             <Button
               variant="ghost"
               size="sm"
@@ -535,18 +684,18 @@ export function GuidedTourModal() {
               Resume Later
             </Button>
 
-            {/* Step Dots */}
+            {/* Step Dots (hidden on very small phones, interactive on tablets/desktop) */}
             <div className="hidden sm:flex items-center gap-1 pl-1">
               {tourConfig.steps.map((step, idx) => (
                 <button
                   key={step.id}
                   onClick={() => goToStep(idx)}
                   className={cn(
-                    "h-1.5 rounded-full transition-all duration-300",
+                    "h-1.5 rounded-full transition-all duration-200",
                     idx === currentStepIndex
-                      ? "w-5 bg-primary"
+                      ? "w-4 bg-primary"
                       : idx < currentStepIndex
-                      ? "w-1.5 bg-primary/40"
+                      ? "w-1.5 bg-primary/40 hover:bg-primary/60"
                       : "w-1.5 bg-muted-foreground/30 hover:bg-muted-foreground/50"
                   )}
                   aria-label={`Jump to step ${idx + 1}`}
@@ -555,7 +704,7 @@ export function GuidedTourModal() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
             <Button
               variant="outline"
               size="sm"
@@ -564,14 +713,14 @@ export function GuidedTourModal() {
               className="text-xs h-8 px-2.5 gap-1"
             >
               <ArrowLeft className="size-3" />
-              <span>Back</span>
+              <span className="hidden xs:inline">Back</span>
             </Button>
 
             <Button
               size="sm"
               onClick={handleNext}
               disabled={isSaving || isNavigating}
-              className="text-xs font-semibold h-8 px-3.5 gap-1.5 bg-primary hover:bg-primary/90 text-primary-foreground shadow-sm"
+              className="text-xs font-semibold h-8 px-3.5 gap-1.5 bg-primary hover:bg-primary/95 text-primary-foreground shadow-xs"
             >
               {isNavigating ? (
                 <>
@@ -580,12 +729,12 @@ export function GuidedTourModal() {
                 </>
               ) : currentStepIndex === totalSteps - 1 ? (
                 <>
-                  <span>Finish Tour</span>
+                  <span>Finish</span>
                   <Check className="size-3" />
                 </>
               ) : (
                 <>
-                  <span>Next Step</span>
+                  <span>Next</span>
                   <ArrowRight className="size-3" />
                 </>
               )}

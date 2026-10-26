@@ -48,8 +48,16 @@ export function MessageScrollerProvider({
         top: viewportRef.current.scrollHeight,
         behavior,
       });
-      setIsAtBottom(true);
-      setShowScrollButton(false);
+      setTimeout(() => {
+        if (viewportRef.current) {
+          const el = viewportRef.current;
+          const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
+          if (dist <= 50) {
+            setIsAtBottom(true);
+            setShowScrollButton(false);
+          }
+        }
+      }, 350);
     }
   }, []);
 
@@ -121,21 +129,40 @@ export function MessageScroller({ children, className }: { children: React.React
 export function MessageScrollerViewport({ children, className }: { children: React.ReactNode; className?: string }) {
   const { viewportRef, setIsAtBottom, setShowScrollButton } = useMessageScroller();
 
+  const handleScroll = useCallback(() => {
+    const el = viewportRef.current;
+    if (!el) return;
+
+    const threshold = 40;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const atBottom = distanceFromBottom <= threshold;
+
+    setIsAtBottom(atBottom);
+
+    if (atBottom) {
+      setShowScrollButton(false);
+    } else {
+      const scrolledUp = distanceFromBottom > 80;
+      if (scrolledUp && el.scrollHeight > el.clientHeight) {
+        setShowScrollButton(true);
+      }
+    }
+  }, [viewportRef, setIsAtBottom, setShowScrollButton]);
+
   useEffect(() => {
     const el = viewportRef.current;
     if (!el) return;
 
+    handleScroll();
+
     const disengage = () => {
-      const offset = 25;
-      const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= offset;
-      if (!atBottom) {
-        setIsAtBottom(false);
-        setShowScrollButton(el.scrollHeight > el.clientHeight);
-      }
+      handleScroll();
     };
 
     const onSelectionChange = () => {
-      if (document.getSelection()?.toString()) disengage();
+      if (document.getSelection()?.toString()) {
+        setIsAtBottom(false);
+      }
     };
 
     el.addEventListener("mousedown", disengage, { passive: true });
@@ -143,18 +170,25 @@ export function MessageScrollerViewport({ children, className }: { children: Rea
     el.addEventListener("selectstart", disengage, { passive: true });
     document.addEventListener("selectionchange", onSelectionChange, { passive: true });
 
+    const resizeObserver = new ResizeObserver(() => {
+      handleScroll();
+    });
+    resizeObserver.observe(el);
+
     return () => {
       el.removeEventListener("mousedown", disengage);
       el.removeEventListener("keydown", disengage);
       el.removeEventListener("selectstart", disengage);
       document.removeEventListener("selectionchange", onSelectionChange);
+      resizeObserver.disconnect();
     };
-  }, [viewportRef, setIsAtBottom, setShowScrollButton]);
+  }, [viewportRef, handleScroll, setIsAtBottom]);
 
   return (
     <div
       ref={viewportRef}
-      className={cn("h-full overflow-y-auto scroll-fade scrollbar-none", className)}
+      onScroll={handleScroll}
+      className={cn("h-full overflow-y-auto scroll-fade narrow-scrollbar-dark", className)}
     >
       {children}
     </div>
@@ -258,20 +292,28 @@ export function MessageScrollerItem({
 export function MessageScrollerButton({ className }: { className?: string }) {
   const { showScrollButton, scrollToBottom } = useMessageScroller();
 
-  if (!showScrollButton) return null;
-
   return (
-    <Button
+    <button
       onClick={() => scrollToBottom("smooth")}
-      size="sm"
       className={cn(
-        "absolute bottom-4 right-4 rounded-full size-8 p-0 shadow-lg hover:shadow-xl transition-all animate-in fade-in slide-in-from-bottom-2 duration-200 z-30",
-        className
+        "absolute z-30 transition-all duration-300 ease-out",
+        "flex items-center justify-center",
+        "size-8 sm:size-9 rounded-full",
+        "bg-card/95 dark:bg-card/95 backdrop-blur-md",
+        "border border-border/80 shadow-md hover:shadow-lg",
+        "text-muted-foreground hover:text-foreground",
+        "hover:scale-110 active:scale-95 focus:outline-none focus:ring-2 focus:ring-primary/40",
+        "cursor-pointer group",
+        showScrollButton
+          ? "opacity-100 translate-y-0 pointer-events-auto"
+          : "opacity-0 translate-y-3 pointer-events-none",
+        className || "bottom-24 sm:bottom-28 right-4 sm:right-6 md:right-8"
       )}
       aria-label="Scroll to bottom"
       type="button"
+      title="Scroll to latest messages"
     >
-      <ArrowDownIcon className="size-4" />
-    </Button>
+      <ArrowDownIcon className="size-4 transition-transform duration-200 group-hover:translate-y-0.5" />
+    </button>
   );
 }

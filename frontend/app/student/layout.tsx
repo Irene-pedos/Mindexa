@@ -96,8 +96,8 @@ export default function StudentLayout({
       <SidebarInset>
         {!isImmersive && <SiteHeader />}
         <main className={cn(
-          "flex-1 bg-muted/30 min-h-[calc(100vh-3.5rem)]",
-          !isImmersive && "p-6",
+          "flex-1 bg-muted/30 min-h-[calc(100vh-3.5rem)] min-w-0 transition-[padding] duration-200 ease-linear",
+          !isImmersive && "p-3.5 sm:p-5 md:p-6",
           isImmersive && "p-0 bg-background min-h-screen"
         )}>
           {children}

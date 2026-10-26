@@ -28,6 +28,7 @@ from app.db.models.assessment import Assessment
 from app.db.models.attempt import AssessmentAttempt, StudentResponse, SubmissionGrade
 from app.db.models.auth import User, UserProfile
 from app.db.models.result import AssessmentResult
+from app.db.repositories.grading_repo import GradingRepository
 from app.db.repositories.result_repo import ResultRepository
 from app.db.session import get_db
 from app.dependencies.auth import require_lecturer_or_admin, require_student
@@ -639,6 +640,7 @@ async def get_release_readiness_queue(
     submitted_count = 0
     fully_graded_submitted_count = 0
     items = []
+    grading_repo = GradingRepository(db)
 
     for s in students:
         student_id = s[0]
@@ -689,12 +691,27 @@ async def get_release_readiness_queue(
             if is_individually_fully_graded:
                 fully_graded_submitted_count += 1
 
+        # Same rule the release gate applies: AI grades accepted with no recorded
+        # human review must be reviewed before release. Reporting it here means the
+        # lecturer sees *why* and *which question* instead of a refused release.
+        unreviewed_question_ids: list[uuid.UUID] = []
+        if (
+            attempt_id
+            and is_individually_fully_graded
+            and not is_released
+            and not (result is not None and result.is_group_result)
+        ):
+            unreviewed_question_ids = await grading_repo.list_unreviewed_ai_acceptances(
+                attempt_id, assessment_id
+            )
+
         # Per-student release eligibility. No dependency on the rest of the class.
         can_release = (
             has_submission
             and is_individually_fully_graded
             and not is_released
             and not integrity_hold
+            and not unreviewed_question_ids
         )
 
         status = "NOT_SUBMITTED"
@@ -705,6 +722,8 @@ async def get_release_readiness_queue(
                 status = "INTEGRITY_HOLD"
             elif not is_individually_fully_graded:
                 status = "GRADING_IN_PROGRESS"
+            elif unreviewed_question_ids:
+                status = "NEEDS_REVIEW"
             else:
                 status = "PENDING_RELEASE"
 
@@ -722,6 +741,7 @@ async def get_release_readiness_queue(
             "max_score": max_score,
             "percentage": percentage,
             "letter_grade": letter_grade,
+            "unreviewed_question_ids": unreviewed_question_ids,
         })
 
     # Purely informational — "have all students who actually submitted been fully graded?"

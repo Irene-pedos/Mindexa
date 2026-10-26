@@ -207,3 +207,38 @@ async def test_rag_service_retrieve_context_below_threshold_triggers_fallback():
     assert res.context_string == ""
     assert len(res.citations) == 0
 
+
+
+@pytest.mark.asyncio
+async def test_narrow_to_selection_never_widens_beyond_allowed_set():
+    service = RAGService(AsyncMock())
+    allowed_id = uuid.uuid4()
+    foreign_id = uuid.uuid4()
+    selected = uuid.uuid4()
+
+    async def resolve(_student_id, rid):
+        return [foreign_id] if rid == selected else [allowed_id]
+
+    service._resolve_selected_id = AsyncMock(side_effect=resolve)
+
+    narrowed = await service._narrow_to_selection(
+        uuid.uuid4(), [allowed_id], selected, None
+    )
+
+    assert narrowed == []
+
+
+@pytest.mark.asyncio
+async def test_narrow_to_selection_keeps_allowed_and_passes_through_without_selection():
+    service = RAGService(AsyncMock())
+    allowed_id = uuid.uuid4()
+    other_allowed = uuid.uuid4()
+    selected = uuid.uuid4()
+    service._resolve_selected_id = AsyncMock(return_value=[allowed_id])
+
+    assert await service._narrow_to_selection(
+        uuid.uuid4(), [allowed_id, other_allowed], selected, None
+    ) == [allowed_id]
+    assert await service._narrow_to_selection(
+        uuid.uuid4(), [allowed_id, other_allowed], None, None
+    ) == [allowed_id, other_allowed]

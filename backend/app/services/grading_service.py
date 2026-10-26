@@ -38,6 +38,7 @@ from app.core.exceptions import (
     AuthorizationError,
     ConflictError,
     NotFoundError,
+    ServiceUnavailableError,
     ValidationError,
 )
 from app.core.logger import get_logger
@@ -67,6 +68,7 @@ from app.db.repositories.grading_repo import GradingRepository
 from app.db.repositories.question_repo import QuestionRepository
 from app.db.repositories.result_repo import ResultRepository
 from app.db.repositories.submission_repo import SubmissionRepository
+from app.services.answer_format import readable_answer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -76,6 +78,15 @@ logger = get_logger("mindexa.grading_service")
 # Centrally managed question taxonomy from QuestionType
 AUTO_GRADABLE = {qt for qt in QuestionType if qt.is_auto_gradable}
 OPEN_ENDED = {qt for qt in QuestionType if qt.is_open_ended}
+
+
+def _ai_review_unavailable() -> ServiceUnavailableError:
+    """What a lecturer sees when the AI reviewer is rate-limited or down (no provider internals)."""
+    return ServiceUnavailableError(
+        "The AI reviewer is busy or unavailable right now. Your grade is not affected — "
+        "try again in a minute.",
+        code="AI_REVIEW_UNAVAILABLE",
+    )
 
 
 class GradingService:
@@ -1210,9 +1221,17 @@ class GradingService:
             )
 
         # 2. Record/Update audit trail in AIGradeReview (Fix H-04)
-        rev_stmt = select(AIGradeReview).where(
-            AIGradeReview.response_id == existing.response_id,
-            AIGradeReview.grading_decision == AIGradeDecision.PENDING,
+        # Reuse the pending row, else the latest row for this grade, so repeated
+        # saves (autosave, edits) update one audit record instead of stacking new
+        # ones. Only a save that actually measured a review may set the duration;
+        # an autosave must never erase it.
+        rev_stmt = (
+            select(AIGradeReview)
+            .where(AIGradeReview.response_id == existing.response_id)
+            .order_by(
+                (AIGradeReview.grading_decision == AIGradeDecision.PENDING).desc(),
+                AIGradeReview.created_at.desc(),
+            )
         )
         existing_rev = (await self.db.execute(rev_stmt)).scalars().first()
 
@@ -1225,7 +1244,8 @@ class GradingService:
             existing_rev.delegation_id = delegation.id if delegation else None
             existing_rev.review_started_at = review_started_at or existing_rev.review_started_at
             existing_rev.review_completed_at = now_utc
-            existing_rev.review_duration_seconds = review_duration_seconds
+            if review_duration_seconds is not None:
+                existing_rev.review_duration_seconds = review_duration_seconds
             existing_rev.lecturer_notes = internal_notes
             self.db.add(existing_rev)
             await self.db.flush()
@@ -1468,7 +1488,10 @@ class GradingService:
         all_responses = await self.submission_repo.list_responses_for_attempt(attempt_id)
         all_grades = await self.grading_repo.list_grades_for_attempt(attempt_id)
 
-        assessment_sections = getattr(assessment, "sections", None) or await self.assessment_repo.list_sections(assessment_id)
+        # Never touch `assessment.sections` here: `get_by_id_simple` does not
+        # eager-load it, and a lazy load under asyncio raises MissingGreenlet,
+        # which aborted the whole task and rolled back every queued item.
+        assessment_sections = await self.assessment_repo.list_sections(assessment_id)
         aq_by_sec = {s.id: [] for s in assessment_sections}
         for aq in aq_rows:
             if aq.assessment_section_id in aq_by_sec:
@@ -1522,7 +1545,7 @@ class GradingService:
         status: str | None = None,
         priority: str | None = None,
         search_query: str | None = None,
-        sort_by: str | None = "date_asc",
+        sort_by: str | None = "submitted_desc",
         page: int = 1,
         page_size: int = 30,
     ) -> tuple[list[dict[str, Any]], int]:
@@ -1534,11 +1557,51 @@ class GradingService:
             2. Find all assessments belonging to those courses.
             3. Filter the queue by those assessment IDs.
         """
-        from app.db.models.academic import Course, TeachingAssignment, TeachingWorkspace
+        allowed_assessment_ids = await self._lecturer_assessment_ids(lecturer_id)
+
+        if not allowed_assessment_ids:
+            return [], 0
+
+        # 2. List queue with allowed assessment filter
+        if assessment_id and assessment_id not in allowed_assessment_ids:
+            return [], 0
+
+        # Default status: items that still need a lecturer. FAILED is included —
+        # an item whose AI grading failed still has to be graded manually or retried,
+        # otherwise the attempt can never be completed or released.
+        needs_action = [
+            GradingQueueStatus.PENDING,
+            GradingQueueStatus.ASSIGNED,
+            GradingQueueStatus.IN_PROGRESS,
+            GradingQueueStatus.AI_SUGGESTED,
+            GradingQueueStatus.FAILED,
+        ]
+        if status == "ALL":
+            # Graded work stays reachable so a lecturer can revisit and correct it.
+            statuses = [*needs_action, GradingQueueStatus.COMPLETED]
+        else:
+            statuses = [status] if status else needs_action
+
+        items, total = await self.grading_repo.list_queue(
+            assessment_ids=allowed_assessment_ids if not assessment_id else [assessment_id],
+            class_section_id=class_section_id,
+            question_type=question_type,
+            statuses=statuses,
+            priority=priority,
+            search_query=search_query,
+            sort_by=sort_by,
+            page=page,
+            page_size=page_size,
+        )
+
+        return items, total
+
+    async def _lecturer_assessment_ids(self, lecturer_id: uuid.UUID) -> list[uuid.UUID]:
+        """Assessments a lecturer may grade: created, workspace owner, assigned course or supervisor."""
+        from app.db.models.academic import TeachingAssignment, TeachingWorkspace
         from app.db.models.assessment import Assessment, AssessmentSupervisor
         from sqlalchemy import and_, or_, select
 
-        # 1. Find lecturer's assessment IDs (created, workspace owner, assigned course, or supervisor)
         workspace_subq = (
             select(TeachingWorkspace.id)
             .outerjoin(TeachingAssignment, TeachingWorkspace.teaching_assignment_id == TeachingAssignment.id)
@@ -1574,39 +1637,471 @@ class GradingService:
             ),
         )
         res = await self.db.execute(stmt)
-        allowed_assessment_ids = list(res.scalars().all())
+        return list(res.scalars().all())
 
-        if not allowed_assessment_ids:
-            return [], 0
+    # -----------------------------------------------------------------------
+    # GRADING OVERVIEW (workspace / assessment ordering by latest submission)
+    # -----------------------------------------------------------------------
 
-        # 2. List queue with allowed assessment filter
-        if assessment_id and assessment_id not in allowed_assessment_ids:
-            return [], 0
+    async def get_grading_overview(self, lecturer_id: uuid.UUID) -> dict[str, Any]:
+        """
+        Per-assessment and per-workspace submission activity for the lecturer,
+        so the grading page can put the work that most recently received
+        submissions first.
+        """
+        from app.db.enums import GradingQueueStatus
+        from app.db.models.assessment import Assessment
+        from app.db.models.attempt import (AssessmentAttempt, GradingQueueItem,
+                                           GroupSubmission)
+        from sqlalchemy import func, select
 
-        # Default status: items that still need a lecturer. FAILED is included —
-        # an item whose AI grading failed still has to be graded manually or retried,
-        # otherwise the attempt can never be completed or released.
-        statuses = [status] if status else [
-            GradingQueueStatus.PENDING,
-            GradingQueueStatus.ASSIGNED,
-            GradingQueueStatus.IN_PROGRESS,
-            GradingQueueStatus.AI_SUGGESTED,
-            GradingQueueStatus.FAILED,
+        assessment_ids = await self._lecturer_assessment_ids(lecturer_id)
+        if not assessment_ids:
+            return {"assessments": [], "workspaces": []}
+
+        meta_rows = (
+            await self.db.execute(
+                select(Assessment.id, Assessment.teaching_workspace_id).where(
+                    Assessment.id.in_(assessment_ids)
+                )
+            )
+        ).all()
+        workspace_of = {r[0]: r[1] for r in meta_rows}
+
+        attempt_rows = (
+            await self.db.execute(
+                select(
+                    AssessmentAttempt.assessment_id,
+                    func.max(AssessmentAttempt.submitted_at),
+                    func.count(AssessmentAttempt.id),
+                )
+                .where(
+                    AssessmentAttempt.assessment_id.in_(assessment_ids),
+                    AssessmentAttempt.submitted_at.is_not(None),
+                )
+                .group_by(AssessmentAttempt.assessment_id)
+            )
+        ).all()
+
+        group_rows = (
+            await self.db.execute(
+                select(
+                    GroupSubmission.assessment_id,
+                    func.max(GroupSubmission.submitted_at),
+                    func.count(GroupSubmission.id),
+                )
+                .where(
+                    GroupSubmission.assessment_id.in_(assessment_ids),
+                    GroupSubmission.submitted_at.is_not(None),
+                    GroupSubmission.is_deleted == False,  # noqa: E712
+                )
+                .group_by(GroupSubmission.assessment_id)
+            )
+        ).all()
+
+        pending_rows = (
+            await self.db.execute(
+                select(
+                    GradingQueueItem.assessment_id,
+                    func.count(func.distinct(GradingQueueItem.attempt_id)),
+                )
+                .where(
+                    GradingQueueItem.assessment_id.in_(assessment_ids),
+                    GradingQueueItem.is_deleted == False,  # noqa: E712
+                    GradingQueueItem.status.in_(
+                        [
+                            GradingQueueStatus.PENDING,
+                            GradingQueueStatus.ASSIGNED,
+                            GradingQueueStatus.IN_PROGRESS,
+                            GradingQueueStatus.AI_SUGGESTED,
+                            GradingQueueStatus.FAILED,
+                        ]
+                    ),
+                )
+                .group_by(GradingQueueItem.assessment_id)
+            )
+        ).all()
+
+        stats: dict[uuid.UUID, dict[str, Any]] = {
+            aid: {"latest": None, "submitted": 0, "pending": 0} for aid in assessment_ids
+        }
+        for aid, latest, count in [*attempt_rows, *group_rows]:
+            entry = stats[aid]
+            entry["submitted"] += count or 0
+            if latest and (entry["latest"] is None or latest > entry["latest"]):
+                entry["latest"] = latest
+        for aid, count in pending_rows:
+            stats[aid]["pending"] = count or 0
+
+        assessments = [
+            {
+                "assessment_id": aid,
+                "workspace_id": workspace_of.get(aid),
+                "latest_submission_at": s["latest"],
+                "submitted_count": s["submitted"],
+                "pending_count": s["pending"],
+            }
+            for aid, s in stats.items()
         ]
 
-        items, total = await self.grading_repo.list_queue(
-            assessment_ids=allowed_assessment_ids if not assessment_id else [assessment_id],
-            class_section_id=class_section_id,
-            question_type=question_type,
-            statuses=statuses,
-            priority=priority,
-            search_query=search_query,
-            sort_by=sort_by,
-            page=page,
-            page_size=page_size,
+        workspaces: dict[uuid.UUID, dict[str, Any]] = {}
+        for a in assessments:
+            ws_id = a["workspace_id"]
+            if ws_id is None:
+                continue
+            ws = workspaces.setdefault(
+                ws_id,
+                {"workspace_id": ws_id, "latest_submission_at": None,
+                 "submitted_count": 0, "pending_count": 0},
+            )
+            ws["submitted_count"] += a["submitted_count"]
+            ws["pending_count"] += a["pending_count"]
+            latest = a["latest_submission_at"]
+            if latest and (ws["latest_submission_at"] is None or latest > ws["latest_submission_at"]):
+                ws["latest_submission_at"] = latest
+
+        return {"assessments": assessments, "workspaces": list(workspaces.values())}
+
+    # -----------------------------------------------------------------------
+    # LLM GRADE CHECK (independent second-marker review, advisory only)
+    # -----------------------------------------------------------------------
+
+    async def review_lecturer_grade(
+        self,
+        *,
+        response_id: uuid.UUID,
+        lecturer_id: uuid.UUID,
+        score: float,
+        feedback: str | None,
+        rubric_scores: list[dict[str, Any]] | None,
+    ) -> dict[str, Any]:
+        """
+        Ask the model to second-mark a response and compare with the lecturer's
+        in-progress grade. Does not read or write any stored grade, so it is
+        safe to call on unsaved edits.
+        """
+        from app.agents.grade_check_agent import GradeCheckAgent
+        from app.core.ai.gateway import AIGateway
+        from app.core.ai.language_policy import assert_ai_allowed
+        from app.core.ai.provider_factory import get_ai_provider
+        from app.db.repositories.attempt_repo import AttemptRepository
+
+        response = await self.submission_repo.get_response_by_id(response_id)
+        if not response:
+            raise NotFoundError(f"StudentResponse {response_id} not found.")
+        attempt = await AttemptRepository(self.db).get_by_id_simple(response.attempt_id)
+        # `get_by_id` loads the options (case-study sub-questions) the answer refers to.
+        question = await self.question_repo.get_by_id(response.question_id)
+        if not attempt or not question:
+            raise NotFoundError("Attempt or question not found for this response.")
+
+        if QuestionType(question.question_type) not in OPEN_ENDED:
+            raise ValidationError(
+                "Grade checks apply to open-ended questions only.",
+                code="GRADE_CHECK_NOT_APPLICABLE",
+            )
+
+        assessment = await self.assessment_repo.get_by_id_simple(attempt.assessment_id)
+        assert_ai_allowed(
+            getattr(assessment, "language", None),
+            action="grade_check",
+            context={"response_id": str(response_id)},
         )
 
-        return items, total
+        grade = await self.grading_repo.get_grade_by_response(response_id)
+        max_score = float(grade.max_score) if grade and grade.max_score else float(question.marks)
+        if score > max_score:
+            raise ValidationError(
+                f"Score {score:g} is above the maximum of {max_score:g}.",
+                code="SCORE_ABOVE_MAX",
+            )
+
+        rubric = await self.assessment_repo.get_rubric_for_question(question.id)
+        rubric_content = (
+            "\n".join(
+                f"- {c.title}: {c.description or ''} ({c.max_marks} marks)"
+                for c in rubric.criteria
+            )
+            if rubric
+            else ""
+        )
+        lecturer_rubric = "\n".join(
+            f"- {r.get('criterion_title') or r.get('criterion') or r.get('criteria_id') or 'criterion'}: "
+            f"{r.get('score', r.get('marks_awarded', '?'))}"
+            for r in (rubric_scores or [])
+        )
+
+        answer_text = response.answer_text
+        if not answer_text and isinstance(response.submitted_content, dict):
+            answer_text = response.submitted_content.get("text")
+
+        agent = GradeCheckAgent(AIGateway(self.db, get_ai_provider()))
+        try:
+            result, _ = await agent.check_grade(
+                lecturer_id=lecturer_id,
+                response_id=response_id,
+                question_text=question.content,
+                question_type=str(getattr(question.question_type, "value", question.question_type)),
+                max_score=max_score,
+                rubric_content=rubric_content,
+                student_answer=readable_answer(answer_text, question.options),
+                lecturer_score=score,
+                lecturer_feedback=feedback or "",
+                lecturer_rubric=lecturer_rubric,
+            )
+        except ServiceUnavailableError as exc:
+            raise _ai_review_unavailable() from exc
+        return result.model_dump()
+
+    # -----------------------------------------------------------------------
+    # LLM ATTEMPT REVIEW (second-mark every saved open-ended grade of one attempt)
+    # -----------------------------------------------------------------------
+
+    # Bounds the model cost of a single review request.
+    ATTEMPT_REVIEW_MAX_QUESTIONS = 12
+
+    async def review_attempt_grades(
+        self, *, attempt_id: uuid.UUID, lecturer_id: uuid.UUID
+    ) -> dict[str, Any]:
+        """
+        Review the SAVED grades (draft or final) of an attempt's open-ended
+        answers. Questions the lecturer has not graded yet are reported, not
+        sent to the model. Advisory only: no grade is read for writing.
+        """
+        from app.agents.grade_check_agent import (AttemptCheckItem,
+                                                  GradeCheckAgent)
+        from app.core.ai.gateway import AIGateway
+        from app.core.ai.language_policy import assert_ai_allowed
+        from app.core.ai.provider_factory import get_ai_provider
+        from app.db.repositories.attempt_repo import AttemptRepository
+
+        attempt = await AttemptRepository(self.db).get_by_id_simple(attempt_id)
+        if not attempt:
+            raise NotFoundError(f"Attempt {attempt_id} not found.")
+        assessment = await self.assessment_repo.get_by_id_simple(attempt.assessment_id)
+        assert_ai_allowed(
+            getattr(assessment, "language", None),
+            action="grade_check",
+            context={"attempt_id": str(attempt_id)},
+        )
+
+        aq_rows = await self.assessment_repo.list_assessment_questions(attempt.assessment_id)
+        responses = {r.question_id: r for r in await self.submission_repo.list_responses_for_attempt(attempt_id)}
+        grades = {
+            g.response_id: g
+            for g in await self.grading_repo.list_grades_for_attempt(attempt_id)
+            if g.response_id is not None
+        }
+
+        rows: list[dict[str, Any]] = []
+        items: list[AttemptCheckItem] = []
+        ref_to_row: dict[str, dict[str, Any]] = {}
+
+        for number, aq in enumerate(aq_rows, start=1):
+            question = aq.question
+            if not question or QuestionType(question.question_type) not in OPEN_ENDED:
+                continue
+            response = responses.get(question.id)
+            grade = grades.get(response.id) if response else None
+            max_score = float(
+                aq.marks_override if aq.marks_override is not None else question.marks
+            )
+            row: dict[str, Any] = {
+                "question_id": question.id,
+                "response_id": response.id if response else None,
+                "number": number,
+                "question_text": (question.content or "")[:160],
+                "score": float(grade.score) if grade and grade.score is not None else None,
+                "max_score": max_score,
+                "is_final": bool(grade and grade.is_final),
+                "check": None,
+            }
+            if response is None or response.is_skipped:
+                row["status"] = "SKIPPED"
+            elif grade is None or grade.score is None:
+                row["status"] = "NOT_GRADED"
+            elif len(items) >= self.ATTEMPT_REVIEW_MAX_QUESTIONS:
+                row["status"] = "NOT_CHECKED"
+            else:
+                row["status"] = "NOT_CHECKED"  # becomes CHECKED if the model answers
+                ref = f"q{number}"
+                rubric = await self.assessment_repo.get_rubric_for_question(question.id)
+                answer = response.answer_text
+                if not answer and isinstance(response.submitted_content, dict):
+                    answer = response.submitted_content.get("text")
+                items.append(
+                    AttemptCheckItem(
+                        ref=ref,
+                        question_text=question.content or "",
+                        question_type=str(getattr(question.question_type, "value", question.question_type)),
+                        max_score=max_score,
+                        rubric_content="\n".join(
+                            f"- {c.title}: {c.description or ''} ({c.max_marks} marks)"
+                            for c in rubric.criteria
+                        ) if rubric else "",
+                        student_answer=readable_answer(answer, response.question.options)
+                        if response.question
+                        else (answer or ""),
+                        lecturer_score=float(grade.score),
+                        lecturer_feedback=grade.feedback or "",
+                        lecturer_rubric="\n".join(
+                            f"- {r.get('criterion_title') or r.get('criterion') or r.get('criteria_id') or 'criterion'}: "
+                            f"{r.get('score', r.get('marks_awarded', '?'))}"
+                            for r in (grade.rubric_scores or [])
+                            if isinstance(r, dict)
+                        ),
+                    )
+                )
+                ref_to_row[ref] = row
+            rows.append(row)
+
+        notes: list[str] = []
+        if items:
+            agent = GradeCheckAgent(AIGateway(self.db, get_ai_provider()))
+            try:
+                results, notes = await agent.check_attempt(
+                    lecturer_id=lecturer_id, attempt_id=attempt_id, items=items
+                )
+            except ServiceUnavailableError as exc:
+                raise _ai_review_unavailable() from exc
+            for ref, result in results.items():
+                row = ref_to_row[ref]
+                row["status"] = "CHECKED"
+                row["check"] = result.model_dump()
+
+        checked = [r["check"]["verdict"] for r in rows if r["check"]]
+        unreviewed = await self.grading_repo.list_unreviewed_ai_acceptances(
+            attempt_id, attempt.assessment_id
+        )
+        return {
+            "questions": rows,
+            "agree_count": checked.count("AGREE"),
+            "review_count": checked.count("REVIEW"),
+            "disagree_count": checked.count("DISAGREE"),
+            "not_graded_count": sum(1 for r in rows if r["status"] == "NOT_GRADED"),
+            "unreviewed_ai_question_ids": unreviewed,
+            "overall_notes": notes,
+            "truncated": sum(
+                1 for r in rows if r["status"] == "NOT_CHECKED"
+            ) > 0,
+        }
+
+    # -----------------------------------------------------------------------
+    # CONSISTENCY CHECK (similar answers, grader drift)
+    # -----------------------------------------------------------------------
+
+    # Drift is only reported with enough evidence and a meaningful gap.
+    BIAS_MIN_SAMPLES = 5
+
+    async def get_consistency_check(
+        self, *, response_id: uuid.UUID, lecturer_id: uuid.UUID
+    ) -> dict[str, Any]:
+        """
+        Compare a response with already-graded answers to the same question:
+        which similar answers exist (and how they were scored), and whether the
+        lecturer's finalized scores run consistently above/below the AI's.
+        """
+        from app.db.repositories.attempt_repo import AttemptRepository
+        from app.services.answer_similarity import (PeerAnswer,
+                                                    find_similar_peers,
+                                                    mean_bias_ratio)
+
+        response = await self.submission_repo.get_response_by_id(response_id)
+        if not response:
+            raise NotFoundError(f"StudentResponse {response_id} not found.")
+        attempt = await AttemptRepository(self.db).get_by_id_simple(response.attempt_id)
+        if not attempt:
+            raise NotFoundError(f"Attempt {response.attempt_id} not found.")
+
+        rows = await self.grading_repo.list_graded_peer_answers(
+            assessment_id=attempt.assessment_id,
+            question_id=response.question_id,
+            exclude_response_id=response_id,
+        )
+
+        peers = [
+            PeerAnswer(r.attempt_id, r.answer_text, float(r.score), float(r.max_score))
+            for r in rows
+            if r.answer_text and r.max_score
+        ]
+        similar = find_similar_peers(response.answer_text or "", peers) if response.answer_text else []
+
+        own = [
+            (float(r.score), float(r.ai_suggested_score), float(r.max_score))
+            for r in rows
+            if r.graded_by_id == lecturer_id and r.ai_suggested_score is not None and r.max_score
+        ]
+        bias = (
+            {"samples": len(own), "mean_diff_ratio": mean_bias_ratio(own)}
+            if len(own) >= self.BIAS_MIN_SAMPLES
+            else None
+        )
+
+        return {
+            "similar_answers": [
+                {
+                    # Peers are identified by attempt only, so anonymous marking holds.
+                    "attempt_id": s.attempt_id,
+                    "label": f"Candidate-{str(s.attempt_id)[:6].upper()}",
+                    "similarity": round(s.similarity, 2),
+                    "score": s.score,
+                    "max_score": s.max_score,
+                }
+                for s in similar
+            ],
+            "bias": bias,
+        }
+
+    # -----------------------------------------------------------------------
+    # RESYNC SUBMISSIONS (repair attempts that never reached the grading queue)
+    # -----------------------------------------------------------------------
+
+    async def resync_assessment_submissions(
+        self, assessment_id: uuid.UUID
+    ) -> dict[str, int]:
+        """
+        Re-run the grading pass for submitted attempts of an assessment that
+        have open-ended answers but no queue item. Idempotent: queueing skips
+        responses that already have an active queue item.
+        """
+        from app.db.models.attempt import (AssessmentAttempt, GradingQueueItem,
+                                           StudentResponse)
+        from app.db.models.question import Question
+        from sqlalchemy import exists, select
+
+        has_open_response = exists().where(
+            StudentResponse.attempt_id == AssessmentAttempt.id,
+            Question.id == StudentResponse.question_id,
+            Question.question_type.in_(list(OPEN_ENDED)),
+            StudentResponse.is_skipped == False,  # noqa: E712
+        )
+        has_queue_item = exists().where(
+            GradingQueueItem.attempt_id == AssessmentAttempt.id,
+            GradingQueueItem.is_deleted == False,  # noqa: E712
+        )
+        rows = (
+            await self.db.execute(
+                select(
+                    AssessmentAttempt.id,
+                    AssessmentAttempt.student_id,
+                ).where(
+                    AssessmentAttempt.assessment_id == assessment_id,
+                    AssessmentAttempt.submitted_at.is_not(None),
+                    has_open_response,
+                    ~has_queue_item,
+                )
+            )
+        ).all()
+
+        repaired = 0
+        for attempt_id, student_id in rows:
+            await self.grade_attempt(
+                attempt_id=attempt_id,
+                assessment_id=assessment_id,
+                student_id=student_id,
+            )
+            repaired += 1
+        return {"checked": len(rows), "repaired": repaired}
 
     # -----------------------------------------------------------------------
     # CLASS-CENTRIC GRADING STATS
@@ -1816,6 +2311,15 @@ class GradingService:
                 "released_count": released_count,
                 "latest_submission_at": latest_at
             })
+
+        # Classes with the most recent submissions first; classes with none last.
+        classes_stats.sort(
+            key=lambda c: (
+                c["latest_submission_at"] is not None,
+                c["latest_submission_at"].timestamp() if c["latest_submission_at"] else 0.0,
+            ),
+            reverse=True,
+        )
 
         return {
             "assessment_id": assessment_id,

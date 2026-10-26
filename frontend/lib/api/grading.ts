@@ -21,7 +21,83 @@ export interface GradeSavePayload {
   review_duration_seconds?: number;
 }
 
+export interface GradingActivity {
+  latest_submission_at: string | null;
+  submitted_count: number;
+  pending_count: number;
+}
+
+export interface GradingOverview {
+  assessments: (GradingActivity & { assessment_id: string; workspace_id: string | null })[];
+  workspaces: (GradingActivity & { workspace_id: string })[];
+}
+
+export interface GradingConsistency {
+  similar_answers: {
+    attempt_id: string;
+    label: string;
+    similarity: number;
+    score: number;
+    max_score: number;
+  }[];
+  bias: { samples: number; mean_diff_ratio: number } | null;
+}
+
+export interface GradeCheck {
+  verdict: "AGREE" | "REVIEW" | "DISAGREE";
+  expected_min: number;
+  expected_max: number;
+  issues: { type: string; message: string; evidence_quote: string | null }[];
+  suggested_feedback: string | null;
+  confidence: number;
+}
+
+export interface AttemptReviewQuestion {
+  question_id: string;
+  response_id: string | null;
+  number: number;
+  question_text: string;
+  score: number | null;
+  max_score: number;
+  is_final: boolean;
+  status: "CHECKED" | "NOT_GRADED" | "SKIPPED" | "NOT_CHECKED";
+  check: GradeCheck | null;
+}
+
+export interface AttemptReview {
+  questions: AttemptReviewQuestion[];
+  agree_count: number;
+  review_count: number;
+  disagree_count: number;
+  not_graded_count: number;
+  unreviewed_ai_question_ids: string[];
+  overall_notes: string[];
+  truncated: boolean;
+}
+
 export const gradingApi = {
+  /** AI second-marker review of every saved open-ended grade in an attempt. */
+  reviewAttempt: (attemptId: string): Promise<AttemptReview> =>
+    apiClient(`/grading/attempt/${attemptId}/review-attempt`, { method: "POST" }),
+  /** AI second-marker review of the grade as typed. Advisory; saves nothing. */
+  reviewGrade: (
+    responseId: string,
+    body: { score: number; feedback?: string; rubric_scores?: unknown[] },
+  ): Promise<GradeCheck> =>
+    apiClient(`/grading/response/${responseId}/review-grade`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  /** Already-graded answers similar to this one, plus the lecturer's drift vs the AI. */
+  getConsistency: (responseId: string): Promise<GradingConsistency> =>
+    apiClient(`/grading/response/${responseId}/consistency`),
+  /** Latest-submission activity per workspace/assessment, used to order the pickers. */
+  getOverview: (): Promise<GradingOverview> => apiClient(`/grading/overview`),
+  /** Re-queues submitted attempts that never reached the grading queue. */
+  resyncAssessment: (
+    assessmentId: string,
+  ): Promise<{ checked: number; repaired: number }> =>
+    apiClient(`/grading/assessment/${assessmentId}/resync`, { method: "POST" }),
   getGradingQueue: (params: Record<string, string | number | boolean>) =>
     apiClient(`/grading/queue${buildQueryString(params)}`),
   getGroupGradingQueue: (params: Record<string, string | number | boolean>) =>

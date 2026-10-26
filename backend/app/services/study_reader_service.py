@@ -23,6 +23,7 @@ from app.core.ai.gateway import AIGateway
 from app.core.ai.provider_factory import (get_ai_provider,
                                           get_embedding_provider)
 from app.core.ai.providers import AICompletionRequest, AIMessage
+from app.services.ai_exam_gate import assert_student_ai_allowed
 from app.core.exceptions import (AuthorizationError, NotFoundError,
                                  ValidationError)
 from app.db.enums import AIActionType
@@ -516,6 +517,7 @@ class StudyReaderService:
     ) -> SkimResponse:
         title, _ = await self.assert_access(student_id, kind, source_id)
         await self._assert_language_allowed_for_source(kind, source_id, action="study_reader_skim")
+        await assert_student_ai_allowed(self.db, student_id)
 
         # Fetch existing chunks to generate skim without re-reading entire raw PDF
         chunks_text = []
@@ -563,6 +565,7 @@ class StudyReaderService:
         self, student_id: uuid.UUID, kind: str, source_id: uuid.UUID
     ) -> FocusResponse:
         title, meta = await self.assert_access(student_id, kind, source_id)
+        await assert_student_ai_allowed(self.db, student_id)
         cache_key = (student_id, kind, source_id)
         cached = self._focus_cache.get(cache_key)
         if cached and cached[0] > time.monotonic():
@@ -783,6 +786,26 @@ class StudyReaderService:
 
     # ── Page-Check Quiz ──────────────────────────────────────────────────────
 
+    async def get_authorized_page_text(
+        self, student_id: uuid.UUID, source_id: uuid.UUID, page_number: int
+    ) -> str:
+        """
+        Page text for a source the student may read, whatever its kind.
+
+        Access is verified with ``assert_access`` before anything is read or served from
+        cache; a source the student cannot open yields an empty string, never its content.
+        """
+        for kind in ("lecturer_material", "student_resource"):
+            try:
+                await self.assert_access(student_id, kind, source_id)
+            except (NotFoundError, AuthorizationError):
+                continue
+            return await self.extract_exact_page_text(kind, source_id, page_number)
+        self.logger.warning(
+            "Page text requested for inaccessible source student=%s source=%s", student_id, source_id
+        )
+        return ""
+
     async def extract_exact_page_text(
         self, kind: str, source_id: uuid.UUID, page_number: int
     ) -> str:
@@ -790,6 +813,9 @@ class StudyReaderService:
         Extracts raw grounded page text directly from the underlying PDF document
         using PyMuPDF (fitz), cached in Redis by (source_id, page_number) for fast, reliable page-scoped AI grounding.
         Falls back to exact-matching page chunks if PDF extraction fails.
+
+        Trusted internal helper: it performs NO access check, so callers must have run
+        ``assert_access`` first (or use ``get_authorized_page_text``).
         """
         from app.core.cache import cache
 
@@ -890,6 +916,7 @@ class StudyReaderService:
         await self._assert_language_allowed_for_source(
             kind, source_id, action="study_reader_page_check", extra_context={"page_number": page_number}
         )
+        await assert_student_ai_allowed(self.db, student_id)
 
         # Retrieve exact page text grounded in PyMuPDF with chunk fallback
         page_context = await self.extract_exact_page_text(kind, source_id, page_number)
@@ -1005,10 +1032,23 @@ class StudyReaderService:
     ) -> ExamLensResponse:
         focus_resp = await self.get_focus(student_id, kind, source_id)
         from app.db.models.assessment import Assessment
+        from app.db.models.result import AssessmentResult
 
-        stmt = select(Assessment.title).where(Assessment.id == assessment_id)
-        res = await self.db.execute(stmt)
-        assessment_title = res.scalar_one_or_none() or "Assessment"
+        # Only assessments the student has a released result for: the lens maps their own weak
+        # questions, and must not reveal the title of an arbitrary (e.g. unpublished) assessment.
+        stmt = (
+            select(Assessment.title)
+            .join(AssessmentResult, AssessmentResult.assessment_id == Assessment.id)
+            .where(
+                Assessment.id == assessment_id,
+                AssessmentResult.student_id == student_id,
+                AssessmentResult.is_released == True,
+            )
+            .limit(1)
+        )
+        assessment_title = (await self.db.execute(stmt)).scalar_one_or_none()
+        if assessment_title is None:
+            raise NotFoundError("Assessment not found")
 
         filtered_pages = []
         for p in focus_resp.heatmap:
