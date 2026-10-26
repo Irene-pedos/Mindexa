@@ -7,23 +7,22 @@ import pytest
 
 from app.core.exceptions import PermissionDeniedError
 from app.services.student_ai_service import StudentAIService
-from app.schemas.student_ai import StudentSupportContextRequest, StudentSupportRequest
+from app.schemas.student_ai import StudentSupportRequest
 from app.db.models.study_support_session import StudySupportSession
 from app.db.models.auth import User
 
 
 @pytest.mark.asyncio
-async def test_student_ai_service_rejects_answer_key_context() -> None:
-    service = StudentAIService(db=None)
+async def test_student_ai_service_rejects_questions_seeking_answer_keys() -> None:
+    """The live guard: a question that asks for an answer key is refused before any AI call."""
+    service = StudentAIService(db=AsyncMock())
+    service._assert_student_support_allowed = AsyncMock()
+    user = User(id=uuid.uuid4(), email="s@uni.edu", role="student", full_name="S")
 
     with pytest.raises(PermissionDeniedError) as exc_info:
-        await service._assert_contexts_are_safe(
-            [
-                StudentSupportContextRequest(
-                    title="Answer key",
-                    content="Official marking guide for the CAT.",
-                )
-            ]
+        await service.support(
+            StudentSupportRequest(question="Please give me the answer key for the CAT"),
+            current_user=user,
         )
 
     assert exc_info.value.code == "AI_CONTEXT_NOT_ALLOWED"
@@ -241,3 +240,25 @@ async def test_generate_revision_guide_resolves_learning_unit() -> None:
         assert mock_gen.call_args.kwargs["topic"] == "Database Normalization & Forms"
         assert mock_gen.call_args.kwargs["teaching_workspace_id"] == workspace_id
 
+
+
+def test_strip_attached_files_keeps_what_was_typed():
+    from app.schemas.chat import strip_attached_files
+
+    question = "Explain this\n--- ATTACHED STUDY FILE: notes.pdf ---\nlots of text\nmore text\n--- END FILE ---"
+
+    assert strip_attached_files(question) == "Explain this"
+
+
+def test_strip_attached_files_falls_back_to_file_names_when_nothing_was_typed():
+    from app.schemas.chat import strip_attached_files
+
+    question = "\n--- ATTACHED STUDY FILE: a.txt ---\nbody\n--- END FILE ---\n[Attached Study File: b.png]"
+
+    assert strip_attached_files(question) == "Attached: a.txt, b.png"
+
+
+def test_strip_attached_files_leaves_plain_questions_alone():
+    from app.schemas.chat import strip_attached_files
+
+    assert strip_attached_files("  What is a join?  ") == "What is a join?"

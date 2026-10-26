@@ -1,12 +1,12 @@
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import datetime
-from typing import Annotated, Any, Dict, List, Literal, Optional, Self
+from typing import Any, Dict, List, Literal, Optional, Self
 
 from app.db.models.study_plan import DEFAULT_INITIAL_READINESS_SCORE
-from pydantic import (AliasChoices, BaseModel, Field, computed_field,
-                      model_validator)
+from pydantic import (AliasChoices, BaseModel, Field, model_validator)
 
 
 # Request bounds: free text reaches the LLM prompt and JSON columns, so it must be capped.
@@ -18,6 +18,31 @@ MAX_QUIZ_ANSWERS = 50
 MAX_CHECKLIST_ITEMS = 50
 MAX_BLACKOUT_DATES = 366
 MAX_SESSION_MINUTES = 480
+# A plan generates sessions day by day; an unbounded window is a CPU/DB denial of service.
+MAX_PLAN_SPAN_DAYS = 366
+
+_WEEKDAY_NAMES = frozenset(
+    {"Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"}
+)
+_CLOCK_TIME = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+
+
+def _validate_schedule_inputs(
+    start_date: Optional[datetime],
+    end_date: Optional[datetime],
+    available_days: List[str],
+    preferred_time_start: str,
+    preferred_time_end: str,
+) -> None:
+    """Reject schedule inputs the generator would otherwise silently ignore or choke on."""
+    if start_date and end_date and (end_date - start_date).days > MAX_PLAN_SPAN_DAYS:
+        raise ValueError(f"A study plan can span at most {MAX_PLAN_SPAN_DAYS} days.")
+    unknown_days = [d for d in available_days if d not in _WEEKDAY_NAMES]
+    if unknown_days:
+        raise ValueError(f"Unknown weekday(s): {', '.join(map(str, unknown_days))}. Use full names like 'Monday'.")
+    for label, value in (("preferred_time_start", preferred_time_start), ("preferred_time_end", preferred_time_end)):
+        if not _CLOCK_TIME.match(value):
+            raise ValueError(f"{label} must be a 24-hour time like '19:00'.")
 
 
 class StudySessionResponse(BaseModel):
@@ -160,6 +185,10 @@ class CreateStudyPlanRequest(BaseModel):
     def validate_dates_and_blackouts(self) -> Self:
         if self.end_date <= self.start_date:
             raise ValueError("End date must be strictly after start date")
+        _validate_schedule_inputs(
+            self.start_date, self.end_date, self.available_days,
+            self.preferred_time_start, self.preferred_time_end,
+        )
         cleaned_blackouts = []
         for d in self.blackout_dates:
             d_str = str(d).strip()
@@ -197,6 +226,10 @@ class GeneratePlanFromAssessmentRequest(BaseModel):
     def validate_blackouts(self) -> Self:
         if self.start_date and self.end_date and self.end_date <= self.start_date:
             raise ValueError("end_date must be strictly after start_date")
+        _validate_schedule_inputs(
+            self.start_date, self.end_date, self.available_days,
+            self.preferred_time_start, self.preferred_time_end,
+        )
         cleaned_blackouts = []
         for d in self.blackout_dates:
             d_str = str(d).strip()

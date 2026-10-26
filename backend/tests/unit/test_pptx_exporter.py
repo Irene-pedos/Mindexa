@@ -58,3 +58,66 @@ def test_build_slide_deck_pptx_generates_valid_presentation():
 
     # Check speaker notes on slide 1
     assert content_slide_1.notes_slide.notes_text_frame.text == "Begin by asking students how they currently store state in applications."
+
+
+def _deck(**slide_overrides):
+    slide = dict(
+        title="Normalisation",
+        bullet_points=["1NF", "2NF", "3NF"],
+        visual_idea="Dependency diagram",
+        speaker_notes="Walk through an example.",
+    )
+    slide.update(slide_overrides)
+    return SlideDeckOutput(
+        title="Databases",
+        slides=[SlideItem(**slide), SlideItem(**slide), SlideItem(**slide)],
+    )
+
+
+def _reload(deck):
+    return Presentation(io.BytesIO(build_slide_deck_pptx(deck)))
+
+
+def test_every_placeholder_fits_inside_the_widescreen_slide():
+    prs = _reload(_deck())
+
+    for slide in prs.slides:
+        for shape in slide.shapes:
+            assert shape.left >= 0 and shape.top >= 0
+            assert shape.left + shape.width <= prs.slide_width
+            assert shape.top + shape.height <= prs.slide_height
+
+
+def test_font_sizes_are_set_on_runs_where_powerpoint_honours_them():
+    prs = _reload(_deck())
+
+    body = prs.slides[1].placeholders[1].text_frame
+    sizes = {run.font.size.pt for p in body.paragraphs for run in p.runs}
+    title_run = prs.slides[1].shapes.title.text_frame.paragraphs[0].runs[0]
+
+    assert None not in sizes and sizes
+    assert title_run.font.size.pt == 32 and title_run.font.bold is True
+
+
+def test_dense_slides_use_a_smaller_font_than_sparse_ones():
+    sparse = _reload(_deck(bullet_points=["One short point"]))
+    dense = _reload(_deck(bullet_points=["A fairly long bullet point about indexing. " * 5] * 10))
+
+    def body_size(prs):
+        return prs.slides[1].placeholders[1].text_frame.paragraphs[0].runs[0].font.size.pt
+
+    assert body_size(dense) < body_size(sparse)
+
+
+def test_xml_illegal_control_characters_do_not_crash_the_export():
+    deck = _deck(title="Bad\x00title\x0c", bullet_points=["null\x00byte", "escape\x1b code"], speaker_notes="n\x08otes")
+
+    prs = _reload(deck)
+
+    assert prs.slides[1].shapes.title.text == "Badtitle"
+
+
+def test_overlong_bullets_are_capped_by_the_schema():
+    slide = SlideItem(title="T", bullet_points=["x" * 5000])
+
+    assert len(slide.bullet_points[0]) == 400

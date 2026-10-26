@@ -7,7 +7,6 @@ from datetime import UTC, datetime
 from app.agents.student_support_agent import StudySupportAgent
 from app.core.ai.gateway import AIGateway
 from app.core.ai.meta_identity import (
-    _META_IDENTITY_PATTERN,
     STUDENT_META_IDENTITY_DEFLECTION,
     is_meta_identity_query,
 )
@@ -18,31 +17,21 @@ from app.core.ai.provider_factory import (
 from app.core.exceptions import PermissionDeniedError, ValidationError
 from app.db.enums import (
     AIActionType,
-    AssessmentStatus,
-    AssessmentType,
-    AttemptStatus,
 )
 from typing import Any
-from app.db.models.assessment import Assessment
-from app.db.models.attempt import AssessmentAttempt
 from app.db.models.auth import User
+from app.schemas.chat import strip_attached_files
 from app.services.ai_exam_gate import assert_student_ai_allowed
 from app.schemas.student_ai import (
     RevisionGuideOutput,
     RevisionGuideRequest,
     StudentChatHistoryItem,
     StudentConversationSummary,
-    StudentSupportContextRequest,
     StudentSupportRequest,
     StudentSupportResponse,
 )
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-
-_BLOCKED_CONTEXT_PATTERN = re.compile(
-    r"(?:answer[ _-]?key|hidden[ _-]?rubric|exam[ _-]?(?:paper|solution))",
-    re.IGNORECASE,
-)
 
 _BLOCKED_QUESTION_PATTERN = re.compile(
     r"(?:answer[ _-]?key|exam[ _-]?(?:paper|solution)|hidden[ _-]?rubric)",
@@ -71,8 +60,10 @@ class StudentAIService:
         if body.conversation_id:
             await self._assert_conversation_not_foreign(body.conversation_id, current_user.id)
 
-        # 1. Deterministic meta / identity question pre-filter (audit without calling LLM)
-        if _META_IDENTITY_PATTERN.search(body.question):
+        # 1. Deterministic meta / identity question pre-filter (audit without calling LLM).
+        # Only what the student typed is checked: attached-file text that merely mentions a
+        # "system prompt" must not turn a normal question into a canned deflection.
+        if is_meta_identity_query(strip_attached_files(body.question)):
             chat_provider = get_ai_provider()
             embed_provider = get_embedding_provider()
             gateway = AIGateway(self.db, chat_provider, embed_provider)
@@ -89,7 +80,7 @@ class StudentAIService:
                 raw_output={
                     "category": "META_IDENTITY",
                     "deflected": True,
-                    "question": body.question,
+                    "question": body.question[:500],
                 },
             )
             return StudentSupportResponse(
@@ -99,7 +90,6 @@ class StudentAIService:
                 fallback_used=False,
             )
 
-        # Validate question & injected context for safety against prohibited exam materials.
         # Only block question text when it explicitly seeks answer keys, exam solutions, or hidden rubrics,
         # while allowing legitimate grading questions that are not trying to obtain prohibited content.
         if _BLOCKED_QUESTION_PATTERN.search(body.question):
@@ -107,14 +97,6 @@ class StudentAIService:
                 "Student AI support cannot process input containing prohibited materials (such as answer keys or exam solutions).",
                 code="AI_CONTEXT_NOT_ALLOWED",
             )
-
-        if hasattr(body, "contexts") and body.contexts:
-            if _BLOCKED_CONTEXT_PATTERN.search(body.question):
-                raise PermissionDeniedError(
-                    "Student AI support cannot process input containing prohibited materials (such as answer keys or exam solutions).",
-                    code="AI_CONTEXT_NOT_ALLOWED",
-                )
-            await self._assert_contexts_are_safe(body.contexts)
 
         # Language policy check for student AI support
         target_ws_id = getattr(body, "teaching_workspace_id", None)
@@ -208,7 +190,6 @@ class StudentAIService:
         offset: int = 0,
     ) -> list[Any]:
         from app.db.models.study_support_session import StudySupportSession
-        from app.schemas.student_ai import StudentConversationSummary
         from sqlalchemy import func
 
         stmt = (
@@ -251,7 +232,7 @@ class StudentAIService:
         first_questions: dict[uuid.UUID, str] = {}
         for turn in all_turns:
             if turn.conversation_id not in first_questions:
-                first_questions[turn.conversation_id] = turn.question
+                first_questions[turn.conversation_id] = strip_attached_files(turn.question)
 
         summaries = []
         for row in grouped_rows:
@@ -433,49 +414,3 @@ class StudentAIService:
     async def _assert_student_support_allowed(self, student_id) -> None:
         """Block student support while an open attempt forbids AI (see ``ai_exam_gate``)."""
         await assert_student_ai_allowed(self.db, student_id)
-
-    async def _assert_contexts_are_safe(
-        self,
-        contexts: list[StudentSupportContextRequest],
-    ) -> None:
-        for context in contexts:
-            haystack = f"{context.title}\n{context.content}"
-            if _BLOCKED_CONTEXT_PATTERN.search(haystack):
-                raise PermissionDeniedError(
-                    "Student AI support cannot use assessment answers, answer keys, hidden rubrics, or active exam content.",
-                    code="AI_CONTEXT_NOT_ALLOWED",
-                )
-            if context.assessment_id:
-                await self._assert_assessment_context_is_safe(context.assessment_id)
-
-    async def _assert_assessment_context_is_safe(self, assessment_id) -> None:
-        assessment = await self.db.get(Assessment, assessment_id)
-        if not assessment or assessment.is_deleted:
-            raise PermissionDeniedError(
-                "Student AI support cannot use unknown assessment context.",
-                code="AI_CONTEXT_NOT_ALLOWED",
-            )
-
-        now = datetime.now(UTC)
-        is_exam_style = (
-            assessment.assessment_type in {
-                AssessmentType.CAT,
-                AssessmentType.SUMMATIVE,
-            }
-            or assessment.is_supervised
-        )
-        window_is_open = (
-            assessment.window_start is not None
-            and assessment.window_start <= now
-            and (assessment.window_end is None or assessment.window_end >= now)
-        )
-        is_locked = assessment.status == AssessmentStatus.ACTIVE
-        if is_exam_style and (
-            assessment.status in {AssessmentStatus.PUBLISHED, AssessmentStatus.ACTIVE}
-            or window_is_open
-            or is_locked
-        ):
-            raise PermissionDeniedError(
-                "Student AI support cannot use active CAT, summative, supervised, or locked assessment context.",
-                code="AI_CONTEXT_NOT_ALLOWED",
-            )

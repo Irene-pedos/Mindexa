@@ -15,10 +15,8 @@ from app.db.models.auth import User
 from app.schemas.lecturer_ai import LecturerSupportRequest
 from app.schemas.student_ai import StudentSupportRequest
 from app.services.lecturer_ai_service import LecturerAIService
-from app.services.student_ai_service import (
-    _META_IDENTITY_PATTERN,
-    StudentAIService,
-)
+from app.core.ai.meta_identity import _META_IDENTITY_PATTERN
+from app.services.student_ai_service import StudentAIService
 
 
 def test_meta_identity_pattern_positives() -> None:

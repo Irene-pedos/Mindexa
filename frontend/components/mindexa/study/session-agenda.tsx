@@ -121,7 +121,7 @@ function SessionCard({ session, onReschedule, onOpen }: SessionCardProps) {
           <Badge
             variant="outline"
             className={cn(
-              "text-[9px] font-semibold px-1.5 py-0",
+              "text-[10px] font-semibold px-1.5 py-0",
               completed && "border-emerald-500/30 text-emerald-600 bg-emerald-500/10",
               overdue && "border-amber-500/30 text-amber-700 bg-amber-500/10",
               !completed && !overdue && "border-primary/20 text-primary bg-primary/5",
@@ -162,7 +162,7 @@ function SessionCard({ session, onReschedule, onOpen }: SessionCardProps) {
           </>
         ) : overdue ? (
           <>
-            <span className="text-[9px] text-amber-700 dark:text-amber-300">Reschedule needed</span>
+            <span className="text-[10px] text-amber-700 dark:text-amber-300">Reschedule needed</span>
             <Button
               size="sm"
               variant="outline"

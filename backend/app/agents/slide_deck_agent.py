@@ -10,6 +10,9 @@ from app.core.ai.providers import AICompletionRequest, AIMessage
 from app.db.enums import AIActionType
 
 
+_MAX_BULLET_CHARS = 400
+
+
 class SlideItem(BaseModel):
     """A single slide within a generated academic slide deck."""
     title: str = Field(..., min_length=1, max_length=200)
@@ -22,10 +25,12 @@ class SlideItem(BaseModel):
     def _coerce_bullets(cls, v: Any) -> List[str]:
         if not v:
             return ["Key concept overview"]
+        # Each bullet is capped: it renders on a slide (and costs export CPU), so a paragraph-long
+        # "bullet" is a mistake whether it came from the model or from a hand-edited export request.
         if isinstance(v, str):
-            return [line.strip() for line in v.split("\n") if line.strip()]
+            return [line.strip()[:_MAX_BULLET_CHARS] for line in v.split("\n") if line.strip()]
         if isinstance(v, list):
-            return [str(item).strip() for item in v if str(item).strip()]
+            return [str(item).strip()[:_MAX_BULLET_CHARS] for item in v if str(item).strip()]
         return ["Key concept overview"]
 
 

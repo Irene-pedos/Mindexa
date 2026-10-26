@@ -17,6 +17,8 @@ from app.agents.assessment_generator_agent import (
     completeness_issues,
 )
 from app.agents.base import BaseAgent
+from app.core.ai.prompt_registry import get_prompt
+from app.core.ai.prompt_render import render_prompt
 from app.core.ai.providers import AICompletionRequest, AIMessage
 from app.core.exceptions import ValidationError
 from app.db.enums import AIActionType
@@ -40,36 +42,6 @@ ACTION_INSTRUCTIONS: dict[str, str] = {
     "make_harder": "Make this question harder (require more application or analysis) while testing the same concept. Keep marks and question type.",
     "fix_ambiguity": "Find and remove ambiguity, double meanings, or more than one defensible answer. Keep the intended answer.",
 }
-
-ENHANCE_SYSTEM = """You are an expert exam-writing assistant helping a university lecturer improve ONE draft question.
-
-Rules:
-- Apply ONLY the requested action: {action_text}
-- Question type is "{qtype}". Do not change the question type.
-- Never invent facts you are not confident about. If you cannot complete something reliably, leave it empty and say so in "summary".
-- For multiple-choice: exactly one option is correct. For true/false: exactly two options, one correct.
-- For case studies: put the scenario in "case_study_context"; each sub-question is an item in "options" with "text" (the sub-question), "explanation" (answer guidance) and "match_key" (marks as a string); every sub-question has is_correct=true.
-- For matching: each option is a pair, "text" = left side, "explanation" = right side, is_correct=true.
-- Open-ended types (short_answer, essay, computational, practical): options stay [] and the model answer goes in "explanation".
-- Keep the language of the original question.
-- If the question contains code, keep it inside the "text" string: escape every double quote as \\" and every line break as \\n so the JSON stays valid. Never output code as its own JSON array.
-- Return ONLY a JSON object with this shape and no other text:
-{{"question": {{"text": str, "options": [{{"text": str, "explanation": str|null, "is_correct": bool, "match_key": str|null}}], "explanation": str|null, "case_study_context": str|null}},
-  "summary": "one sentence on what you changed", "changes": ["short bullet", ...]}}
-"""
-
-REVIEW_SYSTEM = """You are an experienced exam moderator reviewing a lecturer's DRAFT paper before it is submitted.
-You receive a compact list of questions (numbered from 1) and the planned blueprint. Report real problems only; do not praise.
-
-Fields that are null were simply not provided by the editor (for example per-question difficulty); never report them as missing.
-Look for: topics in the blueprint that no question covers; difficulty that does not match the plan; near-duplicate questions;
-ambiguous or double-barrelled wording; questions testing recall when the section asks for application; answers that look wrong;
-missing question counts per section; marks that look unbalanced.
-
-Return ONLY a JSON object, no other text:
-{"summary": "2 sentences max", "findings": [{"severity": "warning"|"suggestion", "code": "SHORT_UPPER_SNAKE", "message": "what is wrong and how to fix it", "question": <number or null>, "section": <section name or null>}]}
-At most 12 findings, most important first. Use "warning" only for things that would likely draw a moderator's objection."""
-
 
 class _EnhancedQuestion(BaseModel):
     text: str = ""
@@ -172,7 +144,10 @@ class QuestionEnhancerAgent(BaseAgent):
         topic: str | None,
     ) -> EnhanceQuestionResponse:
         qtype = _backend_type(question.type)
-        system = ENHANCE_SYSTEM.format(action_text=ACTION_INSTRUCTIONS[action], qtype=qtype)
+        system = render_prompt(
+            get_prompt("question_enhance"),
+            {"action_text": ACTION_INSTRUCTIONS[action], "qtype": qtype},
+        )
         payload = {
             "subject": subject,
             "topic": topic,
@@ -293,7 +268,7 @@ class QuestionEnhancerAgent(BaseAgent):
             ensure_ascii=False,
         )
         request = AICompletionRequest(
-            messages=[AIMessage(role="system", content=REVIEW_SYSTEM), AIMessage(role="user", content=user)],
+            messages=[AIMessage(role="system", content=get_prompt("question_review")), AIMessage(role="user", content=user)],
             temperature=0.2,
             max_tokens=1600,
         )

@@ -1,5 +1,4 @@
 from datetime import UTC, datetime
-import json
 import uuid
 from typing import Any, Dict, List, Optional
 
@@ -12,14 +11,15 @@ from app.db.enums import AIActionType
 from app.db.models.study_support_session import StudySupportSession
 from app.db.schemas.rag import RAGRetrievalResult, SourceCitation
 from app.services.rag_service import RAGService
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import re
 from app.core.ai.meta_identity import (
-    _META_IDENTITY_PATTERN,
     STUDENT_META_IDENTITY_DEFLECTION,
+    is_meta_identity_query,
 )
+from app.schemas.chat import strip_attached_files
 
 _STUDENT_GREETING_PATTERN = re.compile(
     r"^\s*(?:hi|hello|hey|greetings|good\s+(?:morning|afternoon|evening|day)|howdy|sup|hola|bonjour|muraho|mwiriwe)\b[^\w]*$",
@@ -79,7 +79,7 @@ class StudySupportAgent(BaseAgent):
     ) -> StudySupportAgentResponse:
 
         # Step 0: Deterministic meta-identity deflection (deflect without RAG or LLM completion)
-        if _META_IDENTITY_PATTERN.search(question):
+        if is_meta_identity_query(strip_attached_files(question)):
             await self.gateway.log_action(
                 action_type=AIActionType.STUDY_SUPPORT,
                 actor_id=student_id,

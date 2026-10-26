@@ -8,7 +8,7 @@ import pytest
 
 _GATE_CONSUMERS = (
     "app.services.student_ai_service",
-    "app.services.study_planner_service",
+    "app.services.study_planner.guided",
     "app.services.study_reader_service",
 )
 

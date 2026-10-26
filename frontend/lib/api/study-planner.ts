@@ -1,4 +1,5 @@
 import { apiClient } from "./client";
+import type { SourceCitation } from "./student-ai";
 
 export interface ChecklistItem {
   id: string;
@@ -73,16 +74,7 @@ export interface KnowledgeCheckReport {
   generated_by?: "ai" | "fallback" | string;
 }
 
-export interface SourceCitation {
-  resource_id?: string;
-  resource_name?: string;
-  title?: string;
-  snippet?: string;
-  excerpt?: string;
-  page_number?: number | null;
-  chunk_index?: number;
-  relevance_score?: number;
-}
+export type { SourceCitation };
 
 export interface LearningUnit {
   id: string;
@@ -111,7 +103,15 @@ export interface StudySession {
   scheduled_start: string;
   scheduled_end: string;
   duration_minutes: number;
-  status: "SCHEDULED" | "COMPLETED" | "SKIPPED" | "MISSED" | "RESCHEDULED" | string;
+  status:
+    | "SCHEDULED"
+    | "IN_PROGRESS"
+    | "COMPLETED"
+    | "SKIPPED"
+    | "MISSED"
+    | "RESCHEDULED"
+    | "CANCELLED"
+    | string;
   completed_at?: string | null;
   understanding_level?: "YES" | "PARTIAL" | "NO" | null;
   difficulty_rating?: "Easy" | "Medium" | "Hard" | null;
@@ -149,7 +149,7 @@ export interface MaterialCoverageItem {
   course_title: string;
   covered_count: number;
   total_count: number;
-  percentage: number;
+  coverage_percentage: number;
 }
 
 export interface ScheduleConflictWarning {
@@ -303,8 +303,16 @@ export const studyPlannerApi = {
       body: JSON.stringify({ action }),
     });
   },
-  startGuidedSession: async (sessionId: string): Promise<StudySession> => {
-    return apiClient(`/students/study-plans/sessions/${sessionId}/guided/start`, {
+  /**
+   * Start or resume a guided session. Pass `regenerate` to replace a template (fallback)
+   * lesson with a fresh AI one; without it an existing lesson is returned untouched.
+   */
+  startGuidedSession: async (
+    sessionId: string,
+    options: { regenerate?: boolean } = {}
+  ): Promise<StudySession> => {
+    const query = options.regenerate ? "?regenerate=true" : "";
+    return apiClient(`/students/study-plans/sessions/${sessionId}/guided/start${query}`, {
       method: "POST",
     });
   },
@@ -324,7 +332,9 @@ export const studyPlannerApi = {
   ): Promise<{ answer: string; citations: SourceCitation[] }> => {
     return apiClient(`/students/study-plans/sessions/${sessionId}/guided/ask`, {
       method: "POST",
-      body: JSON.stringify({ question, section_context: sectionContext || "" }),
+      // The API rejects more than 4,000 characters of section context (a 422 that would fail
+      // the whole question). It is only background for the answer, so trim it instead.
+      body: JSON.stringify({ question, section_context: (sectionContext || "").slice(0, 4000) }),
     });
   },
   generateGuidedExercise: async (

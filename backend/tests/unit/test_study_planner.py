@@ -1,4 +1,5 @@
 import pytest
+from app.core.exceptions import ValidationError
 import uuid
 from datetime import datetime, UTC, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -245,7 +246,7 @@ async def test_submit_guided_knowledge_check_fails_loudly_on_empty_questions():
         mock_get_session.return_value = mock_session
         mock_gen_quiz.return_value = []
 
-        with pytest.raises(ValueError, match="no questions found"):
+        with pytest.raises(ValidationError, match="no questions found"):
             await service.submit_guided_knowledge_check(session_id, student_id, answers={})
 
 

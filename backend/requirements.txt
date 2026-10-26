@@ -35,25 +35,32 @@ email-validator==2.2.0
 # ── Auth & Security ───────────────────────────────────────────────────────────
 bcrypt==4.2.1
 python-jose[cryptography]==3.3.0
-passlib[bcrypt]==1.7.4
 
 # ── HTTP Utilities ────────────────────────────────────────────────────────────
 httpx==0.28.1                  # async HTTP client (for AI calls)
 python-multipart==0.0.20       # file upload support
 
 # ── AI / LLM ──────────────────────────────────────────────────────────────────
-openai==1.59.5
+# Providers (Groq/OpenAI/Anthropic/Jina) are called over httpx: no vendor SDKs needed.
+# langchain/langchain-openai are only imported by the example app/agents/orchestrator.py.
 langchain==0.3.14
 langchain-openai==0.3.0
-langchain-anthropic==0.3.0
-anthropic==0.42.0
+tiktoken>=0.7.0                # token counting (RAG chunking, prompt budgets)
+json-repair>=0.30.0            # recovers truncated model JSON
+# Imported lazily by services/gemini_service.py (the /gemini chat endpoint).
+google-generativeai>=0.8.0
 
 # ── Vector Store ──────────────────────────────────────────────────────────────
 pgvector==0.3.6
 
 # ── Document Processing (RAG pipeline) ────────────────────────────────────────
-pypdf==5.1.0
+pymupdf>=1.24.3                # PDF text extraction, reader page text
 python-docx==1.1.2
+python-pptx>=0.6.23            # lecturer slide-deck export
+openpyxl>=3.1.0                # Excel exports
+qrcode>=7.4.2                  # moderation document QR codes
+pillow>=10.3.0                 # required by qrcode for image output
+python-dateutil>=2.9.0
 
 # ── Email ─────────────────────────────────────────────────────────────────────
 # smtplib is in stdlib — no extra dep needed for basic SMTP.

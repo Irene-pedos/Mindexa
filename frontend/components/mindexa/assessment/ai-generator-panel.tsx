@@ -27,6 +27,7 @@ import {
 } from "@/lib/api/ai-generation";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { renderRichMathText } from "@/components/mindexa/common/math-renderer";
+import { batchPhase } from "@/lib/ai-batch";
 
 // ─── AI Safety Notice ─────────────────────────────────────────────────────────
 function AISafetyNotice() {
@@ -433,7 +434,8 @@ export function AIGeneratorPanel({
       const res = await aiGenerationApi.generateQuestions(payload);
       setBatch(res);
 
-      if (res.status === "pending" || res.status === "processing") {
+      // The API sends PENDING / PROCESSING in upper case; anything not finished is still running.
+      if (batchPhase(res.status) === "running") {
         toast.info("AI is generating questions from your course materials…");
         startPolling(res.id);
       } else {

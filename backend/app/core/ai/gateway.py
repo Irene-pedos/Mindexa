@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import time
 import uuid
 from asyncio import sleep
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,6 +19,13 @@ from app.core.config import settings
 from app.core.exceptions import RateLimitError, ServiceUnavailableError
 from app.db.enums import AIActionStatus, AIActionType
 from app.db.models.ai import AIActionLog
+from app.db.repositories.ai_usage_repo import AIUsageRepository
+
+# Role -> settings attribute holding that role's rolling 24h completion-token budget.
+_DAILY_BUDGET_SETTING_BY_ROLE = {
+    "student": "AI_DAILY_TOKEN_BUDGET_STUDENT",
+    "lecturer": "AI_DAILY_TOKEN_BUDGET_LECTURER",
+}
 
 
 class AIGateway:
@@ -74,6 +83,25 @@ class AIGateway:
                 
         self.active_embedding_provider = self.embedding_providers[0]
 
+    async def _enforce_daily_budget(self, actor_id: uuid.UUID | None, actor_role: str | None) -> None:
+        """Refuse a completion once the actor has used their rolling 24h token budget.
+
+        System calls (no actor) and roles without a configured budget are not limited. The
+        check is best-effort: concurrent requests can overshoot by a call or two.
+        """
+        setting_name = _DAILY_BUDGET_SETTING_BY_ROLE.get((actor_role or "").lower())
+        budget = int(getattr(settings, setting_name, 0)) if setting_name else 0
+        if actor_id is None or budget <= 0:
+            return
+        since = datetime.now(UTC) - timedelta(hours=24)
+        used = await AIUsageRepository(self.db).completion_tokens_since(actor_id, since)
+        if used >= budget:
+            raise RateLimitError(
+                "You've reached today's AI usage limit. It resets on a rolling 24-hour basis, "
+                "so please try again later.",
+                code="ai_daily_budget_exceeded",
+            )
+
     async def complete(
         self,
         request: AICompletionRequest,
@@ -87,6 +115,7 @@ class AIGateway:
         prompt_version: str | None = None,
         human_reviewed: bool | None = None,
     ) -> AICompletionResponse:
+        await self._enforce_daily_budget(actor_id, actor_role)
         model_name = request.model or self.active_chat_provider.default_model
         initiated = AIActionLog(
             action_type=action_type,
@@ -176,13 +205,18 @@ class AIGateway:
         # Allow at least 4 retries for rate limit errors to give transient limits time to clear
         max_retries = max(4, settings.AI_MAX_RETRIES)
         errors = []
-        
+        deadline = time.monotonic() + settings.AI_TOTAL_TIMEOUT_SECONDS
+
         for provider in self.chat_providers:
             self.active_chat_provider = provider
             attempt = 0
             while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    errors.append(f"{provider.name}: overall time limit reached")
+                    break
                 try:
-                    res = await provider.complete(request)
+                    res = await asyncio.wait_for(provider.complete(request), timeout=remaining)
                     if not res.content or not res.content.strip():
                         if attempt < max_retries:
                             attempt += 1
@@ -328,13 +362,18 @@ class AIGateway:
         # Allow at least 4 retries for rate limit errors
         max_retries = max(4, settings.AI_MAX_RETRIES)
         errors: list[str] = []
+        deadline = time.monotonic() + settings.AI_TOTAL_TIMEOUT_SECONDS
 
         for provider in self.embedding_providers:
             self.active_embedding_provider = provider
             attempt = 0
             while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    errors.append(f"{provider.name}: overall time limit reached")
+                    break
                 try:
-                    return await provider.embed(request)
+                    return await asyncio.wait_for(provider.embed(request), timeout=remaining)
                 except RateLimitError as exc:
                     if attempt >= max_retries:
                         errors.append(f"{provider.name}: Rate limit exceeded after {attempt} retries ({exc})")

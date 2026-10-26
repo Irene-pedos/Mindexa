@@ -249,7 +249,7 @@ export function StudyPlanDashboard({
                 <div className="space-y-1">
                   <div className="flex items-start justify-between gap-2">
                     <div className="space-y-0.5 min-w-0">
-                      <Badge variant="secondary" className="text-[9px] uppercase font-medium mb-1">
+                      <Badge variant="secondary" className="text-[10px] uppercase font-medium mb-1">
                         {todaySession.session_type}
                       </Badge>
                       <p className="text-sm font-medium text-foreground leading-snug">
@@ -265,7 +265,7 @@ export function StudyPlanDashboard({
                     <Badge
                       variant={todaySession.status === "COMPLETED" ? "outline" : "secondary"}
                       className={cn(
-                        "text-[9px] uppercase shrink-0",
+                        "text-[10px] uppercase shrink-0",
                         todaySession.status === "COMPLETED" && "text-emerald-600 border-emerald-500/30"
                       )}
                     >
@@ -325,7 +325,7 @@ export function StudyPlanDashboard({
                 <Award className="size-3.5 text-muted-foreground" />
                 <span className="text-xs font-semibold text-foreground">Readiness Timeline</span>
                 <Badge variant="outline" className={cn(
-                  "text-[9px] font-medium border-border/60",
+                  "text-[10px] font-medium border-border/60",
                   readinessScore >= 80 ? "text-emerald-600" : "text-muted-foreground"
                 )}>
                   {readinessScore}%
@@ -414,7 +414,7 @@ export function StudyPlanDashboard({
                         <div key={i} className="space-y-1">
                           <span className="text-[10px] text-muted-foreground">{d}</span>
                           <div className={cn(
-                            "h-4 rounded-sm flex items-center justify-center text-[9px] font-medium",
+                            "h-4 rounded-sm flex items-center justify-center text-[10px] font-medium",
                             isActive ? "bg-primary text-primary-foreground" : "bg-muted/50 text-muted-foreground/40"
                           )}>
                             {isActive ? "✓" : ""}
@@ -475,7 +475,7 @@ export function StudyPlanDashboard({
                       <Badge
                         variant={s.status === "COMPLETED" ? "outline" : "secondary"}
                         className={cn(
-                          "text-[9px] uppercase shrink-0",
+                          "text-[10px] uppercase shrink-0",
                           s.status === "COMPLETED" && "text-emerald-600 border-emerald-500/30"
                         )}
                       >
@@ -516,10 +516,10 @@ export function StudyPlanDashboard({
                           {item.course_code} — {item.course_title}
                         </span>
                         <span className="text-muted-foreground shrink-0">
-                          {item.covered_count}/{item.total_count} ({item.percentage}%)
+                          {item.covered_count}/{item.total_count} ({item.coverage_percentage}%)
                         </span>
                       </div>
-                      <Progress value={item.percentage} className="h-1.5 rounded-full" />
+                      <Progress value={item.coverage_percentage} className="h-1.5 rounded-full" />
                     </div>
                   ))}
 

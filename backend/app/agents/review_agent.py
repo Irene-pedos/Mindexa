@@ -2,14 +2,12 @@ from __future__ import annotations
 
 import json
 import uuid
-from typing import Any, List, Optional
+from typing import Optional
 
-from pydantic import BaseModel, Field, ValidationError as PydanticValidationError
+from pydantic import BaseModel, Field
 
-from app.core.ai.gateway import AIGateway
 from app.core.ai.prompt_registry import get_prompt
 from app.core.ai.providers import AICompletionRequest, AICompletionResponse, AIMessage
-from app.core.exceptions import ValidationError
 from app.db.enums import AIActionType
 from app.agents.base import BaseAgent
 
@@ -185,7 +183,7 @@ class ReviewAgent(BaseAgent):
         if basis_used:
             system_content += f"\n\n### Grading Basis Used:\n{basis_used}"
         if source_citations:
-            system_content += f"\n\n### Source Citations:\n" + "\n".join(f"- {c}" for c in source_citations)
+            system_content += "\n\n### Source Citations:\n" + "\n".join(f"- {c}" for c in source_citations)
 
         messages = [
             AIMessage(role="system", content=system_content),
@@ -292,7 +290,7 @@ class ReviewAgent(BaseAgent):
         if basis_used:
             system_content += f"\n\n### Grading Basis Used:\n{basis_used}"
         if source_citations:
-            system_content += f"\n\n### Source Citations:\n" + "\n".join(f"- {c}" for c in source_citations)
+            system_content += "\n\n### Source Citations:\n" + "\n".join(f"- {c}" for c in source_citations)
 
         messages = [
             AIMessage(role="system", content=system_content),

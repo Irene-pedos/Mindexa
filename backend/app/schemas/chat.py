@@ -6,6 +6,7 @@ prompt, so history is normalised at the schema boundary instead of trusted downs
 
 from __future__ import annotations
 
+import re
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, BeforeValidator, Field
@@ -48,3 +49,21 @@ def _normalise_history(value: Any) -> list[dict[str, str]]:
 
 
 ChatHistory = Annotated[list[ChatTurn], BeforeValidator(_normalise_history)]
+
+_ATTACHED_FILE_BLOCK = re.compile(r"\n?--- ATTACHED STUDY FILE: (.+?) ---\n[\s\S]*?\n--- END FILE ---")
+_ATTACHED_FILE_NAME_ONLY = re.compile(r"\n?\[Attached Study File: (.+?)\]")
+
+
+def strip_attached_files(question: str) -> str:
+    """What the user typed, without the text of files attached to the message.
+
+    The client sends attached-file text inside ``question`` using these markers (the frontend
+    parses them back the same way). Listings and previews should show the typed words, or the
+    file names when that is all there was, never a page of document text.
+    """
+    typed = _ATTACHED_FILE_BLOCK.sub("", question)
+    typed = _ATTACHED_FILE_NAME_ONLY.sub("", typed).strip()
+    if typed:
+        return typed
+    names = _ATTACHED_FILE_BLOCK.findall(question) + _ATTACHED_FILE_NAME_ONLY.findall(question)
+    return f"Attached: {', '.join(names)}" if names else question.strip()

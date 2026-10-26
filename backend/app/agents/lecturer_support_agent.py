@@ -8,7 +8,7 @@ from app.agents.base import BaseAgent
 from app.core.ai.gateway import AIGateway
 from app.core.ai.providers import AICompletionRequest, AIMessage
 from app.db.enums import AIActionType
-from app.db.schemas.rag import RAGRetrievalResult, SourceCitation
+from app.db.schemas.rag import SourceCitation
 from app.services.rag_service import RAGService
 
 _LECTURER_GREETING_PATTERN = re.compile(

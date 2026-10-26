@@ -243,7 +243,7 @@ export default function StudentStudyPage() {
             Plans & Schedule
             <Badge
               variant="secondary"
-              className="ml-1 text-[9px] font-bold px-1 py-0 bg-primary/10 text-primary border-primary/20"
+              className="ml-1 text-[10px] font-bold px-1 py-0 bg-primary/10 text-primary border-primary/20"
             >
               {plans.length}
             </Badge>

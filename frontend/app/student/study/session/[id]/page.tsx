@@ -1,8 +1,8 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { Loader2, Sparkles, BookOpen, ChevronRight, CheckCircle2, Trophy, ArrowLeft, AlertTriangle, X, RefreshCw } from "lucide-react";
+import { Loader2, BookOpen, ChevronRight, ArrowLeft, AlertTriangle, X, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -27,7 +27,13 @@ export default function GuidedStudySessionPage() {
   const [currentSectionIdx, setCurrentSectionIdx] = useState(0);
   const [report, setReport] = useState<KnowledgeCheckReport | null>(null);
   const [showFallbackBanner, setShowFallbackBanner] = useState(true);
+  const [retryingLesson, setRetryingLesson] = useState(false);
+  const [completionFailed, setCompletionFailed] = useState(false);
+  const [savingCompletion, setSavingCompletion] = useState(false);
   const mainRef = useRef<HTMLElement>(null);
+  // Starting a session can generate an AI lesson. React StrictMode runs effects twice in
+  // development; without this guard that would generate (and bill) the lesson twice.
+  const startedSessionRef = useRef<string | null>(null);
 
   // Reset scroll to top on every section/stage transition
   useEffect(() => {
@@ -37,6 +43,8 @@ export default function GuidedStudySessionPage() {
   useEffect(() => {
     async function initSession() {
       if (!sessionId) return;
+      if (startedSessionRef.current === sessionId) return;
+      startedSessionRef.current = sessionId;
       setLoading(true);
       try {
         const data = await studyPlannerApi.startGuidedSession(sessionId);
@@ -81,17 +89,46 @@ export default function GuidedStudySessionPage() {
     }
   };
 
-  const handleKnowledgeCheckComplete = async (kcReport: KnowledgeCheckReport) => {
-    setReport(kcReport);
+  // Replace a template lesson with a fresh AI one, in place (no page reload).
+  const handleRetryLesson = async () => {
+    setRetryingLesson(true);
+    try {
+      const data = await studyPlannerApi.startGuidedSession(sessionId, { regenerate: true });
+      setSession(data);
+      setCurrentSectionIdx(0);
+      if (data.lesson_plan_json?.generated_by === "fallback") {
+        toast.error("The AI service is still unavailable. Please try again in a few minutes.");
+      } else {
+        toast.success("Your lesson was rebuilt from your course materials.");
+      }
+    } catch (err: any) {
+      toast.error(err?.message || "Could not regenerate the lesson");
+    } finally {
+      setRetryingLesson(false);
+    }
+  };
+
+  // Saving completion can fail (network, expired session). The student still sees their
+  // results, but the failure stays visible with a retry, so progress is never silently lost.
+  const saveCompletion = async () => {
+    setSavingCompletion(true);
     try {
       const updated = await studyPlannerApi.completeGuidedSession(sessionId);
       setSession(updated);
-      setStage("summary");
+      setCompletionFailed(false);
       toast.success("Session completed and progress saved!");
     } catch (err: any) {
+      setCompletionFailed(true);
       toast.error(err?.message || "Error completing guided session");
-      setStage("summary");
+    } finally {
+      setSavingCompletion(false);
     }
+  };
+
+  const handleKnowledgeCheckComplete = async (kcReport: KnowledgeCheckReport) => {
+    setReport(kcReport);
+    setStage("summary");
+    await saveCompletion();
   };
 
   if (loading) {
@@ -160,9 +197,15 @@ export default function GuidedStudySessionPage() {
                         size="sm"
                         variant="outline"
                         className="h-7 text-[11px] font-bold border-amber-500/50 text-amber-700 dark:text-amber-300 hover:bg-amber-500/15 gap-1"
-                        onClick={() => window.location.reload()}
+                        onClick={handleRetryLesson}
+                        disabled={retryingLesson}
                       >
-                        <RefreshCw className="size-3" /> Retry AI Lesson
+                        {retryingLesson ? (
+                          <Loader2 className="size-3 animate-spin" />
+                        ) : (
+                          <RefreshCw className="size-3" />
+                        )}{" "}
+                        {retryingLesson ? "Rebuilding lesson..." : "Retry AI Lesson"}
                       </Button>
                       <button
                         className="text-[11px] text-amber-600 dark:text-amber-400 underline hover:no-underline"
@@ -229,6 +272,11 @@ export default function GuidedStudySessionPage() {
                     <BookOpen className="size-4 text-primary" /> Lesson Overview
                   </h4>
                   <div className="space-y-2">
+                    {sections.length === 0 && (
+                      <p className="text-xs text-muted-foreground">
+                        No lesson sections are available for this session yet.
+                      </p>
+                    )}
                     {sections.map((sec, idx) => (
                       <div key={idx} className="flex items-center gap-2.5 text-xs text-foreground/90 font-medium">
                         <span className="size-5 rounded-full bg-primary/10 text-primary flex items-center justify-center font-semibold text-[10px]">
@@ -286,11 +334,34 @@ export default function GuidedStudySessionPage() {
 
           {/* STAGE 5: SESSION SUMMARY */}
           {stage === "summary" && (
-            <SessionSummaryReport
-              session={session}
-              report={report || session.knowledge_check_report}
-              onReturnToPlanner={handleExit}
-            />
+            <>
+              {completionFailed && (
+                <div
+                  role="alert"
+                  className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 flex flex-wrap items-center gap-3"
+                >
+                  <AlertTriangle className="size-5 text-amber-600 dark:text-amber-400 shrink-0" />
+                  <p className="flex-1 text-xs font-medium text-amber-800 dark:text-amber-300">
+                    Your results are shown below, but this session&apos;s progress wasn&apos;t saved yet.
+                  </p>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-[11px] font-bold gap-1"
+                    onClick={saveCompletion}
+                    disabled={savingCompletion}
+                  >
+                    {savingCompletion ? <Loader2 className="size-3 animate-spin" /> : <RefreshCw className="size-3" />}{" "}
+                    {savingCompletion ? "Saving..." : "Retry saving"}
+                  </Button>
+                </div>
+              )}
+              <SessionSummaryReport
+                session={session}
+                report={report || session.knowledge_check_report}
+                onReturnToPlanner={handleExit}
+              />
+            </>
           )}
         </main>
       </div>

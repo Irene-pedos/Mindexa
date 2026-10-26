@@ -113,7 +113,7 @@ export function PlanAdjustmentModal({
                   </span>
                   <Badge
                     variant="outline"
-                    className="text-[9px] font-semibold bg-primary/10 border-primary/20 text-primary"
+                    className="text-[10px] font-semibold bg-primary/10 border-primary/20 text-primary"
                   >
                     Recommended
                   </Badge>

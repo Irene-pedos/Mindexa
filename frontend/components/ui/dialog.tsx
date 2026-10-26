@@ -51,12 +51,19 @@ function DialogContent({
   className,
   children,
   showCloseButton = true,
+  portalContainer,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   showCloseButton?: boolean
+  /**
+   * Render inside this element instead of <body>. Needed when the page is shown with the browser
+   * Fullscreen API on one element: only that element's subtree is visible, so a dialog portalled
+   * to <body> would open invisibly.
+   */
+  portalContainer?: HTMLElement | null
 }) {
   return (
-    <DialogPortal>
+    <DialogPortal container={portalContainer ?? undefined}>
       <DialogOverlay />
       <DialogPrimitive.Content
         data-slot="dialog-content"

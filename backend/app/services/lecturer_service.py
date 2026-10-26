@@ -80,8 +80,10 @@ class LecturerService:
                 StudentEnrollment.is_deleted == False
             )
         else:
-            # Check if enrolled in ANY section of the course
-            from app.db.models.academic import TeachingAssignment
+            # Check if enrolled in ANY section of the course. ClassSection is imported here too:
+            # the import further down makes it a local name for the whole function, so using the
+            # module-level one at this point raised UnboundLocalError.
+            from app.db.models.academic import ClassSection, TeachingAssignment
             enroll_stmt = select(StudentEnrollment).join(ClassSection).join(TeachingAssignment, TeachingAssignment.class_section_id == ClassSection.id).where(
                 StudentEnrollment.student_id == user.id,
                 TeachingAssignment.course_id == ws.course_id,

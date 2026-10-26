@@ -134,6 +134,8 @@ export async function refreshToken(options: RefreshOptions = {}) {
 
 interface FetchOptions extends RequestInit {
   requireAuth?: boolean;
+  /** How to read a successful response. Defaults to JSON; use "blob" for file downloads. */
+  responseType?: "json" | "blob";
 }
 
 /**
@@ -144,7 +146,8 @@ export const getToken = () => {
 };
 
 export async function apiClient(endpoint: string, options: FetchOptions = {}) {
-  const { requireAuth = true, headers, ...customConfig } = options;
+  const { requireAuth = true, responseType = "json", headers, ...customConfig } = options;
+  const readBody = (res: Response) => (responseType === "blob" ? res.blob() : res.json());
 
   const config: RequestInit = {
     ...customConfig,
@@ -170,11 +173,6 @@ export async function apiClient(endpoint: string, options: FetchOptions = {}) {
       Authorization: `Bearer ${currentToken}`,
     };
   }
-
-  console.log(`[apiClient] ${config.method || "GET"} ${endpoint}`, {
-    auth: !!(config.headers as any)?.["Authorization"],
-    window: typeof window !== "undefined",
-  });
 
   const apiUrl = resolveApiUrl();
   let response;
@@ -219,7 +217,7 @@ export async function apiClient(endpoint: string, options: FetchOptions = {}) {
       };
       response = await fetch(`${apiUrl}${endpoint}`, config);
       if (response.ok || response.status !== 401) {
-        return response.json();
+        return readBody(response);
       }
     }
 
@@ -257,7 +255,7 @@ export async function apiClient(endpoint: string, options: FetchOptions = {}) {
           Authorization: `Bearer ${finalToken}`,
         };
         response = await fetch(`${apiUrl}${endpoint}`, config);
-        if (response.ok) return response.json();
+        if (response.ok) return readBody(response);
       }
 
       // Notify about session expiration
@@ -283,7 +281,8 @@ export async function apiClient(endpoint: string, options: FetchOptions = {}) {
     const errorCode: string | undefined = errorData?.error?.code || errorData?.code;
 
     // Rate limiting carries `details: { limit, tier, retry_after_seconds }`, which are not field errors.
-    if (response.status === 429) {
+    // The daily AI budget is a 429 too, but "slow down" would be wrong: its message says when it resets.
+    if (response.status === 429 && errorCode !== "ai_daily_budget_exceeded") {
       const retryAfter = Number(
         errorData?.error?.details?.retry_after_seconds ??
           errorData?.details?.retry_after_seconds ??
@@ -348,5 +347,5 @@ export async function apiClient(endpoint: string, options: FetchOptions = {}) {
   }
 
   if (response.status === 204) return null;
-  return response.json();
+  return readBody(response);
 }

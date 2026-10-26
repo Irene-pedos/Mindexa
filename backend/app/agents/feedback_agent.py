@@ -1,15 +1,10 @@
 from __future__ import annotations
 
-import json
 import uuid
-from typing import Any
 
-from pydantic import BaseModel, Field, ValidationError as PydanticValidationError
+from pydantic import BaseModel, Field
 
-from app.core.ai.gateway import AIGateway
-from app.core.ai.prompt_registry import get_prompt
 from app.core.ai.providers import AICompletionRequest, AIMessage
-from app.core.exceptions import ValidationError
 from app.db.enums import AIActionType
 
 

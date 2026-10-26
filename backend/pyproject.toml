@@ -43,12 +43,13 @@ dependencies = [
     "flower>=2.0.1",
 
     # ── AI / LLM Layer ────────────────────────────────────────────────
+    # Providers (Groq/OpenAI/Anthropic/Jina) are called over httpx, so no vendor SDKs are needed.
+    # langchain/langchain-openai are only imported by the example agents/orchestrator.py.
     "langchain>=0.2.0",
     "langchain-openai>=0.1.8",
-    "langchain-community>=0.2.0",
-    "langgraph>=0.1.0",
-    "openai>=1.30.0",
     "tiktoken>=0.7.0",
+    # Imported (lazily) by services/gemini_service.py for the /gemini chat endpoint.
+    "google-generativeai>=0.8.0",
 
     # ── Document Processing (RAG) ─────────────────────────────────────
     "pymupdf>=1.24.3",
@@ -60,20 +61,12 @@ dependencies = [
     # ── HTTP Client ───────────────────────────────────────────────────
     "httpx>=0.27.0",
 
-    # ── Email ────────────────────────────────────────────────────────
-    "fastapi-mail>=1.4.1",
-
-    # ── Rate Limiting ─────────────────────────────────────────────────
-    "slowapi>=0.1.9",
-
     # ── Logging & Monitoring ─────────────────────────────────────────
     "structlog>=24.1.0",
     "sentry-sdk[fastapi]>=2.3.1",
 
     # ── Utilities ─────────────────────────────────────────────────────
-    "python-slugify>=8.0.4",
-    "arrow>=1.3.0",
-    "shortuuid>=1.0.13",
+    "python-dateutil>=2.9.0",
     "json-repair>=0.30.0",
 
     # ── Excel Export (Phase 6C) ───────────────────────────────────────

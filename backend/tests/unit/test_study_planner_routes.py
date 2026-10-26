@@ -123,7 +123,8 @@ async def test_all_study_planner_service_methods():
         assert len(quiz) >= 1
         assert quiz[0]["generated_by"] == "ai"
 
-        # Test reschedule_session
+        # Test reschedule_session (a completed session can't be rescheduled, so reopen the mock first)
+        mock_session.status = "SCHEDULED"
         resched = await service.reschedule_session(session_id, student_id, datetime.now(UTC) + timedelta(days=1), 45)
         assert resched.status == "RESCHEDULED"
 
@@ -166,10 +167,12 @@ async def test_reschedule_contract_schema_and_route():
     mock_session.duration_minutes = 60
     mock_session.status = "SCHEDULED"
 
+    # Relative dates: a fixed calendar date eventually falls in the past, which is rejected.
+    new_start = datetime.now(UTC) + timedelta(days=3)
     mock_plan = MagicMock()
     mock_plan.id = mock_session.study_plan_id
-    mock_plan.start_date = datetime(2026, 7, 1, tzinfo=UTC)
-    mock_plan.end_date = datetime(2026, 8, 31, tzinfo=UTC)
+    mock_plan.start_date = datetime.now(UTC) - timedelta(days=30)
+    mock_plan.end_date = datetime.now(UTC) + timedelta(days=30)
     mock_plan.blackout_dates = []
 
     with patch.object(service.repo, "get_session_by_id", new_callable=AsyncMock) as mock_get_session, \
@@ -182,7 +185,7 @@ async def test_reschedule_contract_schema_and_route():
 
         # Route reads body.new_duration_minutes
         resched = await service.reschedule_session(
-            session_id, student_id, req1.new_start, req1.new_duration_minutes
+            session_id, student_id, new_start, req1.new_duration_minutes
         )
         assert resched.duration_minutes == 45
         assert resched.status == "RESCHEDULED"

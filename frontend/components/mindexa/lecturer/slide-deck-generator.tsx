@@ -1,14 +1,7 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
-import {
-  Card,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-  CardContent,
-  CardFooter,
-} from "@/components/ui/card";
+import { useState, useEffect, useRef } from "react";
+import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
@@ -22,7 +15,6 @@ import {
   Clock,
   Check,
   Copy,
-  FileCode,
   Loader2,
   AlertTriangle,
   Lightbulb,
@@ -41,6 +33,8 @@ import {
   SlideItem,
 } from "@/lib/api/lecturer-ai";
 import { cn } from "@/lib/utils";
+import { useUnsavedChangesWarning } from "@/hooks/use-unsaved-changes-warning";
+import { NumberField } from "./number-field";
 
 interface SlideDeckGeneratorProps {
   workspaceId: string;
@@ -63,21 +57,36 @@ export function SlideDeckGenerator({
   const [isExporting, setIsExporting] = useState(false);
   const [generatedDeck, setGeneratedDeck] = useState<SlideDeckOutput | null>(null);
 
+  // A deck is "unexported" until it has been downloaded or copied in its current (possibly
+  // edited) form; that is the work a regenerate or a closed tab would lose.
+  const exportedSnapshotRef = useRef("");
+  const deckSnapshot = generatedDeck ? JSON.stringify(generatedDeck) : "";
+  const hasUnexportedDeck = !!generatedDeck && deckSnapshot !== exportedSnapshotRef.current;
+  useUnsavedChangesWarning(hasUnexportedDeck);
+
   const [activeSlideIndex, setActiveSlideIndex] = useState(0);
   const [copied, setCopied] = useState(false);
 
   // Fetch learning units when workspace changes
   useEffect(() => {
+    // A deck belongs to the workspace it was generated for; never keep it (or export it) after
+    // switching to another.
+    setGeneratedDeck(null);
+    setActiveSlideIndex(0);
+
     if (!workspaceId) {
       setLearningUnits([]);
       setSelectedLuId("");
       return;
     }
 
+    // Ignore a slow response for a workspace the lecturer has already left.
+    let cancelled = false;
     async function loadLUs() {
       try {
         setLoadingUnits(true);
         const units = await lecturerAiApi.getWorkspaceLearningUnits(workspaceId);
+        if (cancelled) return;
         setLearningUnits(units || []);
         if (units && units.length > 0) {
           setSelectedLuId(units[0].id);
@@ -85,16 +94,21 @@ export function SlideDeckGenerator({
           setSelectedLuId("");
         }
       } catch (err: any) {
+        if (cancelled) return;
         console.error("Failed to load learning units", err);
         toast.error("Could not fetch learning units for this workspace.");
       } finally {
-        setLoadingUnits(false);
+        if (!cancelled) setLoadingUnits(false);
       }
     }
     loadLUs();
+    return () => {
+      cancelled = true;
+    };
   }, [workspaceId]);
 
   const [selectedOutcomes, setSelectedOutcomes] = useState<string[]>([]);
+  const selectedLu = learningUnits.find((u) => u.id === selectedLuId);
 
   // Update selected outcomes when selected LU changes
   useEffect(() => {
@@ -121,13 +135,27 @@ export function SlideDeckGenerator({
       toast.error("AI operations are restricted for Kinyarwanda language workspaces.");
       return;
     }
+    if (
+      hasUnexportedDeck &&
+      !window.confirm("Generating again replaces the deck on screen, which hasn't been downloaded or copied. Continue?")
+    ) {
+      return;
+    }
+
+    // A unit with learning outcomes needs at least one picked: "none selected" used to be sent as
+    // "no filter", i.e. everything, which is the opposite of what an empty selection suggests.
+    const unitHasOutcomes = (selectedLu?.learning_outcomes?.length ?? 0) > 0;
+    if (unitHasOutcomes && selectedOutcomes.length === 0) {
+      toast.error("Select at least one learning outcome to build the deck around.");
+      return;
+    }
 
     try {
       setIsGenerating(true);
       const res = await lecturerAiApi.generateSlideDeck(
         selectedLuId,
         estimatedDuration,
-        selectedOutcomes.length > 0 ? selectedOutcomes : undefined
+        unitHasOutcomes ? selectedOutcomes : undefined
       );
       setGeneratedDeck(res.deck);
       setActiveSlideIndex(0);
@@ -154,6 +182,7 @@ export function SlideDeckGenerator({
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
+      exportedSnapshotRef.current = deckSnapshot;
       toast.success("PowerPoint (.pptx) downloaded successfully!");
     } catch (err: any) {
       console.error("Failed to export pptx", err);
@@ -183,6 +212,7 @@ export function SlideDeckGenerator({
 
     navigator.clipboard.writeText(text);
     setCopied(true);
+    exportedSnapshotRef.current = deckSnapshot;
     toast.success("Slide deck outline copied to clipboard!");
     setTimeout(() => setCopied(false), 2000);
   };
@@ -203,8 +233,6 @@ export function SlideDeckGenerator({
     nextSlides[slideIdx] = { ...nextSlides[slideIdx], bullet_points: nextBullets };
     setGeneratedDeck({ ...generatedDeck, slides: nextSlides });
   };
-
-  const selectedLu = learningUnits.find((u) => u.id === selectedLuId);
 
   return (
     <div className="flex-1 p-3 sm:p-5 lg:p-6 overflow-y-auto space-y-4 w-full max-w-full narrow-scrollbar-dark">
@@ -308,7 +336,7 @@ export function SlideDeckGenerator({
               {loadingUnits ? (
                 <div className="flex items-center gap-2 text-xs text-muted-foreground py-2 animate-pulse">
                   <Loader2 className="size-3.5 animate-spin text-primary" />
-                  <span>Segmenting & loading units...</span>
+                  <span>Loading learning units...</span>
                 </div>
               ) : learningUnits.length === 0 ? (
                 <div className="p-3 rounded-xl border border-border/70 bg-card text-xs text-muted-foreground space-y-1">
@@ -395,13 +423,12 @@ export function SlideDeckGenerator({
               <Label htmlFor="deck-duration" className="text-xs font-semibold">
                 Estimated Lecture Duration (minutes)
               </Label>
-              <Input
+              <NumberField
                 id="deck-duration"
-                type="number"
                 min={10}
                 max={180}
                 value={estimatedDuration}
-                onChange={(e) => setEstimatedDuration(parseInt(e.target.value) || 45)}
+                onCommit={setEstimatedDuration}
                 className="h-9 text-xs bg-background rounded-xl"
               />
             </div>
@@ -623,7 +650,7 @@ export function SlideDeckGenerator({
                     <span className="text-[10px] font-bold text-foreground truncate block">
                       {sIdx + 1}. {slide.title}
                     </span>
-                    <span className="text-[9px] text-muted-foreground line-clamp-2 leading-tight">
+                    <span className="text-[10px] text-muted-foreground line-clamp-2 leading-tight">
                       {slide.bullet_points[0] || ""}
                     </span>
                   </button>

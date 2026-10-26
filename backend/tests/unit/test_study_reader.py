@@ -677,24 +677,26 @@ async def test_extract_exact_page_text_strict_chunk_fallback(monkeypatch):
     # 1. Mock file_path lookup returning None (no PDF file on disk)
     mock_res_file = MagicMock()
     mock_res_file.scalar_one_or_none.return_value = None
+    mock_db.execute = AsyncMock(return_value=mock_res_file)
 
-    # 2. Mock chunk query returning strictly matched page chunk
-    from app.db.models.resource import LecturerMaterialChunk
-    mock_chunk = LecturerMaterialChunk(
-        id=uuid.uuid4(),
-        lecturer_material_id=material_id,
+    # 2. The indexed chunks (ResourceChunk) are what the pipeline really writes
+    from app.db.models.resource_chunk import ResourceChunk
+    academic_id = uuid.uuid4()
+    mock_chunk = ResourceChunk(
+        resource_id=academic_id,
         chunk_index=0,
         content="Strictly page 4 content.",
-        source_page=4,
+        metadata_json={"page": 4},
     )
-    mock_res_chunks = MagicMock()
-    mock_res_chunks.scalars.return_value.all.return_value = [mock_chunk]
-
-    mock_db.execute = AsyncMock(side_effect=[mock_res_file, mock_res_chunks])
+    service.resource_repo = MagicMock()
+    service.resource_repo.get_academic_resource_id = AsyncMock(return_value=academic_id)
+    service.resource_repo.list_source_chunks = AsyncMock(return_value=[mock_chunk])
 
     result = await service.extract_exact_page_text("lecturer_material", material_id, page_num)
 
     assert result == "Strictly page 4 content."
+    # Only chunks of the requested page may be pulled
+    assert service.resource_repo.list_source_chunks.call_args.kwargs["page"] == page_num
     # Verify cached in Redis for fast future retrieval
     mock_cache_set.assert_called_once()
     assert mock_cache_set.call_args[0][0] == "study_page_text"

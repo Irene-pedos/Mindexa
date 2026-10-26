@@ -163,3 +163,94 @@ async def test_analytics_service_compute_aggregates_compilation():
     compiled_cohort = cohort_stmt.compile(dialect=postgresql.dialect())
     assert "CAST(assessment_result.is_passing AS INTEGER)" in str(compiled_cohort)
 
+
+
+# ── AI narrative cache ───────────────────────────────────────────────────────
+
+
+def _service_for_insights(monkeypatch, stats):
+    from app.core.cache import cache
+
+    db = AsyncMock()
+    db.get.return_value = MagicMock(title="CS101")
+    service = AnalyticsService(db)
+    service._compute_aggregates = AsyncMock(return_value=stats)
+    store: dict = {}
+
+    async def fake_get(namespace, key):
+        return store.get((namespace, key))
+
+    async def fake_set(namespace, key, value, ttl=None):
+        store[(namespace, key)] = value
+
+    monkeypatch.setattr(cache, "get", fake_get)
+    monkeypatch.setattr(cache, "set", fake_set)
+    monkeypatch.setattr(
+        "app.services.result_service.ResultService.assert_lecturer_assessment_access", AsyncMock()
+    )
+    return service
+
+
+_OUTPUT = AnalyticsAgentOutput(
+    summary="The class did solidly overall on this assessment.", weak_topics=["Joins"], insights=["x"], recommended_interventions=["y"]
+)
+
+
+@pytest.mark.asyncio
+async def test_narrative_is_cached_so_repeat_views_do_not_call_the_model(monkeypatch):
+    service = _service_for_insights(monkeypatch, {"cohort_size": 10, "average_score": 60.0})
+    assessment_id, lecturer_id = uuid.uuid4(), uuid.uuid4()
+
+    with patch(
+        "app.agents.analytics_agent.AnalyticsAgent.analyze_assessment",
+        new_callable=AsyncMock,
+        return_value=_OUTPUT,
+    ) as analyze:
+        first = await service.get_assessment_ai_insights(assessment_id, lecturer_id)
+        second = await service.get_assessment_ai_insights(assessment_id, lecturer_id)
+
+    assert analyze.call_count == 1
+    assert second["ai_narrative"] == first["ai_narrative"] == "The class did solidly overall on this assessment."
+    assert second["weak_topics"] == ["Joins"]
+
+
+@pytest.mark.asyncio
+async def test_changed_statistics_invalidate_the_cached_narrative(monkeypatch):
+    stats = {"cohort_size": 10, "average_score": 60.0}
+    service = _service_for_insights(monkeypatch, stats)
+    assessment_id, lecturer_id = uuid.uuid4(), uuid.uuid4()
+
+    with patch(
+        "app.agents.analytics_agent.AnalyticsAgent.analyze_assessment",
+        new_callable=AsyncMock,
+        return_value=_OUTPUT,
+    ) as analyze:
+        await service.get_assessment_ai_insights(assessment_id, lecturer_id)
+        service._compute_aggregates.return_value = {**stats, "cohort_size": 11}  # a new submission
+        await service.get_assessment_ai_insights(assessment_id, lecturer_id)
+
+    assert analyze.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_each_class_section_has_its_own_narrative_and_regenerate_bypasses_the_cache(monkeypatch):
+    service = _service_for_insights(monkeypatch, {"cohort_size": 10})
+    assessment_id, lecturer_id = uuid.uuid4(), uuid.uuid4()
+    section_a, section_b = uuid.uuid4(), uuid.uuid4()
+
+    with patch(
+        "app.agents.analytics_agent.AnalyticsAgent.analyze_assessment",
+        new_callable=AsyncMock,
+        return_value=_OUTPUT,
+    ) as analyze:
+        await service.get_assessment_ai_insights(assessment_id, lecturer_id, class_section_id=section_a)
+        await service.get_assessment_ai_insights(assessment_id, lecturer_id, class_section_id=section_b)
+        assert analyze.call_count == 2  # same numbers, different cohort: not shared
+
+        await service.get_assessment_ai_insights(assessment_id, lecturer_id, class_section_id=section_a)
+        assert analyze.call_count == 2  # cached
+
+        await service.get_assessment_ai_insights(
+            assessment_id, lecturer_id, class_section_id=section_a, regenerate=True
+        )
+        assert analyze.call_count == 3

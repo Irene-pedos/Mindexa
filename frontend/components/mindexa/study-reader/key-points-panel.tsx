@@ -332,7 +332,7 @@ export function KeyPointsPanel({
                   <div className="flex items-center justify-between pt-1 border-t border-border/30">
                     <Badge
                       variant="outline"
-                      className="text-[9px] font-medium h-4 px-1.5"
+                      className="text-[10px] font-medium h-4 px-1.5"
                     >
                       {TAG_LABELS[kp.tag] || kp.tag}
                     </Badge>

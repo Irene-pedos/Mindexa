@@ -3,15 +3,12 @@ from __future__ import annotations
 import uuid
 from typing import Any, Dict, List, Optional
 
-import httpx
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.db.enums import EnrollmentStatus, ResourceCategory
 from app.db.models.academic import StudentEnrollment, TeachingWorkspace
 from app.db.models.academic_resource import AcademicResource
-from app.db.models.resource import (LecturerMaterial, LecturerMaterialChunk,
-                                    StudentResource)
-from app.db.models.resource_chunk import ResourceChunk
+from app.db.models.resource import (LecturerMaterial, StudentResource)
 from app.db.schemas.rag import RAGRetrievalResult, SourceCitation
 from sqlalchemy import and_, bindparam, or_, select, text
 from sqlalchemy.dialects.postgresql import ARRAY
@@ -97,6 +94,7 @@ class RAGService:
                   AND lm.is_deleted = FALSE
                   AND lm.is_current = TRUE
                   AND lm.processing_status = 'PROCESSED'
+                  AND rc.is_deleted = FALSE
                   AND rc.embedding IS NOT NULL
         """
         if material_ids:
@@ -303,6 +301,7 @@ class RAGService:
                 FROM resource_chunks rc
                 JOIN academic_resources ar ON rc.resource_id = ar.id
                 WHERE rc.resource_id = ANY(:allowed_ids)
+                  AND rc.is_deleted = FALSE
                   AND rc.embedding IS NOT NULL
                 ORDER BY rc.embedding <=> CAST(:query_embedding AS vector)
                 LIMIT :top_k
@@ -444,6 +443,7 @@ class RAGService:
                 FROM resource_chunks rc
                 JOIN academic_resources ar ON rc.resource_id = ar.id
                 WHERE rc.resource_id = ANY(:allowed_ids)
+                  AND rc.is_deleted = FALSE
                   AND rc.embedding IS NOT NULL
                 ORDER BY rc.embedding <=> CAST(:query_embedding AS vector)
                 LIMIT :top_k
@@ -523,69 +523,30 @@ class RAGService:
         questions: List[str],
         student_id: Optional[uuid.UUID] = None,
     ) -> List[List[float]]:
-        """Generate embeddings for batch query texts via audited AIGateway."""
+        """Generate embeddings for batch query texts via the audited, budgeted AIGateway.
+
+        There is deliberately no direct-to-provider fallback: it bypassed the audit log and the
+        per-user daily budget, and the gateway already tries every configured embedding provider.
+        """
         if not questions:
             return []
-        try:
-            from app.core.ai.gateway import AIGateway
-            from app.core.ai.provider_factory import (get_ai_providers,
-                                                      get_embedding_providers)
-            from app.core.ai.providers import AIEmbeddingRequest
+        from app.core.ai.gateway import AIGateway
+        from app.core.ai.provider_factory import get_ai_providers, get_embedding_providers
+        from app.core.ai.providers import AIEmbeddingRequest
 
-            gateway = AIGateway(self.db, get_ai_providers(), get_embedding_providers())
-            summary = (
-                f"RAG query embedding: {questions[0][:50]}"
-                if len(questions) == 1
-                else f"RAG batch query embedding: {len(questions)} items"
-            )
-            req = AIEmbeddingRequest(input=questions)
-            res = await gateway.embed(
-                req,
-                actor_id=student_id,
-                actor_role="student" if student_id else None,
-                prompt_summary=summary,
-            )
-            return [self._fit_dimension(vec) for vec in res.embeddings]
-        except Exception as exc:
-            logger.warning("AIGateway embedding failed for RAG query, attempting direct fallback", error=str(exc))
-
-        if not self.jina_api_key or not self.jina_api_key.strip():
-            raise Exception("Jina API key is not configured")
-
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.jina_api_key}",
-        }
-        url = f"{self.jina_base_url}/embeddings"
-        jina_dim = min(settings.PGVECTOR_DIMENSION, 1024)
-        target_dim = settings.PGVECTOR_DIMENSION
-        payload = {
-            "model": self.embedding_model,
-            "task": "retrieval.query" if len(questions) == 1 else "retrieval.passage",
-            "dimensions": jina_dim,
-            "input": questions,
-        }
-
-        try:
-            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-                response = await client.post(url, headers=headers, json=payload)
-                if response.status_code != 200:
-                    logger.error("Jina embedding failed", status=response.status_code, text=response.text)
-                    raise Exception(f"Jina embedding request failed with status {response.status_code}")
-
-                data = response.json()
-                results: List[List[float]] = []
-                for item in data.get("data", []):
-                    emb = item["embedding"]
-                    if len(emb) < target_dim:
-                        emb = emb + [0.0] * (target_dim - len(emb))
-                    elif len(emb) > target_dim:
-                        emb = emb[:target_dim]
-                    results.append(emb)
-                return results
-        except Exception as e:
-            logger.warning("Jina embedding error", error=str(e))
-            raise e
+        gateway = AIGateway(self.db, get_ai_providers(), get_embedding_providers())
+        summary = (
+            f"RAG query embedding: {questions[0][:50]}"
+            if len(questions) == 1
+            else f"RAG batch query embedding: {len(questions)} items"
+        )
+        res = await gateway.embed(
+            AIEmbeddingRequest(input=questions),
+            actor_id=student_id,
+            actor_role="student" if student_id else None,
+            prompt_summary=summary,
+        )
+        return [self._fit_dimension(vec) for vec in res.embeddings]
 
     async def _embed_question(self, question: str, student_id: Optional[uuid.UUID] = None) -> List[float]:
         """Generate embedding for single query text via audited AIGateway."""

@@ -1,4 +1,4 @@
-import { apiClient, getToken, resolveApiUrl } from "./client";
+import { apiClient } from "./client";
 
 export interface LearningUnitItem {
   id: string;
@@ -161,7 +161,8 @@ export const lecturerAiApi = {
   },
 
   /**
-   * Fetch ordered Learning Units for a workspace (with automatic segmentation fallback)
+   * Fetch the workspace's existing Learning Units, in order. Units are created when materials are
+   * processed; this does not segment anything on demand.
    */
   async getWorkspaceLearningUnits(workspaceId: string): Promise<LearningUnitItem[]> {
     return apiClient(`/lecturers/ai/workspaces/${workspaceId}/learning-units`);
@@ -188,27 +189,12 @@ export const lecturerAiApi = {
    * Export a SlideDeckOutput schema to a downloadable .pptx presentation file
    */
   async exportSlideDeckPptx(deck: SlideDeckOutput): Promise<Blob> {
-    const apiUrl = resolveApiUrl();
-    const token = getToken();
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-    };
-    if (token) {
-      headers["Authorization"] = `Bearer ${token}`;
-    }
-
-    const res = await fetch(`${apiUrl}/lecturers/ai/slides/export`, {
+    // Through apiClient so an expired token is refreshed and errors are parsed like every other call.
+    return apiClient("/lecturers/ai/slides/export", {
       method: "POST",
-      headers,
       body: JSON.stringify({ deck }),
+      responseType: "blob",
     });
-
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.message || err.detail || "Failed to export PowerPoint presentation");
-    }
-
-    return res.blob();
   },
 
   /**

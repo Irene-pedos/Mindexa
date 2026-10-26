@@ -19,9 +19,10 @@ from app.agents.slide_deck_agent import SlideDeckAgent
 from app.core.ai.gateway import AIGateway
 from app.core.ai.language_policy import assert_ai_allowed
 from app.core.ai.meta_identity import (
-    _META_IDENTITY_PATTERN,
     LECTURER_META_IDENTITY_DEFLECTION,
+    is_meta_identity_query,
 )
+from app.schemas.chat import strip_attached_files
 from app.core.ai.provider_factory import get_ai_provider, get_embedding_provider
 from app.core.exceptions import NotFoundError, PermissionDeniedError, ValidationError
 from app.db.enums import AIActionType, UserRole
@@ -157,8 +158,9 @@ class LecturerAIService:
             context={"workspace_id": str(workspace.id)},
         )
 
-        # 2. Deterministic meta / identity question pre-filter (audit without calling LLM)
-        if _META_IDENTITY_PATTERN.search(body.question):
+        # 2. Deterministic meta / identity question pre-filter (audit without calling LLM).
+        # Typed text only: pasted/attached document text must not trigger the canned deflection.
+        if is_meta_identity_query(strip_attached_files(body.question)):
             gateway = self._get_gateway()
             await gateway.log_action(
                 action_type=AIActionType.STUDY_SUPPORT,
@@ -217,7 +219,7 @@ class LecturerAIService:
             mode=body.mode,
         )
 
-    # ─── 2. Learning Units Fetch & Fallback Segmentation ──────────────────────
+    # ─── 2. Learning Units Fetch ──────────────────────────────────────────────
 
     async def get_workspace_learning_units(
         self,

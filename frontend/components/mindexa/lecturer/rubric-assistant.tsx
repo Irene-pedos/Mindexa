@@ -1,14 +1,7 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
-import {
-  Card,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-  CardContent,
-  CardFooter,
-} from "@/components/ui/card";
+import { useState, useEffect, useRef } from "react";
+import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
@@ -22,7 +15,6 @@ import {
   Trash2,
   CheckCircle2,
   AlertCircle,
-  HelpCircle,
   Search,
   BookOpenCheck,
   RefreshCw,
@@ -36,10 +28,12 @@ import {
   lecturerAiApi,
   RubricCriterion,
   RubricCriterionLevel,
-  RubricDraftOutput,
 } from "@/lib/api/lecturer-ai";
 import { questionApi, QuestionBankItem } from "@/lib/api/question";
+import { useUnsavedChangesWarning } from "@/hooks/use-unsaved-changes-warning";
+import { rubricProblems } from "@/lib/rubric-validation";
 import { cn } from "@/lib/utils";
+import { NumberField } from "./number-field";
 
 interface RubricAssistantProps {
   workspaceId?: string;
@@ -67,6 +61,14 @@ export function RubricAssistant({
   const [rubricTitle, setRubricTitle] = useState("");
   const [rubricDescription, setRubricDescription] = useState("");
   const [criteria, setCriteria] = useState<RubricCriterion[]>([]);
+  const hasSelectionRef = useRef(false);
+
+  // "Unsaved" = the rubric differs from what was last saved (a fresh AI draft counts: nothing
+  // has been saved yet). Used to warn before a redraft overwrites it or the page is closed.
+  const savedSnapshotRef = useRef("");
+  const currentSnapshot = JSON.stringify({ rubricTitle, rubricDescription, criteria });
+  const hasUnsavedRubric = criteria.length > 0 && currentSnapshot !== savedSnapshotRef.current;
+  useUnsavedChangesWarning(hasUnsavedRubric);
 
   // Search questions on mount / query
   useEffect(() => {
@@ -78,13 +80,14 @@ export function RubricAssistant({
           page_size: 15,
         });
         setQuestions(res.items || []);
-        setSelectedQuestion((prev) => {
-          if (!prev && res.items && res.items.length > 0) {
-            setTargetMarks(res.items[0].marks || 10);
-            return res.items[0];
-          }
-          return prev;
-        });
+        // Pre-select the first result once. (Done here, not inside a state updater, which must
+        // stay free of side effects and double-fires under StrictMode.)
+        const first = res.items?.[0];
+        if (first && !hasSelectionRef.current) {
+          hasSelectionRef.current = true;
+          setSelectedQuestion(first);
+          setTargetMarks(first.marks || 10);
+        }
       } catch (err) {
         console.error("Failed to load questions", err);
       } finally {
@@ -96,6 +99,7 @@ export function RubricAssistant({
   }, [searchQuery]);
 
   const handleSelectQuestion = (q: QuestionBankItem) => {
+    hasSelectionRef.current = true;
     setSelectedQuestion(q);
     setTargetMarks(q.marks || 10);
   };
@@ -107,6 +111,12 @@ export function RubricAssistant({
     }
     if (isRwandaBlocked) {
       toast.error("AI operations are restricted for Kinyarwanda language courses.");
+      return;
+    }
+    if (
+      hasUnsavedRubric &&
+      !window.confirm("Drafting again replaces the criteria on screen, which haven't been saved. Continue?")
+    ) {
       return;
     }
 
@@ -133,8 +143,13 @@ export function RubricAssistant({
 
   const handleSaveRubric = async () => {
     if (!selectedQuestion) return;
-    if (criteria.length === 0) {
-      toast.error("Rubric must contain at least one criterion.");
+
+    // Catch what the server would reject, with a message that names the problem.
+    const problems = rubricProblems(criteria, targetMarks);
+    if (problems.length > 0) {
+      toast.error("This rubric can't be saved yet", {
+        description: problems.slice(0, 3).join("\n"),
+      });
       return;
     }
 
@@ -146,7 +161,8 @@ export function RubricAssistant({
         criteria,
         rubricDescription || undefined
       );
-      toast.success("Rubric saved and attached to Question in database!");
+      savedSnapshotRef.current = currentSnapshot;
+      toast.success("Rubric saved and attached to the question. Any earlier rubric is kept untouched.");
     } catch (err: any) {
       console.error("Failed to save rubric", err);
       toast.error(err.message || "Failed to save rubric.");
@@ -172,7 +188,10 @@ export function RubricAssistant({
   };
 
   const removeCriterion = (idx: number) => {
-    setCriteria(criteria.filter((_, i) => i !== idx));
+    // Renumber so order_index stays 1..n (the table requires it to be unique per rubric).
+    setCriteria(
+      criteria.filter((_, i) => i !== idx).map((c, i) => ({ ...c, order_index: i + 1 }))
+    );
   };
 
   const updateCriterion = (idx: number, field: keyof RubricCriterion, val: any) => {
@@ -305,7 +324,7 @@ export function RubricAssistant({
                     )}
                   >
                     <div className="flex items-center justify-between gap-1 mb-0.5">
-                      <Badge variant="outline" className="text-[9px] px-1 py-0 uppercase">
+                      <Badge variant="outline" className="text-[10px] px-1 py-0 uppercase">
                         {q.question_type}
                       </Badge>
                       <span className="text-[10px] font-semibold text-primary">{q.marks || 1} pts</span>
@@ -334,13 +353,12 @@ export function RubricAssistant({
               <Label htmlFor="rubric-marks" className="text-xs font-semibold">
                 Total Target Marks
               </Label>
-              <Input
+              <NumberField
                 id="rubric-marks"
-                type="number"
                 min={1}
                 max={100}
                 value={targetMarks}
-                onChange={(e) => setTargetMarks(parseInt(e.target.value) || 10)}
+                onCommit={setTargetMarks}
                 className="h-9 text-xs bg-background rounded-xl"
               />
             </div>
@@ -494,12 +512,12 @@ export function RubricAssistant({
                       <div className="flex items-center gap-2">
                         <div className="flex items-center gap-1">
                           <span className="text-xs text-muted-foreground">Max:</span>
-                          <Input
-                            type="number"
+                          <NumberField
                             min={1}
                             max={100}
                             value={crit.max_marks}
-                            onChange={(e) => updateCriterion(cIdx, "max_marks", parseInt(e.target.value) || 1)}
+                            onCommit={(v) => updateCriterion(cIdx, "max_marks", v)}
+                            aria-label={`Maximum marks for criterion ${cIdx + 1}`}
                             className="w-16 h-8 text-xs bg-background font-bold"
                           />
                           <span className="text-xs text-muted-foreground">pts</span>
@@ -539,11 +557,12 @@ export function RubricAssistant({
                                 className="text-xs font-semibold h-6 px-1.5 bg-background w-24"
                               />
                               <div className="flex items-center gap-1">
-                                <Input
-                                  type="number"
+                                <NumberField
                                   min={0}
+                                  max={crit.max_marks}
                                   value={lvl.marks}
-                                  onChange={(e) => updateLevel(cIdx, lIdx, "marks", parseInt(e.target.value) || 0)}
+                                  onCommit={(v) => updateLevel(cIdx, lIdx, "marks", v)}
+                                  aria-label={`Marks for level ${lvl.label || lIdx + 1}`}
                                   className="w-12 h-6 text-xs bg-background font-bold text-primary px-1"
                                 />
                                 <span className="text-[10px] text-muted-foreground">pts</span>

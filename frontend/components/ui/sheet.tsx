@@ -53,13 +53,15 @@ interface SheetContentProps
   extends React.ComponentPropsWithoutRef<typeof SheetPrimitive.Content>,
     VariantProps<typeof sheetVariants> {
   showCloseButton?: boolean;
+  /** Render inside this element instead of <body> (see DialogContent's `portalContainer`). */
+  portalContainer?: HTMLElement | null;
 }
 
 const SheetContent = React.forwardRef<
   React.ElementRef<typeof SheetPrimitive.Content>,
   SheetContentProps
->(({ side = "right", className, children, showCloseButton = true, ...props }, ref) => (
-  <SheetPortal>
+>(({ side = "right", className, children, showCloseButton = true, portalContainer, ...props }, ref) => (
+  <SheetPortal container={portalContainer ?? undefined}>
     <SheetOverlay />
     <SheetPrimitive.Content
       ref={ref}

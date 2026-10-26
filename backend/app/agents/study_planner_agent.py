@@ -8,11 +8,10 @@ from typing import Any, Dict, List, Optional
 from pydantic import model_validator
 
 from app.agents.base import BaseAgent
-from app.core.ai.gateway import AIGateway
 from app.core.ai.prompt_registry import get_prompt
 from app.core.ai.prompt_render import render_prompt, untrusted_block
 from app.core.ai.providers import AICompletionRequest, AIMessage
-from app.core.logger import get_logger
+from app.core.logging import get_logger
 from app.db.enums import AIActionType
 from app.db.models.study_plan import StudySession
 from pydantic import BaseModel, Field, field_validator
@@ -848,15 +847,15 @@ class StudyPlannerAgent(BaseAgent):
 
         output: GuidedExerciseOutput = self._parse_json_output(response.content, GuidedExerciseOutput)  # type: ignore
         if output.options and len(output.options) >= 2:
+            # Models tend to put the right answer first; shuffle and re-point the correct index.
             import random
             options_with_idx = list(enumerate(output.options))
-            new_options = [opt for _, opt in options_with_idx]
-            new_correct_idx = next(
+            random.shuffle(options_with_idx)
+            output.options = [opt for _, opt in options_with_idx]
+            output.correct_option_index = next(
                 (new_i for new_i, (old_i, _) in enumerate(options_with_idx) if old_i == output.correct_option_index),
-                0
+                0,
             )
-            output.options = new_options
-            output.correct_option_index = new_correct_idx
 
         return output
 
@@ -877,8 +876,8 @@ class StudyPlannerAgent(BaseAgent):
             f"Given these sequential document chunks, group them into 3 to 10 logically coherent Learning Units in the order they appear.\n"
             f"Each unit should be teachable in one 30-60 minute study session and must include 2 to 4 clear, concise learning outcomes.\n\n"
             f"Sequential Chunks:\n" + "\n".join(chunk_summaries) + "\n\n"
-            f"Return ONLY a JSON list of objects matching this schema:\n"
-            f"[{{\"title\": \"LU 1: ...\", \"summary\": \"...\", \"learning_outcomes\": [\"Outcome 1\", \"Outcome 2\"], \"chunk_indices\": [0, 1], \"estimated_minutes\": 45}}]"
+            "Return ONLY a JSON list of objects matching this schema:\n"
+            "[{\"title\": \"LU 1: ...\", \"summary\": \"...\", \"learning_outcomes\": [\"Outcome 1\", \"Outcome 2\"], \"chunk_indices\": [0, 1], \"estimated_minutes\": 45}]"
         )
 
         request = AICompletionRequest(

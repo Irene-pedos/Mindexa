@@ -52,15 +52,25 @@ export default function AcademicRecordPage() {
   useEffect(() => {
     async function loadData() {
       try {
-        const [dashData, resultsData] = await Promise.all([
+        const PAGE_SIZE = 100 // the API rejects anything larger
+        const MAX_PAGES = 20
+        const [dashData, firstPage] = await Promise.all([
           studentApi.getDashboard(),
-          resultApi.getMyResults({ page: 1, page_size: 200 }),
+          resultApi.getMyResults({ page: 1, page_size: PAGE_SIZE }),
         ])
 
         setCgpa(dashData.summary.cgpa.value)
         setCompletedAssessments(dashData.summary.completed_assessments_count.value)
 
-        const items: any[] = resultsData.items || []
+        // Collect every page, so a long record is not silently cut off.
+        const items: any[] = [...(firstPage.items || [])]
+        let lastPageSize = items.length
+        for (let page = 2; lastPageSize === PAGE_SIZE && page <= MAX_PAGES; page++) {
+          const next = await resultApi.getMyResults({ page, page_size: PAGE_SIZE })
+          const nextItems = next.items || []
+          items.push(...nextItems)
+          lastPageSize = nextItems.length
+        }
 
         // Build course record list from results
         const records: CourseRecord[] = items.map((r: any) => ({

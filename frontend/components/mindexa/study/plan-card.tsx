@@ -39,14 +39,14 @@ export function PlanCard({ plan, expanded, onToggleExpanded, onAdjust, onResched
             <div className="flex items-center gap-1.5 flex-wrap">
               <Badge
                 variant="secondary"
-                className="text-[9px] font-semibold bg-primary/10 text-primary border border-primary/20 py-0 px-1.5"
+                className="text-[10px] font-semibold bg-primary/10 text-primary border border-primary/20 py-0 px-1.5"
               >
                 {plan.study_type}
               </Badge>
               <Badge
                 variant="outline"
                 className={cn(
-                  "text-[9px] font-semibold border-border/60 py-0 px-1.5",
+                  "text-[10px] font-semibold border-border/60 py-0 px-1.5",
                   plan.priority === "High" &&
                     "text-amber-600 dark:text-amber-400 bg-amber-500/5 border-amber-500/30",
                 )}
@@ -113,7 +113,7 @@ export function PlanCard({ plan, expanded, onToggleExpanded, onAdjust, onResched
             >
               <div className="space-y-0.5 min-w-0 flex-1">
                 <p className="text-[11px] font-semibold text-foreground truncate">{sessionLabel(s)}</p>
-                <p className="text-[9px] text-muted-foreground flex items-center gap-1">
+                <p className="text-[10px] text-muted-foreground flex items-center gap-1">
                   <CalendarIcon className="size-2" aria-hidden />
                   {s.scheduled_start ? formatSessionRelativeTime(s.scheduled_start) : "Unscheduled"}
                 </p>
@@ -123,7 +123,7 @@ export function PlanCard({ plan, expanded, onToggleExpanded, onAdjust, onResched
                 {s.status === "COMPLETED" ? (
                   <Badge
                     variant="outline"
-                    className="text-[9px] font-semibold border-emerald-500/30 text-emerald-600 bg-emerald-500/5 px-1.5 py-0"
+                    className="text-[10px] font-semibold border-emerald-500/30 text-emerald-600 bg-emerald-500/5 px-1.5 py-0"
                   >
                     <Check className="size-2 mr-0.5" aria-hidden /> Done
                   </Badge>

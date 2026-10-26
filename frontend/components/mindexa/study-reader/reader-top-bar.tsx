@@ -153,7 +153,7 @@ export function ReaderTopBar({
           </span>
           <Badge
             variant="outline"
-            className="text-[9px] uppercase font-mono px-1 py-0 h-4 shrink-0 hidden lg:inline-flex border-border/60"
+            className="text-[10px] uppercase font-mono px-1 py-0 h-4 shrink-0 hidden lg:inline-flex border-border/60"
           >
             {source.extension?.replace(".", "") || "FILE"}
           </Badge>

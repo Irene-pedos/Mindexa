@@ -13,11 +13,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.exceptions import AuthorizationError, ValidationError
+from app.core.uploads import (assert_content_matches_extension, assert_not_empty, clean_display_name,
+                              read_limited, validated_extension)
 from app.db.models.resource import LecturerMaterial, StudentResource
 from app.db.models.academic_resource import AcademicResource
 from app.db.repositories.resource_repo import ResourceRepository
 from app.db.repositories.workspace_repo import WorkspaceRepository
-from app.db.schemas.resource import LecturerMaterialCreate, StudentResourceResponse
+from app.db.schemas.resource import LecturerMaterialCreate
 
 
 class ResourceService:
@@ -38,13 +40,15 @@ class ResourceService:
         """
         await self.assert_can_manage_workspace_material(lecturer_id, metadata)
 
-        # 1. Validate file extension
-        ext = os.path.splitext(file.filename)[1].lower()
-        if ext not in settings.ALLOWED_UPLOAD_EXTENSIONS:
-            raise ValidationError(
-                f"File extension {ext} is not allowed.",
-                code="INVALID_FILE_TYPE",
-            )
+        # 1. Validate name, size and content before anything touches the disk
+        ext = validated_extension(file.filename, settings.ALLOWED_UPLOAD_EXTENSIONS)
+        content = await read_limited(
+            file, settings.max_upload_size_bytes, limit_label=f"{settings.MAX_UPLOAD_SIZE_MB}MB"
+        )
+        assert_not_empty(content)
+        assert_content_matches_extension(ext, content)
+        file_size = len(content)
+        filename = clean_display_name(file.filename)
 
         # 2. Create directory structure: uploads/lecturers/{lecturer_id}/materials/
         relative_dir = os.path.join("lecturers", str(lecturer_id), "materials")
@@ -57,22 +61,14 @@ class ResourceService:
         absolute_path = os.path.join(settings.UPLOAD_DIR, file_path)
 
         # 4. Write file to disk
-        content = await file.read()
-        file_size = len(content)
-        if file_size > settings.max_upload_size_bytes:
-            raise ValidationError(
-                f"File size exceeds the {settings.MAX_UPLOAD_SIZE_MB}MB limit.",
-                code="FILE_TOO_LARGE",
-            )
-
         with open(absolute_path, "wb") as f:
             f.write(content)
 
         # 5. Handle versioning (mark old versions of this filename as not current in this workspace)
-        latest_existing = await self.repo.get_latest_material_by_filename(metadata.teaching_workspace_id, file.filename)
+        latest_existing = await self.repo.get_latest_material_by_filename(metadata.teaching_workspace_id, filename)
         next_version = (latest_existing.version + 1) if latest_existing else 1
 
-        superseded_ids = await self.repo.mark_superseded(metadata.teaching_workspace_id, file.filename)
+        superseded_ids = await self.repo.mark_superseded(metadata.teaching_workspace_id, filename)
 
         # 6. Create DB record
         material = LecturerMaterial(
@@ -80,14 +76,14 @@ class ResourceService:
             teaching_workspace_id=metadata.teaching_workspace_id,
             course_id=metadata.course_id,
             assessment_id=metadata.assessment_id,
-            original_filename=file.filename,
+            original_filename=filename,
             safe_filename=safe_name,
             file_path=file_path,
             file_size_bytes=file_size,
             file_extension=ext,
             mime_type=file.content_type or "application/octet-stream",
             material_category=metadata.material_category,
-            display_name=metadata.display_name or file.filename,
+            display_name=metadata.display_name or filename,
             description=metadata.description,
             is_student_visible=metadata.is_student_visible,
             version=next_version,
@@ -187,6 +183,8 @@ class ResourceService:
             .values(is_deleted=True, deleted_at=func.now())
         )
         result = await self.db.execute(stmt)
+        if result.rowcount > 0 and material.academic_resource_id:
+            await self.repo.soft_delete_chunks(material.academic_resource_id)
         return result.rowcount > 0
 
     # ── Student Resources ────────────────────────────────────────────────────
@@ -200,13 +198,18 @@ class ResourceService:
         """
         Save a personal student study resource to disk and record it in the DB.
         """
-        # 1. Validate file extension
-        ext = os.path.splitext(file.filename)[1].lower()
-        if ext not in settings.ALLOWED_UPLOAD_EXTENSIONS:
-            raise ValidationError(
-                f"File extension {ext} is not allowed.",
-                code="INVALID_FILE_TYPE",
-            )
+        # 1. Validate name, size, content and the student's quota before anything touches the disk
+        ext = validated_extension(file.filename, settings.STUDENT_ALLOWED_UPLOAD_EXTENSIONS)
+        content = await read_limited(
+            file,
+            settings.max_student_upload_size_bytes,
+            limit_label=f"{settings.MAX_STUDENT_UPLOAD_SIZE_MB}MB",
+        )
+        assert_not_empty(content)
+        assert_content_matches_extension(ext, content)
+        file_size = len(content)
+        filename = clean_display_name(file.filename)
+        await self._assert_student_within_quota(student_id, file_size)
 
         # 2. Create directory structure: uploads/students/{student_id}/resources/
         relative_dir = os.path.join("students", str(student_id), "resources")
@@ -219,28 +222,20 @@ class ResourceService:
         absolute_path = os.path.join(settings.UPLOAD_DIR, file_path)
 
         # 4. Write file to disk
-        content = await file.read()
-        file_size = len(content)
-        if file_size > settings.max_upload_size_bytes:
-            raise ValidationError(
-                f"File size exceeds the {settings.MAX_UPLOAD_SIZE_MB}MB limit.",
-                code="FILE_TOO_LARGE",
-            )
-
         with open(absolute_path, "wb") as f:
             f.write(content)
 
         # 5. Create DB record
         resource = StudentResource(
             student_id=student_id,
-            original_filename=file.filename,
+            original_filename=filename,
             safe_filename=safe_name,
             file_path=file_path,
             file_size_bytes=file_size,
             file_extension=ext[1:].upper() if ext.startswith(".") else ext.upper(),
             mime_type=file.content_type or "application/octet-stream",
             subject_tag=subject_tag,
-            display_name=file.filename,
+            display_name=filename,
         )
 
         await self.repo.create_student_resource(resource)
@@ -269,6 +264,22 @@ class ResourceService:
 
         return resource
 
+    async def _assert_student_within_quota(self, student_id: uuid.UUID, incoming_bytes: int) -> None:
+        """Cap how many files / bytes one student can have embedded at our expense."""
+        count, total_bytes = await self.repo.student_resource_usage(student_id)
+        if count >= settings.STUDENT_MAX_RESOURCES:
+            raise ValidationError(
+                f"You can keep up to {settings.STUDENT_MAX_RESOURCES} study files. "
+                "Delete one you no longer need to upload another.",
+                code="STUDENT_UPLOAD_COUNT_LIMIT",
+            )
+        if total_bytes + incoming_bytes > settings.student_storage_quota_bytes:
+            raise ValidationError(
+                f"This upload would exceed your {settings.STUDENT_STORAGE_QUOTA_MB}MB study storage. "
+                "Delete a file you no longer need and try again.",
+                code="STUDENT_STORAGE_QUOTA_EXCEEDED",
+            )
+
     async def list_student_resources(self, student_id: uuid.UUID) -> List[StudentResource]:
         """List all personal resources for a student."""
         return await self.repo.list_student_resources(student_id)
@@ -279,4 +290,8 @@ class ResourceService:
         if not resource or resource.student_id != student_id:
             return False
         
-        return await self.repo.delete_student_resource(resource_id)
+        deleted = await self.repo.delete_student_resource(resource_id)
+        if deleted and resource.academic_resource_id:
+            # The text of a deleted upload must no longer be retrievable by the tutor.
+            await self.repo.soft_delete_chunks(resource.academic_resource_id)
+        return deleted

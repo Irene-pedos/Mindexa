@@ -13,10 +13,11 @@ Design goals:
 """
 from __future__ import annotations
 
-import logging
 from typing import Optional
 
-logger = logging.getLogger(__name__)
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 # ---------------------------------------------------------------------------
 # Token counting

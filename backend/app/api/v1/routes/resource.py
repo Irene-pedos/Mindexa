@@ -4,6 +4,7 @@ app/api/v1/routes/resource.py
 Routes for lecturer materials and student resources.
 """
 
+import asyncio
 import uuid
 import os
 from typing import List
@@ -19,14 +20,14 @@ from app.db.schemas.resource import (
     LecturerMaterialCreate,
     StudentResourceResponse
 )
-from app.db.repositories.resource_repo import ResourceRepository
 from app.db.repositories.workspace_repo import WorkspaceRepository
 from app.services.resource_service import ResourceService
 from app.services.student_service import StudentService
 from app.db.enums import ResourceCategory, UserRole
 from app.core.config import settings
-from app.core.exceptions import NotFoundError, AuthorizationError, RoleRequiredError, ValidationError
+from app.core.exceptions import NotFoundError, AuthorizationError, RoleRequiredError
 from app.core.logging import get_logger
+from app.core.uploads import assert_content_matches_extension, read_limited
 
 logger = get_logger(__name__)
 
@@ -54,7 +55,6 @@ async def upload_material(
     Upload a file (lecture notes, rubric, etc.) for a teaching workspace or assessment.
     """
     service = ResourceService(db)
-    from app.db.schemas.resource import LecturerMaterialCreate
     metadata = LecturerMaterialCreate(
         teaching_workspace_id=teaching_workspace_id,
         course_id=course_id,
@@ -269,6 +269,41 @@ async def delete_student_resource(
     return {"success": True, "message": "Resource deleted successfully"}
 
 
+def _extract_text_sync(ext: str, content: bytes, filename: str | None) -> tuple[str, int]:
+    """Blocking text extraction; returns (text, page_count). Never raises on unreadable files."""
+    page_count = 1
+    try:
+        if ext == ".pdf":
+            import fitz
+
+            doc = fitz.open(stream=content, filetype="pdf")
+            try:
+                page_count = len(doc)
+                if page_count > settings.MAX_DOCUMENT_PAGES:
+                    return "Extraction note: this document has too many pages to attach.", page_count
+                pages = []
+                for i, page in enumerate(doc):
+                    t = page.get_text()
+                    if t.strip():
+                        pages.append(f"--- Page {i+1} ---\n{t.strip()}")
+            finally:
+                doc.close()
+            return "\n\n".join(pages), page_count
+        if ext in [".docx", ".doc"]:
+            import io
+
+            import docx
+
+            doc = docx.Document(io.BytesIO(content))
+            return "\n".join(p.text for p in doc.paragraphs if p.text.strip()), page_count
+        if ext in [".txt", ".csv", ".json", ".md", ".py", ".js", ".ts", ".html"]:
+            return content.decode("utf-8", errors="ignore"), page_count
+        return f"Attached file: {filename} (Binary format {ext})", page_count
+    except Exception:
+        logger.warning("document_text_extraction_failed", extension=ext)
+        return "Extraction note: this document could not be read.", page_count
+
+
 @router.post(
     "/extract-text",
     summary="Extract text content from uploaded document (PDF, DOCX, TXT, CSV)",
@@ -281,40 +316,13 @@ async def extract_document_text(
     Synchronously extracts clean human-readable text from PDF, DOCX, or text files.
     """
     ext = os.path.splitext(file.filename or "")[1].lower()
-    content = await file.read(settings.max_upload_size_bytes + 1)
-    if len(content) > settings.max_upload_size_bytes:
-        raise ValidationError(
-            f"File size exceeds the {settings.MAX_UPLOAD_SIZE_MB}MB limit.", code="FILE_TOO_LARGE"
-        )
-    
-    extracted_text = ""
-    page_count = 1
+    content = await read_limited(
+        file, settings.max_upload_size_bytes, limit_label=f"{settings.MAX_UPLOAD_SIZE_MB}MB"
+    )
+    assert_content_matches_extension(ext, content)
 
-    try:
-        if ext == ".pdf":
-            import fitz
-            doc = fitz.open(stream=content, filetype="pdf")
-            page_count = len(doc)
-            pages = []
-            for i, page in enumerate(doc):
-                t = page.get_text()
-                if t.strip():
-                    pages.append(f"--- Page {i+1} ---\n{t.strip()}")
-            doc.close()
-            extracted_text = "\n\n".join(pages)
-        elif ext in [".docx", ".doc"]:
-            import docx
-            import io
-            doc = docx.Document(io.BytesIO(content))
-            paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
-            extracted_text = "\n".join(paragraphs)
-        elif ext in [".txt", ".csv", ".json", ".md", ".py", ".js", ".ts", ".html"]:
-            extracted_text = content.decode("utf-8", errors="ignore")
-        else:
-            extracted_text = f"Attached file: {file.filename} (Binary format {ext})"
-    except Exception:
-        logger.warning("document_text_extraction_failed", extension=ext)
-        extracted_text = "Extraction note: this document could not be read."
+    # PDF/DOCX parsing is CPU-bound and synchronous: keep it off the event loop.
+    extracted_text, page_count = await asyncio.to_thread(_extract_text_sync, ext, content, file.filename)
 
     return {
         "filename": file.filename,

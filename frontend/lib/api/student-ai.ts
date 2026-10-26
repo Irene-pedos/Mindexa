@@ -1,11 +1,19 @@
 import { apiClient } from "./client";
 
+/**
+ * A retrieved source behind an AI answer (backend: `SourceCitation`). Shared by the tutor,
+ * the study planner and the reader so they cannot drift apart again.
+ */
 export interface SourceCitation {
   resource_name: string;
   resource_id: string;
   page_number: number | null;
   chunk_index: number;
+  /** First characters of the matched chunk. */
   excerpt: string;
+  /** Computed aliases the API also returns (`title` = resource_name, `snippet` = excerpt). */
+  title?: string;
+  snippet?: string;
 }
 
 export interface StudentSupportRequest {
@@ -64,10 +72,14 @@ export const studentAiApi = {
   /**
    * Request study support from the AI agent.
    */
-  async getSupport(data: StudentSupportRequest): Promise<StudentSupportResponse> {
+  async getSupport(
+    data: StudentSupportRequest,
+    options: { signal?: AbortSignal } = {}
+  ): Promise<StudentSupportResponse> {
     return apiClient("/student/ai/support", {
       method: "POST",
       body: JSON.stringify(data),
+      signal: options.signal,
     });
   },
 

@@ -439,41 +439,6 @@ async def list_all_flags(
     }
 
 
-# ── GET FULL INTEGRITY REPORT (Supervisor) ────────────────────────────────────
-
-
-@router.get(
-    "/{attempt_id}",
-    response_model=AttemptIntegrityReport,
-    summary="Get full integrity report for an attempt (supervisor)",
-)
-async def get_integrity_report(
-    attempt_id: uuid.UUID,
-    current_user=Depends(require_lecturer_or_admin),
-    db: AsyncSession = Depends(get_db),
-) -> AttemptIntegrityReport:
-    """
-    Returns a comprehensive integrity report for one attempt:
-    - All integrity events (ordered by time)
-    - All flags (with status and resolution)
-    - All warnings issued
-    - Event type counts
-    """
-    service = IntegrityService(db)
-    report = await service.get_attempt_integrity_report(attempt_id)
-
-    return AttemptIntegrityReport(
-        attempt_id=report["attempt_id"],
-        student_id=report["student_id"],
-        is_flagged=report["is_flagged"],
-        total_warnings=report["total_warnings"],
-        event_counts=report["event_counts"],
-        events=[IntegrityEventResponse.model_validate(e) for e in report["events"]],
-        flags=[IntegrityFlagResponse.model_validate(f) for f in report["flags"]],
-        warnings=[IntegrityWarningResponse.model_validate(w) for w in report["warnings"]],
-    )
-
-
 # ── SUPERVISION SESSION ───────────────────────────────────────────────────────
 
 
@@ -599,3 +564,40 @@ async def update_integrity_profile(
     from app.schemas.integrity import IntegrityProfileResponse
     return IntegrityProfileResponse.model_validate(profile).model_dump()
 
+
+# NOTE: this catch-all `/{attempt_id}` route must stay LAST. Declared earlier it captured
+# GET /integrity/profiles (and any other fixed GET path) and failed it with a UUID error.
+
+# ── GET FULL INTEGRITY REPORT (Supervisor) ────────────────────────────────────
+
+
+@router.get(
+    "/{attempt_id}",
+    response_model=AttemptIntegrityReport,
+    summary="Get full integrity report for an attempt (supervisor)",
+)
+async def get_integrity_report(
+    attempt_id: uuid.UUID,
+    current_user=Depends(require_lecturer_or_admin),
+    db: AsyncSession = Depends(get_db),
+) -> AttemptIntegrityReport:
+    """
+    Returns a comprehensive integrity report for one attempt:
+    - All integrity events (ordered by time)
+    - All flags (with status and resolution)
+    - All warnings issued
+    - Event type counts
+    """
+    service = IntegrityService(db)
+    report = await service.get_attempt_integrity_report(attempt_id)
+
+    return AttemptIntegrityReport(
+        attempt_id=report["attempt_id"],
+        student_id=report["student_id"],
+        is_flagged=report["is_flagged"],
+        total_warnings=report["total_warnings"],
+        event_counts=report["event_counts"],
+        events=[IntegrityEventResponse.model_validate(e) for e in report["events"]],
+        flags=[IntegrityFlagResponse.model_validate(f) for f in report["flags"]],
+        warnings=[IntegrityWarningResponse.model_validate(w) for w in report["warnings"]],
+    )

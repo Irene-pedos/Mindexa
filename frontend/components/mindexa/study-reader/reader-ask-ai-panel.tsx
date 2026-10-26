@@ -3,7 +3,8 @@
 
 import React, { useState } from "react";
 import { ReaderSource, SkimBullet } from "./types";
-import { studyReaderApi, AskAIReaderResponse } from "@/lib/api/study-reader";
+import { studyReaderApi } from "@/lib/api/study-reader";
+import { useSupportThread } from "@/hooks/use-support-thread";
 import { RichMessageRenderer } from "@/components/mindexa/common/rich-message-renderer";
 import {
   Sparkles,
@@ -23,23 +24,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "sonner";
+import { errorMessage } from "@/lib/error-message";
 import { cn } from "@/lib/utils";
 
-interface ChatMessage {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  page?: number;
-  selectedText?: string;
-  citations?: Array<{
-    resource_id?: string;
-    source_name?: string;
-    page_number?: number;
-    chunk_index?: number;
-    matched_text?: string;
-  }>;
-  createdAt: string;
-}
+type ReaderMessageExtra = { page?: number; selectedText?: string };
 
 interface ReaderAskAiPanelProps {
   source: ReaderSource;
@@ -56,9 +44,8 @@ export function ReaderAskAiPanel({
   onClearSelectedText,
   onSelectPage,
 }: ReaderAskAiPanelProps) {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const { messages, loading, send } = useSupportThread<ReaderMessageExtra>();
   const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(false);
   const [activeView, setActiveView] = useState<"chat" | "skim">("chat");
 
   // Skim state
@@ -76,65 +63,23 @@ export function ReaderAskAiPanel({
     return `Explain this excerpt in simple terms: "${preview}…" (+${remaining} more characters selected)`;
   };
 
-  const handleSend = async (customPrompt?: string) => {
+  const handleSend = (customPrompt?: string) => {
     const questionText = customPrompt || input.trim();
     if (!questionText || loading) return;
-
-    const userMsg: ChatMessage = {
-      id: `user-${Date.now()}`,
-      role: "user",
-      content: questionText,
-      page: currentPage,
-      selectedText: selectedText || undefined,
-      createdAt: new Date().toISOString(),
-    };
-
-    setMessages((prev) => [...prev, userMsg]);
     setInput("");
-    setLoading(true);
 
-    try {
-      // Bounded chat history: trim to the last 10 messages (5 turns) to prevent unbounded payload growth
-      const history = messages.slice(-10).map((m) => ({
-        role: m.role,
-        content: m.content,
-      }));
-
-      const res: AskAIReaderResponse = await studyReaderApi.askAI({
-        question: questionText,
+    void send({
+      question: questionText,
+      userExtra: { page: currentPage, selectedText: selectedText || undefined },
+      failureReply: "I'm having trouble analyzing this material right now. Please try again in a moment.",
+      request: {
         source_surface: "study_reader",
-        conversation_history: history,
         selected_resource_id: source.id,
         teaching_workspace_id: source.workspaceId,
         current_page: currentPage,
-        selected_text: selectedText
-          ? selectedText.length > 2000
-            ? selectedText.slice(0, 2000)
-            : selectedText
-          : undefined,
-      });
-
-      const aiMsg: ChatMessage = {
-        id: `ai-${Date.now()}`,
-        role: "assistant",
-        content: res.explanation,
-        citations: res.citations || [],
-        createdAt: new Date().toISOString(),
-      };
-
-      setMessages((prev) => [...prev, aiMsg]);
-    } catch (err: any) {
-      toast.error(err.message || "Failed to reach AI Tutor");
-      const errorMsg: ChatMessage = {
-        id: `err-${Date.now()}`,
-        role: "assistant",
-        content: "I'm having trouble analyzing this material right now. Please try again in a moment.",
-        createdAt: new Date().toISOString(),
-      };
-      setMessages((prev) => [...prev, errorMsg]);
-    } finally {
-      setLoading(false);
-    }
+        selected_text: selectedText ? selectedText.slice(0, 2000) : undefined,
+      },
+    });
   };
 
   const handleLoadSkim = async (force = false) => {
@@ -146,8 +91,8 @@ export function ReaderAskAiPanel({
       const res = await studyReaderApi.skimDocument(source.kind, source.id);
       setSkimSummary(res.summary);
       setSkimBullets(res.bullets || []);
-    } catch (err: any) {
-      toast.error(err.message || "Failed to generate document skim");
+    } catch (err) {
+      toast.error(errorMessage(err, "Failed to generate document skim"));
     } finally {
       setLoadingSkim(false);
     }
@@ -207,7 +152,7 @@ export function ReaderAskAiPanel({
             </Button>
           )}
 
-          <Badge variant="outline" className="text-[9px] font-mono h-5 px-1.5 border-border/60">
+          <Badge variant="outline" className="text-[10px] font-mono h-5 px-1.5 border-border/60">
             p. {currentPage}
           </Badge>
         </div>
@@ -393,7 +338,7 @@ export function ReaderAskAiPanel({
                             title={`Jump to Page ${c.page_number || 1}`}
                           >
                             <BookOpen className="size-2.5 text-primary" />
-                            <span>{c.source_name || "Source"}</span>
+                            <span>{c.resource_name || c.title || "Source"}</span>
                             {c.page_number && (
                               <span className="font-mono text-primary font-bold">
                                 p. {c.page_number}
@@ -425,7 +370,7 @@ export function ReaderAskAiPanel({
                   Context: &ldquo;{selectedText.length > 70 ? `${selectedText.slice(0, 70)}…` : selectedText}&rdquo;
                 </span>
                 {selectedText.length > 70 && (
-                  <span className="text-[9px] font-mono text-primary/80 bg-primary/15 px-1 py-0.2 rounded shrink-0">
+                  <span className="text-[10px] font-mono text-primary/80 bg-primary/15 px-1 py-0.2 rounded shrink-0">
                     +{selectedText.length - 70} chars
                   </span>
                 )}

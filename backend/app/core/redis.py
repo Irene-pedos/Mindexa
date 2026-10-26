@@ -28,6 +28,7 @@ from app.core.config import settings
 # ─── Redis Client Singleton ────────────────────────────────────────────────────
 
 _redis_client: aioredis.Redis | None = None
+_redis_client_loop: asyncio.AbstractEventLoop | None = None
 
 
 async def get_redis() -> aioredis.Redis:
@@ -38,18 +39,19 @@ async def get_redis() -> aioredis.Redis:
     Connection pooling is handled internally by redis.asyncio.
     Automatically re-initializes if the event loop changed (e.g. during pytest runs).
     """
-    global _redis_client
+    global _redis_client, _redis_client_loop
     try:
         current_loop = asyncio.get_running_loop()
     except RuntimeError:
         current_loop = None
 
-    if _redis_client is not None:
-        client_loop = getattr(_redis_client, "_loop", None)
-        if client_loop is not None and (client_loop.is_closed() or (current_loop is not None and client_loop is not current_loop)):
+    # redis-py does not expose the loop its connections are bound to, so remember it ourselves.
+    if _redis_client is not None and _redis_client_loop is not None:
+        if _redis_client_loop.is_closed() or (current_loop is not None and _redis_client_loop is not current_loop):
             _redis_client = None
 
     if _redis_client is None:
+        _redis_client_loop = current_loop
         _redis_client = aioredis.from_url(
             settings.REDIS_URL,
             encoding="utf-8",

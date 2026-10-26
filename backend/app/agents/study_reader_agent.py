@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-import logging
 import random
 import uuid
 from typing import Any, List, Optional
@@ -13,6 +11,7 @@ from app.core.ai.gateway import AIGateway
 from app.core.ai.prompt_registry import get_prompt
 from app.core.ai.prompt_render import render_prompt, untrusted_block
 from app.core.ai.providers import AICompletionRequest, AIMessage
+from app.core.exceptions import ValidationError
 from app.db.enums import AIActionType
 from app.schemas.study_reader import (
     PageCheckQuestion,
@@ -20,8 +19,6 @@ from app.schemas.study_reader import (
     SkimBullet,
     SkimResponse,
 )
-
-logger = logging.getLogger(__name__)
 
 
 class SkimJSONOutput(BaseModel):
@@ -93,54 +90,25 @@ class StudyReaderAgent(BaseAgent):
             prompt_version="v1",
         )
 
-        try:
-            parsed: SkimJSONOutput = self._parse_json_output(
-                llm_response.content, SkimJSONOutput
+        # A malformed answer is surfaced as an error (the parser raises a user-safe
+        # ValidationError). Inventing generic bullets with made-up page numbers would present
+        # fabricated content as if it came from the student's document.
+        parsed: SkimJSONOutput = self._parse_json_output(llm_response.content, SkimJSONOutput)
+        bullets = [
+            SkimBullet(bullet=b.get("bullet", ""), page_number=b.get("page_number"))
+            for b in parsed.bullets
+            if b.get("bullet")
+        ]
+        if not bullets:
+            raise ValidationError(
+                "The AI could not produce a usable skim of this document. Please try again.",
+                code="AI_OUTPUT_VALIDATION_FAILED",
             )
-            bullets = [
-                SkimBullet(
-                    bullet=b.get("bullet", ""),
-                    page_number=b.get("page_number"),
-                )
-                for b in parsed.bullets
-                if b.get("bullet")
-            ]
-            if not bullets:
-                bullets = [
-                    SkimBullet(
-                        bullet=f"Overview of key themes and objectives for {title}.",
-                        page_number=1,
-                    ),
-                    SkimBullet(
-                        bullet="Primary theoretical foundations, definitions, and formulas.",
-                        page_number=2,
-                    ),
-                    SkimBullet(
-                        bullet="Applied problem solving and exam-relevant key takeaways.",
-                        page_number=3,
-                    ),
-                ]
-            return SkimResponse(
-                title=title,
-                summary=parsed.summary or f"Core study overview for {title}.",
-                bullets=bullets,
-            )
-        except Exception as exc:
-            logger.warning("Failed to parse skim output: %s", exc)
-            return SkimResponse(
-                title=title,
-                summary=f"Overview for {title}.",
-                bullets=[
-                    SkimBullet(
-                        bullet="Review introduction and foundational concepts.",
-                        page_number=1,
-                    ),
-                    SkimBullet(
-                        bullet="Examine primary formulas and process workflows.",
-                        page_number=2,
-                    ),
-                ],
-            )
+        return SkimResponse(
+            title=title,
+            summary=parsed.summary or f"Core study overview for {title}.",
+            bullets=bullets,
+        )
 
     async def generate_page_check(
         self,
@@ -195,61 +163,38 @@ class StudyReaderAgent(BaseAgent):
             prompt_version="v1",
         )
 
-        try:
-            parsed: PageCheckJSONOutput = self._parse_json_output(
-                llm_resp.content, PageCheckJSONOutput
-            )
-            questions: List[PageCheckQuestion] = []
-            for idx, q in enumerate(parsed.questions):
-                if not q.get("question"):
-                    continue
-                opts = list(q.get("options", ["Option 1", "Option 2", "Option 3", "Option 4"]))
-                raw_idx = int(q.get("correct_option_index", 0))
-                # Identify the correct answer text before shuffling
-                correct_text = opts[raw_idx] if 0 <= raw_idx < len(opts) else (opts[0] if opts else "")
-                
-                # Shuffle options so the correct answer is never predictably first
-                if len(opts) > 1:
-                    random.shuffle(opts)
-                    new_idx = opts.index(correct_text) if correct_text in opts else 0
-                else:
-                    new_idx = 0
+        # As with skim: a malformed answer is an error, not a made-up quiz graded as if real.
+        parsed: PageCheckJSONOutput = self._parse_json_output(llm_resp.content, PageCheckJSONOutput)
+        questions: List[PageCheckQuestion] = []
+        for idx, q in enumerate(parsed.questions):
+            if not q.get("question"):
+                continue
+            opts = list(q.get("options", ["Option 1", "Option 2", "Option 3", "Option 4"]))
+            raw_idx = int(q.get("correct_option_index", 0))
+            # Identify the correct answer text before shuffling
+            correct_text = opts[raw_idx] if 0 <= raw_idx < len(opts) else (opts[0] if opts else "")
 
-                questions.append(
-                    PageCheckQuestion(
-                        id=q.get("id", f"q{idx+1}"),
-                        question=q.get("question", "Recall question"),
-                        options=opts,
-                        correct_option_index=new_idx,
-                        explanation=q.get("explanation", "Correct based on course text."),
-                    )
+            # Shuffle options so the correct answer is never predictably first
+            if len(opts) > 1:
+                random.shuffle(opts)
+                new_idx = opts.index(correct_text) if correct_text in opts else 0
+            else:
+                new_idx = 0
+
+            questions.append(
+                PageCheckQuestion(
+                    id=q.get("id", f"q{idx+1}"),
+                    question=q.get("question", "Recall question"),
+                    options=opts,
+                    correct_option_index=new_idx,
+                    explanation=q.get("explanation", "Correct based on course text."),
                 )
-
-            if not questions:
-                raise ValueError("No questions parsed from LLM response")
-
-            return PageCheckResponse(page_number=page_number, questions=questions)
-        except Exception as exc:
-            logger.warning("Failed to parse page check questions: %s", exc)
-            fallback_opts = [
-                "Core definition & properties",
-                "Historical backdrop only",
-                "Unrelated tangent",
-                "Summary notes",
-            ]
-            correct_val = "Core definition & properties"
-            random.shuffle(fallback_opts)
-            fallback_correct_idx = fallback_opts.index(correct_val)
-
-            return PageCheckResponse(
-                page_number=page_number,
-                questions=[
-                    PageCheckQuestion(
-                        id="q1",
-                        question=f"What is the primary principle discussed on page {page_number}?",
-                        options=fallback_opts,
-                        correct_option_index=fallback_correct_idx,
-                        explanation="Page content focuses on primary core definitions and formulas.",
-                    )
-                ],
             )
+
+        if not questions:
+            raise ValidationError(
+                "The AI could not produce usable questions for this page. Please try again.",
+                code="AI_OUTPUT_VALIDATION_FAILED",
+            )
+
+        return PageCheckResponse(page_number=page_number, questions=questions)

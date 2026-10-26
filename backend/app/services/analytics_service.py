@@ -4,28 +4,38 @@ app/services/analytics_service.py
 Service for computing assessment performance aggregates and generating AI insights.
 """
 
-import uuid
+import hashlib
 import inspect
-from typing import Any, List, Optional, Dict
-from sqlalchemy import Integer, and_, exists, func, not_, or_, select, case
+import json
+import uuid
+from typing import Any, Optional, Dict
+from sqlalchemy import Integer, and_, func, select, case
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agents.analytics_agent import AnalyticsAgent, AnalyticsAgentOutput
+from app.agents.analytics_agent import AnalyticsAgent
 from app.core.ai.gateway import AIGateway
 from app.core.ai.provider_factory import get_ai_provider
 from app.core.exceptions import NotFoundError
-from app.db.models.assessment import Assessment, AssessmentTargetSection
+from app.db.models.assessment import Assessment
 from app.db.models.question import Question, AssessmentQuestion
 from app.db.models.result import AssessmentResult, ResultBreakdown
 from app.db.models.attempt import AssessmentAttempt
 from app.db.models.academic import StudentEnrollment
-from app.db.models.ai import AIActionLog
-from app.db.enums import AIActionType, AIActionStatus
+
+
+_INSIGHTS_CACHE_NAMESPACE = "assessment_ai_insights"
+_INSIGHTS_CACHE_TTL_SECONDS = 24 * 60 * 60
 
 
 class AnalyticsService:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
+
+    @staticmethod
+    def _stats_fingerprint(stats: Dict[str, Any]) -> str:
+        """Stable digest of the statistics a narrative is written from."""
+        canonical = json.dumps(stats, sort_keys=True, default=str)
+        return hashlib.sha256(canonical.encode()).hexdigest()[:16]
 
     async def get_assessment_ai_insights(
         self,
@@ -51,38 +61,24 @@ class AnalyticsService:
         # 2. Compute cohort aggregates (filtered by class section if provided)
         stats = await self._compute_aggregates(assessment_id, class_section_id)
 
-        # 3. Check for cached AI narrative insights in Append-Only AIActionLog
+        # 3. Reuse a cached narrative when the numbers it was written from have not changed.
+        # The key carries the section filter and a fingerprint of the stats, so a new submission,
+        # a re-mark or a different section never serves a stale or wrong-cohort narrative.
+        from app.core.cache import cache
+
         ai_narrative = None
         weak_topics = []
         insights = []
         recommended_interventions = []
+        cache_key = f"{assessment_id}:{class_section_id or 'all'}:{self._stats_fingerprint(stats)}"
 
         if not regenerate:
-            stmt = (
-                select(AIActionLog.raw_output)
-                .where(
-                    and_(
-                        AIActionLog.action_type == AIActionType.NARRATE_ANALYTICS,
-                        AIActionLog.subject_entity_id == assessment_id,
-                        AIActionLog.status == AIActionStatus.COMPLETED,
-                    )
-                )
-                .order_by(AIActionLog.created_at.desc())
-                .limit(1)
-            )
-            cached_res = await self.db.execute(stmt)
-            if cached_res:
-                row = cached_res.fetchone()
-                if inspect.iscoroutine(row):
-                    row.close()
-                    row = None
-                if row and row[0]:
-                    raw = row[0]
-                    if isinstance(raw, dict):
-                        ai_narrative = raw.get("summary")
-                        weak_topics = raw.get("weak_topics", [])
-                        insights = raw.get("insights", [])
-                        recommended_interventions = raw.get("recommended_interventions", [])
+            cached = await cache.get(_INSIGHTS_CACHE_NAMESPACE, cache_key)
+            if isinstance(cached, dict) and cached.get("summary"):
+                ai_narrative = cached["summary"]
+                weak_topics = cached.get("weak_topics", [])
+                insights = cached.get("insights", [])
+                recommended_interventions = cached.get("recommended_interventions", [])
 
         # 4. If no cached narrative found or regeneration is requested, run the AI Agent
         if not ai_narrative:
@@ -101,6 +97,17 @@ class AnalyticsService:
             weak_topics = agent_output.weak_topics
             insights = agent_output.insights
             recommended_interventions = agent_output.recommended_interventions
+            await cache.set(
+                _INSIGHTS_CACHE_NAMESPACE,
+                cache_key,
+                {
+                    "summary": ai_narrative,
+                    "weak_topics": weak_topics,
+                    "insights": insights,
+                    "recommended_interventions": recommended_interventions,
+                },
+                ttl=_INSIGHTS_CACHE_TTL_SECONDS,
+            )
 
         return {
             "class_average": round(stats.get("average_score", 0.0), 1),
@@ -126,8 +133,7 @@ class AnalyticsService:
         """
         Internal helper to compute performance statistics and question difficulties.
         """
-        from app.db.models.attempt import StudentResponse, SubmissionGrade, AssessmentAttempt
-        from app.db.models.question import Question
+        from app.db.models.attempt import StudentResponse, SubmissionGrade
         from app.db.enums import QuestionType
         # Base query for results
         stmt = select(

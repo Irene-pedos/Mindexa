@@ -140,7 +140,7 @@ export function PageHeatStrip({
           })}
         </div>
 
-        <span className="text-[8px] font-mono text-muted-foreground font-semibold mt-1">
+        <span className="text-[10px] font-mono text-muted-foreground font-semibold mt-1">
           {currentPage}
         </span>
       </div>

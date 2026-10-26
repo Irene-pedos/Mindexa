@@ -67,6 +67,7 @@ class SlideDeckGenerateRequest(BaseModel):
     estimated_minutes: int = Field(default=45, ge=5, le=180)
     selected_outcomes: Optional[List[str]] = Field(
         default=None,
+        min_length=1,  # omit the field for "all outcomes"; an explicit empty list is a mistake
         max_length=50,
         description="Optional subset of learning outcomes to emphasize in the deck",
     )

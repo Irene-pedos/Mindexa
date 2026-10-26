@@ -22,7 +22,7 @@ export function NextUpBanner({ session, onStart, onReschedule }: NextUpBannerPro
         <div className="flex items-center gap-1.5">
           <Badge
             variant="secondary"
-            className="text-[9px] font-bold uppercase tracking-wider bg-primary text-primary-foreground border-none px-1.5 py-0"
+            className="text-[10px] font-bold uppercase tracking-wider bg-primary text-primary-foreground border-none px-1.5 py-0"
           >
             Up Next
           </Badge>

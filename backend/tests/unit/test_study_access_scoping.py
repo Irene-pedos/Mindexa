@@ -81,7 +81,7 @@ async def test_session_under_another_plan_is_not_found(method):
             uuid.uuid4(), uuid.uuid4(), MagicMock(), None, plan_id=uuid.uuid4()
         )
 
-    with pytest.raises(ValueError, match="not found"):
+    with pytest.raises(NotFoundError, match="not found"):
         await call
 
 

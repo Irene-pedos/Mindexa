@@ -1,6 +1,6 @@
 "use client";
 
-import React, {
+import React,{
   createContext,
   useCallback,
   useContext,
@@ -10,7 +10,6 @@ import React, {
   useState,
 } from "react";
 import { ArrowDownIcon } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 interface MessageScrollerContextType {
@@ -97,30 +96,12 @@ export function useMessageScroller() {
   return ctx;
 }
 
+// Scroll position is tracked by MessageScrollerViewport (the element that actually scrolls);
+// this wrapper only lays it out. It used to carry a second scroll handler with different
+// thresholds, which never fired (scroll events don't bubble in React) and only invited drift.
 export function MessageScroller({ children, className }: { children: React.ReactNode; className?: string }) {
-  const { viewportRef, setIsAtBottom, setShowScrollButton } = useMessageScroller();
-
-  const handleScroll = () => {
-    const el = viewportRef.current;
-    if (!el) return;
-
-    // Threshold check (25px from bottom)
-    const offset = 25;
-    const isBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= offset;
-    
-    setIsAtBottom(isBottom);
-    if (isBottom) {
-      setShowScrollButton(false);
-    } else {
-      const scrolledUpSubstantially = el.scrollHeight - el.scrollTop - el.clientHeight > 100;
-      if (scrolledUpSubstantially) {
-        setShowScrollButton(el.scrollHeight > el.clientHeight);
-      }
-    }
-  };
-
   return (
-    <div className={cn("relative flex-1 overflow-hidden h-full", className)} onScroll={handleScroll}>
+    <div className={cn("relative flex-1 overflow-hidden h-full", className)}>
       {children}
     </div>
   );

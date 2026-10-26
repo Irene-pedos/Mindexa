@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useLayoutEffect, useRef } from "react";
 import { Paperclip, Send, X, FileText } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { cn } from "@/lib/utils";
@@ -26,21 +26,24 @@ const DEFAULT_PLACEHOLDERS = [
   "Break down algorithmic time complexity",
 ];
 
+/**
+ * Cap on what is typed in one message. The API accepts 64k characters in total, and attached
+ * file text (up to ~40k, see lib/chat-attachments) travels in the same field.
+ */
+const MAX_TYPED_CHARS = 8000;
+
 interface AIChatInputProps {
+  /**
+   * Starting text when the input manages its own value (no `value`/`onChange`). Keeping the draft
+   * inside the input means typing does not re-render the page around it; change the component's
+   * `key` to replace the draft from outside (for example "edit this message").
+   */
+  initialValue?: string;
   value?: string;
   onChange?: (val: string) => void;
-  onSend?: (params: {
-    input: string;
-    attachments: Attachment[];
-    isThinking?: boolean;
-    isDeepSearch?: boolean;
-  }) => void;
+  onSend?: (params: { input: string; attachments: Attachment[] }) => void;
   isGenerating?: boolean;
   onStop?: () => void;
-  thinkActive?: boolean;
-  setThinkActive?: (active: boolean | ((prev: boolean) => boolean)) => void;
-  deepSearchActive?: boolean;
-  setDeepSearchActive?: (active: boolean | ((prev: boolean) => boolean)) => void;
   attachments?: Attachment[];
   setAttachments?: React.Dispatch<React.SetStateAction<Attachment[]>>;
   placeholders?: string[];
@@ -51,6 +54,7 @@ interface AIChatInputProps {
 }
 
 export const AIChatInput: React.FC<AIChatInputProps> = ({
+  initialValue = "",
   value: externalValue,
   onChange: externalOnChange,
   onSend,
@@ -64,7 +68,7 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
   className,
   onUploadFile,
 }) => {
-  const [internalValue, setInternalValue] = useState("");
+  const [internalValue, setInternalValue] = useState(initialValue);
   const [placeholderIndex, setPlaceholderIndex] = useState(0);
   const [showPlaceholder, setShowPlaceholder] = useState(true);
   const [isActive, setIsActive] = useState(false);
@@ -73,7 +77,7 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
 
   const wrapperRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const inputValue = externalValue !== undefined ? externalValue : internalValue;
   const setInputValue = (val: string) => {
@@ -188,11 +192,25 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
 
     setAttachments((prev) => [...prev, ...newAttachments]);
     setIsReadingFile(false);
-    toast.success(`Attached ${files.length} file(s). Content ready for AI.`);
+
+    const unreadable = newAttachments.filter((a) => !a.extractedText);
+    if (unreadable.length === 0) {
+      toast.success(`Attached ${files.length} file(s). Content ready for AI.`);
+    } else {
+      // Don't claim the AI can read a file whose text could not be extracted (e.g. images).
+      toast.warning(
+        `Attached ${files.length} file(s), but the text of ${unreadable
+          .map((a) => a.name)
+          .join(", ")} couldn't be read. The AI will only see the file name.`
+      );
+    }
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
   const handleRemoveAttachment = (idx: number) => {
+    // Release the preview URL created when the file was attached (it holds the file in memory).
+    const removed = attachments[idx];
+    if (removed?.url?.startsWith("blob:")) URL.revokeObjectURL(removed.url);
     setAttachments((prev) => prev.filter((_, i) => i !== idx));
   };
 
@@ -210,12 +228,22 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
     setAttachments([]);
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Enter sends, Shift+Enter inserts a new line. While an IME is composing (Kinyarwanda/CJK
+    // keyboards, accent pickers) Enter confirms the composition and must not send the message.
+    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       handleSend();
     }
   };
+
+  // Grow with the text up to the max-h-40 cap, then scroll.
+  useLayoutEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [inputValue]);
 
   const placeholderContainerVariants = {
     initial: {},
@@ -287,6 +315,7 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
                     }}
                     className="size-4 rounded-full flex items-center justify-center hover:bg-muted-foreground/20 text-muted-foreground transition-colors ml-0.5 shrink-0"
                     title="Remove attachment"
+                    aria-label={`Remove attachment ${att.name}`}
                   >
                     <X className="size-2.5" />
                   </button>
@@ -295,8 +324,8 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
             </div>
           )}
 
-          {/* Main Input Row */}
-          <div className="flex items-center gap-2 w-full">
+          {/* Main Input Row (items-end keeps the buttons at the bottom as the text area grows) */}
+          <div className="flex items-end gap-2 w-full">
             {/* Attachment Button */}
             <button
               onClick={(e) => {
@@ -306,6 +335,7 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
               disabled={disabled}
               className="p-2 sm:p-2.5 rounded-full hover:bg-muted/70 text-muted-foreground hover:text-foreground transition-colors shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
               title="Attach study material or notes"
+              aria-label="Attach study material or notes"
               type="button"
             >
               <Paperclip className="size-4" />
@@ -313,15 +343,17 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
 
             {/* Input field with dynamic animated placeholder */}
             <div className="flex-1 relative flex items-center min-w-0">
-              <input
+              <textarea
                 ref={inputRef}
-                type="text"
+                rows={1}
                 value={inputValue}
+                maxLength={MAX_TYPED_CHARS}
                 onChange={(e) => setInputValue(e.target.value)}
                 onKeyDown={handleKeyDown}
                 disabled={disabled}
+                aria-label={placeholder || "Message the AI assistant"}
                 placeholder={disabled ? (placeholder || "AI Assistant disabled for this workspace policy") : undefined}
-                className="flex-1 border-0 outline-none py-2 px-1 text-xs sm:text-sm bg-transparent w-full font-normal text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
+                className="flex-1 resize-none border-0 outline-none py-2 px-1 text-xs sm:text-sm leading-relaxed bg-transparent w-full font-normal text-foreground disabled:opacity-50 disabled:cursor-not-allowed max-h-40 overflow-y-auto"
                 style={{ position: "relative", zIndex: 1 }}
                 onFocus={() => {
                   if (!disabled) handleActivate();

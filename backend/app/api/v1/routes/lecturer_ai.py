@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import uuid
 from typing import List
 
@@ -54,7 +55,7 @@ async def lecturer_support(
     "/workspaces/{workspace_id}/learning-units",
     status_code=status.HTTP_200_OK,
     response_model=List[LearningUnitItemResponse],
-    summary="Get segmented Learning Units for a teaching workspace (with auto-segmentation fallback)",
+    summary="Get the existing Learning Units of a teaching workspace",
 )
 async def get_workspace_learning_units(
     workspace_id: uuid.UUID,
@@ -95,7 +96,8 @@ async def export_slide_deck(
     body: SlideDeckExportRequest,
     current_user: User = Depends(require_lecturer_or_admin),
 ) -> Response:
-    pptx_bytes = build_slide_deck_pptx(body.deck)
+    # python-pptx is synchronous and CPU-bound: keep it off the event loop.
+    pptx_bytes = await asyncio.to_thread(build_slide_deck_pptx, body.deck)
     filename = f"slide-deck-{uuid.uuid4().hex[:8]}.pptx"
     return Response(
         content=pptx_bytes,

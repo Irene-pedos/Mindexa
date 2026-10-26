@@ -50,33 +50,6 @@ export interface UpdateKeyPointPayload {
   next_review_at?: string | null;
 }
 
-export interface AskAIReaderPayload {
-  question: string;
-  source_surface?: "study_tutor" | "study_reader" | "assessment_inline";
-  conversation_history?: Array<{ role: string; content: string }>;
-  selected_resource_id?: string;
-  teaching_workspace_id?: string;
-  current_page?: number;
-  selected_text?: string;
-  thinking_mode?: boolean;
-  deep_search_mode?: boolean;
-}
-
-export interface AskAIReaderResponse {
-  explanation: string;
-  citations: Array<{
-    resource_id?: string;
-    source_name?: string;
-    page_number?: number;
-    chunk_index?: number;
-    score?: number;
-    matched_text?: string;
-  }>;
-  fallback_used: boolean;
-  model?: string;
-  provider?: string;
-}
-
 export interface ReaderMetadata {
   id: string;
   kind: ReaderSourceKind;
@@ -217,16 +190,6 @@ export const studyReaderApi = {
   ): Promise<SkimResponse> => {
     return apiClient(`/student/reader/${kind}/${id}/skim`, {
       method: "POST",
-    });
-  },
-
-  askAI: async (payload: AskAIReaderPayload): Promise<AskAIReaderResponse> => {
-    return apiClient("/student/ai/support", {
-      method: "POST",
-      body: JSON.stringify({
-        source_surface: "study_reader",
-        ...payload,
-      }),
     });
   },
 

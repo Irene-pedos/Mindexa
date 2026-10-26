@@ -245,7 +245,7 @@ export function ContextualAskAiPanel({
                   )}
 
                   <div
-                    className={`text-[9px] mt-1 ${
+                    className={`text-[10px] mt-1 ${
                       msg.sender === "user"
                         ? "text-primary-foreground/70 text-right"
                         : "text-muted-foreground"

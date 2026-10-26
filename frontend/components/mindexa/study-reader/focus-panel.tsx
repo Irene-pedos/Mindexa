@@ -114,7 +114,7 @@ export function FocusPanel({
                     <Target className="size-3" />
                     <span>Focus Next</span>
                   </span>
-                  <Badge variant="outline" className="text-[9px] font-mono h-4 px-1 border-rose-500/30 text-rose-600 dark:text-rose-400">
+                  <Badge variant="outline" className="text-[10px] font-mono h-4 px-1 border-rose-500/30 text-rose-600 dark:text-rose-400">
                     {focusData.focus_next.length} priorities
                   </Badge>
                 </div>
@@ -225,7 +225,7 @@ export function FocusPanel({
                         <Badge
                           variant="outline"
                           className={cn(
-                            "text-[9px] font-semibold h-4 px-1.5",
+                            "text-[10px] font-semibold h-4 px-1.5",
                             kp.confidence === "lost"
                               ? "bg-rose-500/10 text-rose-600 border-rose-500/30"
                               : "bg-amber-500/10 text-amber-600 border-amber-500/30"

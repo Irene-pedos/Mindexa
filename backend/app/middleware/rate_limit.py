@@ -46,7 +46,6 @@ USAGE (in main.py):
 
 from __future__ import annotations
 
-import asyncio
 import math
 import time
 
@@ -57,7 +56,7 @@ from starlette.types import ASGIApp
 
 from app.core.client_ip import get_client_ip
 from app.core.config import settings
-from app.core.logger import get_logger
+from app.core.logging import get_logger
 
 logger = get_logger("mindexa.rate_limit")
 
@@ -81,8 +80,7 @@ _ROUTE_TIERS: list[tuple[str, str]] = [
     ("/api/v1/ai/generate", "ai_heavy"),
     ("/api/v1/gemini", "ai_heavy"),
     ("/api/v1/student/ai", "ai_heavy"),
-    ("/api/v1/lecturer/ai", "ai_heavy"),
-    # The router is mounted at /lecturers/ai (plural); the singular prefix above never matched it.
+    # The router is mounted at /lecturers/ai (plural).
     ("/api/v1/lecturers/ai", "ai_heavy"),
     ("/api/v1/grading/grade-attempt", "ai_heavy"),
     ("/grading/grade-attempt", "ai_heavy"),
@@ -123,6 +121,24 @@ _AI_PATH_MARKERS = (
     "/grade-attempt",
     "/confirm-ai",
     "/feedback-ai",
+    "/ai-insights",  # analytics narrative; `?regenerate=true` calls the model
+)
+
+# Routes under the AI prefixes that never call a model. Counting them against the AI budget
+# let a few deck exports or history reads lock a user out of the chat.
+_STUDENT_AI_NON_LLM_PREFIXES = (
+    "/api/v1/student/ai/conversations",
+    "/api/v1/student/ai/history",
+)
+_LECTURER_AI_NON_LLM_MARKERS = ("/learning-units", "/slides/export", "/rubrics/save")
+
+# File intake: each upload is parsed and (for most) embedded by a paid provider, so it needs a
+# budget of its own. Only POST: the same paths are also listed/polled with GET.
+_UPLOAD_POST_PATHS = (
+    "/api/v1/student/resources/upload",
+    "/api/v1/resources/student-resources",
+    "/api/v1/resources/extract-text",
+    "/api/v1/resources/lecturer-materials",
 )
 
 
@@ -137,15 +153,23 @@ _STUDY_PLAN_AI_MARKERS = (
     "/guided/complete",
 )
 
-# Study reader routes that run an LLM (see api/v1/routes/study_reader.py).
-_STUDY_READER_AI_SUFFIXES = ("/skim", "/page-check")
+# Study reader routes that run an LLM or embeddings (see api/v1/routes/study_reader.py).
+_STUDY_READER_AI_SUFFIXES = ("/skim", "/page-check", "/focus")
 
 
-def _resolve_tier(path: str) -> str:
+def _resolve_tier(path: str, method: str = "GET") -> str:
     if path == "/":
         return "exempt"
     if any(marker in path for marker in _AI_PATH_MARKERS):
         return "ai_heavy"
+    if path.startswith(_STUDENT_AI_NON_LLM_PREFIXES):
+        return _DEFAULT_TIER
+    if path.startswith("/api/v1/lecturers/ai") and any(
+        marker in path for marker in _LECTURER_AI_NON_LLM_MARKERS
+    ):
+        return _DEFAULT_TIER
+    if method.upper() == "POST" and path.rstrip("/") in _UPLOAD_POST_PATHS:
+        return "upload"
     for prefix, tier in _ROUTE_TIERS:
         if path.startswith(prefix):
             return tier
@@ -180,6 +204,8 @@ def _limit_for_tier(tier: str) -> int:
         return settings.RATE_LIMIT_VERIFY_SEAL_PER_MINUTE
     if tier == "ai_heavy":
         return settings.RATE_LIMIT_AI_PER_MINUTE
+    if tier == "upload":
+        return settings.RATE_LIMIT_UPLOAD_PER_MINUTE
     if tier == "high_volume":
         return settings.RATE_LIMIT_HIGH_VOLUME_PER_MINUTE
     return settings.RATE_LIMIT_DEFAULT_PER_MINUTE
@@ -246,7 +272,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if request.method == "OPTIONS":
             return await call_next(request)
 
-        tier = _resolve_tier(request.url.path)
+        tier = _resolve_tier(request.url.path, request.method)
         limit = _limit_for_tier(tier)
         window_seconds = _window_for_tier(tier)
 
@@ -265,9 +291,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             )
         except Exception as exc:
             logger.warning(
-                "Rate limiter Redis error (using in-memory fallback): %s",
-                str(exc),
-                extra={"client_ip": client_ip, "tier": tier},
+                "rate_limiter_redis_error_using_fallback",
+                error=str(exc),
+                client_ip=client_ip,
+                tier=tier,
             )
             if getattr(settings, "RATE_LIMIT_FAIL_CLOSED_ON_AI", False) and tier == "ai_heavy":
                 return JSONResponse(
@@ -287,7 +314,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                     window_seconds=window_seconds,
                 )
             except Exception as fallback_exc:
-                logger.error("Rate limiter fallback failed: %s", str(fallback_exc))
+                logger.error("rate_limiter_fallback_failed", error=str(fallback_exc))
                 return await call_next(request)
 
         # Add rate limit headers to every response
@@ -300,13 +327,13 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         if current_count > limit:
             logger.warning(
-                "Rate limit exceeded: %s %s (ip=%s, tier=%s, count=%d/%d)",
-                request.method,
-                request.url.path,
-                client_ip,
-                tier,
-                current_count,
-                limit,
+                "rate_limit_exceeded",
+                method=request.method,
+                path=request.url.path,
+                client_ip=client_ip,
+                tier=tier,
+                count=current_count,
+                limit=limit,
             )
             return JSONResponse(
                 status_code=429,
@@ -374,7 +401,6 @@ async def _check_rate_limit(
 # IN-MEMORY FALLBACK COUNTER LOGIC (WHEN REDIS IS UNAVAILABLE)
 # ---------------------------------------------------------------------------
 
-_fallback_lock = asyncio.Lock()
 _fallback_store: dict[str, tuple[int, float]] = {}
 _MAX_FALLBACK_KEYS = 10000
 
@@ -392,14 +418,15 @@ async def _check_in_memory_rate_limit(
     window_remaining = max(1, int(window_seconds - (now - window_start)))
     key = f"rl:{tier}:{ip}:{window_bucket}"
 
-    async with _fallback_lock:
-        if len(_fallback_store) > _MAX_FALLBACK_KEYS:
-            expired = [k for k, (_, exp) in _fallback_store.items() if exp < now]
-            for k in expired:
-                _fallback_store.pop(k, None)
+    # No await between read and write, so the event loop cannot interleave requests here. (A
+    # module-level asyncio.Lock was removed: it binds to one event loop and breaks on any other.)
+    if len(_fallback_store) > _MAX_FALLBACK_KEYS:
+        expired = [k for k, (_, exp) in _fallback_store.items() if exp < now]
+        for k in expired:
+            _fallback_store.pop(k, None)
 
-        count, _ = _fallback_store.get(key, (0, 0.0))
-        count += 1
-        _fallback_store[key] = (count, now + window_seconds + 5)
+    count, _ = _fallback_store.get(key, (0, 0.0))
+    count += 1
+    _fallback_store[key] = (count, now + window_seconds + 5)
 
     return count, window_remaining

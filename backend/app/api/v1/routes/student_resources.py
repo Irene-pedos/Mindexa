@@ -12,7 +12,7 @@ from app.dependencies.auth import require_student
 from app.db.schemas.resource import StudentResourceResponse
 from app.db.repositories.resource_repo import ResourceRepository
 from app.services.resource_service import ResourceService
-from app.core.exceptions import ValidationError, NotFoundError, AuthorizationError
+from app.core.exceptions import NotFoundError, AuthorizationError
 from app.core.config import settings
 
 router = APIRouter(prefix="/student/resources", tags=["Student Resources"])
@@ -34,24 +34,8 @@ async def upload_student_resource(
     Returns the full StudentResourceResponse so the UI can immediately reflect
     the upload without a separate GET call.
     """
-    # 1. Validate file extension
-    ext = os.path.splitext(file.filename)[1].lower()
-    allowed = [".pdf", ".docx", ".txt"]
-    if ext not in allowed:
-        raise ValidationError(
-            f"File extension {ext} is not allowed. Only {', '.join(allowed)} are permitted.",
-            code="INVALID_FILE_TYPE",
-        )
-
-    # 2. Validate file size (enforce server-side limit from settings)
-    content = await file.read()
-    if len(content) > settings.max_student_upload_size_bytes:
-        raise ValidationError(
-            f"File size exceeds the {settings.MAX_STUDENT_UPLOAD_SIZE_MB}MB limit.",
-            code="FILE_TOO_LARGE",
-        )
-    await file.seek(0)  # Reset file pointer for service layer
-
+    # Extension, size (read incrementally), content signature and per-student quota are all
+    # enforced in the service, shared with the legacy /resources/student-resources route.
     service = ResourceService(db)
     resource = await service.upload_student_resource(
         current_user.id, file, subject_tag

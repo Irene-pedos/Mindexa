@@ -271,7 +271,7 @@ export function PageCheckPanel({
                             optionStyle,
                           )}
                         >
-                          <span className="size-4 rounded-full border border-current/40 text-[9px] font-bold flex items-center justify-center shrink-0 uppercase font-mono">
+                          <span className="size-4 rounded-full border border-current/40 text-[10px] font-bold flex items-center justify-center shrink-0 uppercase font-mono">
                             {String.fromCharCode(65 + optIndex)}
                           </span>
                           <span className="flex-1 leading-snug">{opt}</span>

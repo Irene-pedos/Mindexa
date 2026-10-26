@@ -116,7 +116,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           if (JSON.stringify(prevUser) === serializedCurrentUser) {
             return prevUser;
           }
-          console.log("[AuthProvider] Auth verified for:", currentUser.email);
           return currentUser;
         });
 
@@ -128,7 +127,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     } catch (err) {
       console.error("[AuthProvider] Failed to validate session:", err);
-      clearSession();
+      const status = (err as { status?: number } | null)?.status;
+      if (status === 401 || status === 403) {
+        clearSession();
+      } else {
+        // A rate limit (429), a server hiccup or a dropped connection says nothing about whether
+        // the session is valid. Keep the user signed in with the last known profile; the next
+        // request that really gets a 401 will end the session.
+        try {
+          const cached = localStorage.getItem("user");
+          if (cached) setUser((prev) => prev ?? (JSON.parse(cached) as AuthUser));
+          else clearSession();
+        } catch {
+          clearSession();
+        }
+      }
     } finally {
       setIsInitializing(false);
     }

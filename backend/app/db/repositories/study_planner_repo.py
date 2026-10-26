@@ -176,9 +176,11 @@ class StudyPlannerRepository:
             StudentLearningProfile.student_id == student_id,
             StudentLearningProfile.course_id == course_id,
             StudentLearningProfile.is_deleted == False,
-        )
+        ).order_by(StudentLearningProfile.created_at.asc())
         res = await self.db.execute(stmt)
-        profile = res.scalar_one_or_none()
+        # `first()`, not `scalar_one_or_none()`: the unique constraint treats NULL course_id as
+        # distinct, so concurrent creation can leave duplicate platform-wide rows. Oldest wins.
+        profile = res.scalars().first()
         if not profile:
             profile = StudentLearningProfile(
                 student_id=student_id,

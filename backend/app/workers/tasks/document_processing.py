@@ -29,7 +29,11 @@ def process_uploaded_document(self, resource_id: str):
         
         async with get_db_context() as db:
             service = DocumentProcessingService()
-            await service.process_resource(uuid.UUID(resource_id), db)
+            await service.process_resource(
+                uuid.UUID(resource_id),
+                db,
+                final_attempt=self.request.retries >= self.max_retries,
+            )
 
     try:
         # In Celery solo pool on Windows, get_event_loop() often returns the main thread's loop 

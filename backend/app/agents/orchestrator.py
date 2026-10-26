@@ -21,13 +21,8 @@ When NOT to use this:
 import uuid
 from typing import Any
 
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.runnables import RunnablePassthrough
-from langchain_openai import ChatOpenAI  # Example, requires langchain-openai
 
 from app.core.ai.gateway import AIGateway
-from app.db.enums import AIActionType
-from app.core.config import settings
 
 class OrchestratorAgent:
     """Example of a LangChain-powered orchestrator."""

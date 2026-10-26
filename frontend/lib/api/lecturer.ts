@@ -1,5 +1,25 @@
 // frontend/lib/api/lecturer.ts
 import { apiClient, resolveApiUrl, getToken } from "./client";
+import type { SourceCitation } from "./student-ai";
+
+export interface LecturerSupportRequest {
+  workspace_id: string;
+  question: string;
+  mode: string;
+  conversation_id?: string;
+  selected_material_ids?: string[];
+  conversation_history?: Array<{ role: string; content: string }>;
+}
+
+export interface LecturerSupportResponse {
+  answer: string;
+  conversation_id?: string;
+  citations: SourceCitation[];
+  fallback_used: boolean;
+  /** Display names of the selected materials that belong to the workspace. */
+  selected_sources: string[];
+  mode: string;
+}
 
 export interface LecturerDashboardSummary {
   active_classes_count: number;
@@ -354,50 +374,15 @@ export const lecturerApi = {
     window.URL.revokeObjectURL(url);
     document.body.removeChild(a);
   },
-  getAISupport: async (data: {
-    workspace_id: string;
-    question: string;
-    mode: string;
-    conversation_id?: string;
-    selected_material_ids?: string[];
-    conversation_history?: Array<{ role: string; content: string }>;
-    feature_payload?: any;
-  }): Promise<{
-    answer: string;
-    conversation_id?: string;
-    citations: any[];
-    fallback_used: boolean;
-    selected_sources: string[];
-    mode: string;
-    model?: string;
-    provider?: string;
-  }> => {
+  /** Ask the lecturer assistant a question grounded in a workspace's materials. */
+  getAISupport: async (
+    data: LecturerSupportRequest,
+    options: { signal?: AbortSignal } = {}
+  ): Promise<LecturerSupportResponse> => {
     return apiClient("/lecturers/ai/support", {
       method: "POST",
       body: JSON.stringify(data),
-    });
-  },
-  aiSupport: async (data: {
-    workspace_id: string;
-    question: string;
-    mode: string;
-    conversation_id?: string;
-    selected_material_ids?: string[];
-    conversation_history?: Array<{ role: string; content: string }>;
-    feature_payload?: any;
-  }): Promise<{
-    answer: string;
-    conversation_id?: string;
-    citations: any[];
-    fallback_used: boolean;
-    selected_sources: string[];
-    mode: string;
-    model?: string;
-    provider?: string;
-  }> => {
-    return apiClient("/lecturers/ai/support", {
-      method: "POST",
-      body: JSON.stringify(data),
+      signal: options.signal,
     });
   },
 };

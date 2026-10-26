@@ -14,6 +14,7 @@ from app.core.logging import get_logger
 from app.db.enums import ResourceProcessingStatus
 from app.db.models.academic_resource import AcademicResource
 from app.db.models.resource_chunk import ResourceChunk
+from app.db.repositories.resource_repo import ResourceRepository
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
@@ -23,11 +24,27 @@ logger = get_logger(__name__)
 class DocumentExtractionError(Exception):
     pass
 
+class DocumentLimitError(DocumentExtractionError):
+    """A size/page ceiling was hit. The message is written for end users and is shown as-is."""
+
+
 class EmbeddingGenerationError(Exception):
     pass
 
+def _is_transient(exc: Exception) -> bool:
+    """Failures worth retrying: the provider or network, not the document itself."""
+    from app.core.exceptions import RateLimitError, ServiceUnavailableError
+
+    return isinstance(
+        exc,
+        (EmbeddingGenerationError, ServiceUnavailableError, RateLimitError, httpx.HTTPError, TimeoutError),
+    )
+
+
 def _public_processing_error(exc: Exception) -> str:
     """User-safe summary of a processing failure (no paths, no provider response bodies)."""
+    if isinstance(exc, DocumentLimitError):
+        return str(exc)
     text = str(exc).lower()
     if any(word in text for word in ("embedding", "jina", "ai provider", "timeout", "429")):
         return "The file was read but could not be indexed right now. Please try uploading it again later."
@@ -44,8 +61,15 @@ class DocumentProcessingService:
         except Exception:
             self.tokenizer = None
 
-    async def process_resource(self, resource_id: uuid.UUID, db: AsyncSession) -> None:
-        """Full pipeline entry point called by Celery task."""
+    async def process_resource(
+        self, resource_id: uuid.UUID, db: AsyncSession, *, final_attempt: bool = True
+    ) -> None:
+        """Full pipeline entry point called by Celery task.
+
+        A transient failure (embedding provider down, timeout) on a non-final attempt resets the
+        resource to PENDING and re-raises so the task's retry actually happens. On the final
+        attempt, or for a permanent failure, the resource is marked FAILED and nothing is raised.
+        """
         resource = await db.get(AcademicResource, resource_id)
         if not resource:
             logger.error("Resource not found", resource_id=resource_id)
@@ -70,14 +94,26 @@ class DocumentProcessingService:
             else:
                 raise DocumentExtractionError(f"Unsupported file type: {ext}")
 
+            if len(pages) > settings.MAX_DOCUMENT_PAGES:
+                raise DocumentLimitError(
+                    f"This document has too many pages (limit {settings.MAX_DOCUMENT_PAGES}). "
+                    "Split it into smaller files and upload them separately."
+                )
+
             # 5. Chunk text
             chunks_data = self._chunk_text(pages)
+            if len(chunks_data) > settings.MAX_DOCUMENT_CHUNKS:
+                raise DocumentLimitError(
+                    "This document is too large to index. Split it into smaller files and upload them separately."
+                )
 
             # 6. Generate embeddings
             texts = [c["content"] for c in chunks_data]
             embeddings = await self._generate_embeddings(texts, resource_id=resource.id, db=db)
 
-            # 7. Store ResourceChunk records
+            # 7. Store ResourceChunk records, retiring any from an earlier run first so a
+            #    reprocessed document is never indexed twice (and a failed run keeps the old index).
+            await ResourceRepository(db).soft_delete_chunks(resource.id)
             await self._store_chunks(resource.id, chunks_data, embeddings, db)
 
             # 8. Set status to COMPLETED on AcademicResource
@@ -112,6 +148,10 @@ class DocumentProcessingService:
 
         except Exception as e:
             logger.exception("Error processing resource", resource_id=resource_id, error=str(e))
+            if _is_transient(e) and not final_attempt:
+                resource.processing_status = ResourceProcessingStatus.PENDING
+                await db.commit()
+                raise
             # The raw error can contain file paths and provider response bodies; it stays in the
             # logs, and only a safe summary is stored (it is returned by the resource APIs).
             public_error = _public_processing_error(e)
@@ -132,12 +172,22 @@ class DocumentProcessingService:
         pages = []
         try:
             doc = fitz.open(file_path)
-            for i, page in enumerate(doc):
-                text = page.get_text()
-                if text.strip():
-                    pages.append({"page": i + 1, "text": text})
-            doc.close()
+            try:
+                # Check the page count before extracting a single page of a pathological file.
+                if len(doc) > settings.MAX_DOCUMENT_PAGES:
+                    raise DocumentLimitError(
+                        f"This document has too many pages (limit {settings.MAX_DOCUMENT_PAGES}). "
+                        "Split it into smaller files and upload them separately."
+                    )
+                for i, page in enumerate(doc):
+                    text = page.get_text()
+                    if text.strip():
+                        pages.append({"page": i + 1, "text": text})
+            finally:
+                doc.close()
             return pages
+        except DocumentLimitError:
+            raise
         except Exception as e:
             raise DocumentExtractionError(f"PDF extraction failed: {str(e)}")
 
@@ -220,97 +270,41 @@ class DocumentProcessingService:
         resource_id: Optional[uuid.UUID] = None,
         db: Optional[AsyncSession] = None,
     ) -> List[List[float]]:
-        """Generate document passage embeddings via audited AIGateway."""
+        """Generate document passage embeddings via the audited, budgeted AIGateway.
+
+        No direct-to-provider fallback: the gateway already tries every configured embedding
+        provider, and a side door around it skipped auditing and the daily budget.
+        """
         import asyncio
 
+        from app.core.ai.gateway import AIGateway
+        from app.core.ai.provider_factory import get_ai_providers, get_embedding_providers
+        from app.core.ai.providers import AIEmbeddingRequest
+
+        if db is None:
+            raise EmbeddingGenerationError("A database session is required to generate embeddings")
+
         batch_size = 16
-        if db is not None:
-            try:
-                from app.core.ai.gateway import AIGateway
-                from app.core.ai.provider_factory import (
-                    get_ai_providers, get_embedding_providers)
-                from app.core.ai.providers import AIEmbeddingRequest
+        gateway = AIGateway(db, get_ai_providers(), get_embedding_providers())
+        embeddings: List[List[float]] = []
 
-                gateway = AIGateway(db, get_ai_providers(), get_embedding_providers())
-                all_gateway_embeddings: List[List[float]] = []
-
-                for batch_start in range(0, len(texts), batch_size):
-                    sub_batch = texts[batch_start : batch_start + batch_size]
-                    req = AIEmbeddingRequest(input=sub_batch)
-                    res = await gateway.embed(
-                        req,
-                        subject_entity_type="academic_resource",
-                        subject_entity_id=resource_id,
-                        prompt_summary=f"Document embedding batch for resource {resource_id}",
-                    )
-                    if len(res.embeddings) != len(sub_batch):
-                        raise EmbeddingGenerationError(
-                            f"AIGateway returned {len(res.embeddings)} embeddings for {len(sub_batch)} inputs"
-                        )
-                    all_gateway_embeddings.extend(res.embeddings)
-                    if batch_start + batch_size < len(texts):
-                        await asyncio.sleep(0.3)
-
-                return all_gateway_embeddings
-            except Exception as exc:
-                logger.warning(
-                    "AIGateway document embedding failed, attempting direct provider fallback",
-                    error=str(exc),
+        for batch_start in range(0, len(texts), batch_size):
+            sub_batch = texts[batch_start : batch_start + batch_size]
+            res = await gateway.embed(
+                AIEmbeddingRequest(input=sub_batch),
+                subject_entity_type="academic_resource",
+                subject_entity_id=resource_id,
+                prompt_summary=f"Document embedding batch for resource {resource_id}",
+            )
+            if len(res.embeddings) != len(sub_batch):
+                raise EmbeddingGenerationError(
+                    f"AIGateway returned {len(res.embeddings)} embeddings for {len(sub_batch)} inputs"
                 )
+            embeddings.extend(res.embeddings)
+            if batch_start + batch_size < len(texts):
+                await asyncio.sleep(0.3)
 
-        if not self.jina_api_key:
-            raise EmbeddingGenerationError("JINA_API_KEY not configured")
-
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.jina_api_key}",
-        }
-        url = f"{self.jina_base_url}/embeddings"
-        jina_dim = min(settings.PGVECTOR_DIMENSION, 1024)
-        target_dim = settings.PGVECTOR_DIMENSION
-
-        all_direct_embeddings: List[List[float]] = []
-
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            for batch_start in range(0, len(texts), batch_size):
-                sub_batch = texts[batch_start : batch_start + batch_size]
-                payload = {
-                    "model": self.embedding_model,
-                    "task": "retrieval.passage",
-                    "dimensions": jina_dim,
-                    "input": sub_batch,
-                }
-
-                response = None
-                for attempt in range(3):
-                    response = await client.post(url, headers=headers, json=payload)
-                    if response.status_code == 429 or "RATE_TOKEN_LIMIT_EXCEEDED" in response.text:
-                        await asyncio.sleep(2.0 * (attempt + 1))
-                        continue
-                    break
-
-                if response is None or response.status_code != 200:
-                    err_text = response.text if response else "No response"
-                    raise EmbeddingGenerationError(f"Jina API failed: {err_text}")
-
-                data = response.json()
-                raw_embeddings = [item["embedding"] for item in data.get("data", [])]
-                if len(raw_embeddings) != len(sub_batch):
-                    raise EmbeddingGenerationError(
-                        f"Jina direct provider returned {len(raw_embeddings)} embeddings for {len(sub_batch)} inputs"
-                    )
-
-                for emb in raw_embeddings:
-                    if len(emb) < target_dim:
-                        emb = emb + [0.0] * (target_dim - len(emb))
-                    elif len(emb) > target_dim:
-                        emb = emb[:target_dim]
-                    all_direct_embeddings.append(emb)
-
-                if batch_start + batch_size < len(texts):
-                    await asyncio.sleep(0.3)
-
-        return all_direct_embeddings
+        return embeddings
 
     async def _store_chunks(self, resource_id: uuid.UUID, chunks_data: List[Dict[str, Any]], embeddings: List[List[float]], db: AsyncSession) -> None:
         """Bulk insert ResourceChunk records."""

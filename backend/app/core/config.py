@@ -100,6 +100,7 @@ class Settings(BaseSettings):
     RATE_LIMIT_AI_PER_MINUTE: int = 20
     RATE_LIMIT_STUDENT_AI_SUPPORT_PER_HOUR: int = 30
     RATE_LIMIT_VERIFY_SEAL_PER_MINUTE: int = 20
+    RATE_LIMIT_UPLOAD_PER_MINUTE: int = 10
     RATE_LIMIT_FAIL_CLOSED_ON_AI: bool = False
     # Reverse proxies in front of the API (nginx, Caddy, a PaaS router). 0 = connect directly and
     # ignore X-Forwarded-For, which is client-controlled. Set to 1+ in production behind proxies,
@@ -230,27 +231,45 @@ class Settings(BaseSettings):
     AI_REQUEST_TIMEOUT_SECONDS: float = 30.0
     AI_MAX_RETRIES: int = 2
     AI_RETRY_BACKOFF_SECONDS: float = 0.5
-    AI_STUDENT_SUPPORT_MAX_CONTEXT_SNIPPETS: int = 5
+    # Wall-clock cap for one completion/embedding call including every retry and provider
+    # fallback, so a failing provider cannot hold a request (and its DB session) for minutes.
+    AI_TOTAL_TIMEOUT_SECONDS: float = 90.0
+    # Rolling 24h completion-token budget per user by role (0 disables the limit).
+    AI_DAILY_TOKEN_BUDGET_STUDENT: int = 300_000
+    AI_DAILY_TOKEN_BUDGET_LECTURER: int = 1_000_000
     SAMPLE_CHECK_AGREEMENT_THRESHOLD: float = 0.80
 
     # ─── Google Gemini ────────────────────────────────────────────────────────
     GEMINI_API_KEY: str = ""
     GEMINI_DEFAULT_MODEL: str = "gemini-2.5-flash"
 
-    # ─── Vector Store ─────────────────────────────────────────────────────────
-    VECTOR_STORE: Literal["pgvector", "qdrant"] = "pgvector"
+    # ─── Vector Store (pgvector only) ─────────────────────────────────────────
     PGVECTOR_DIMENSION: int = 1536  # Default pgvector dimension for embeddings
 
     # ─── RAG Parameters ───────────────────────────────────────────────────────
     RAG_TOP_K: int = 5
-    RAG_SIMILARITY_THRESHOLD: float = 0.35  # Lowered: cosine sim for good RAG matches is 0.40–0.65; 0.75 always triggers fallback
     RAG_CHUNK_SIZE: int = 400
     RAG_CHUNK_OVERLAP: int = 50
     MAX_STUDENT_UPLOAD_SIZE_MB: int = 10
+    # Wall-clock times students pick for study sessions ("19:00") are in this local zone, as a
+    # fixed offset from UTC in minutes (Africa/Kigali = UTC+2, no DST). Sessions are stored in UTC.
+    STUDY_PLANNER_UTC_OFFSET_MINUTES: int = 120
+    # Only formats the RAG pipeline can actually process (others would upload, then fail).
+    STUDENT_ALLOWED_UPLOAD_EXTENSIONS: list[str] = [".pdf", ".docx", ".txt"]
+    # Per-student ceilings: every upload is embedded by a paid provider.
+    STUDENT_MAX_RESOURCES: int = 30
+    STUDENT_STORAGE_QUOTA_MB: int = 200
+    # Guards against pathological documents (huge page counts / decompression bombs).
+    MAX_DOCUMENT_PAGES: int = 1000
+    MAX_DOCUMENT_CHUNKS: int = 5000
 
     @property
     def max_student_upload_size_bytes(self) -> int:
         return self.MAX_STUDENT_UPLOAD_SIZE_MB * 1024 * 1024
+
+    @property
+    def student_storage_quota_bytes(self) -> int:
+        return self.STUDENT_STORAGE_QUOTA_MB * 1024 * 1024
 
     # ─── Pagination ───────────────────────────────────────────────────────────
     DEFAULT_PAGE_SIZE: int = 20

@@ -11,7 +11,6 @@ Service layer for the Study Reader revision workspace:
 """
 
 import asyncio
-import json
 import logging
 import time
 import uuid
@@ -22,32 +21,38 @@ from app.agents.study_reader_agent import StudyReaderAgent
 from app.core.ai.gateway import AIGateway
 from app.core.ai.provider_factory import (get_ai_provider,
                                           get_embedding_provider)
-from app.core.ai.providers import AICompletionRequest, AIMessage
 from app.services.ai_exam_gate import assert_student_ai_allowed
 from app.core.exceptions import (AuthorizationError, NotFoundError,
                                  ValidationError)
-from app.db.enums import AIActionType
-from app.db.models.resource import (LecturerMaterial, LecturerMaterialChunk,
-                                    StudentResource, StudentResourceChunk)
+from app.db.models.resource import LecturerMaterial, StudentResource
+from app.db.repositories.resource_repo import ResourceRepository
 from app.db.repositories.study_reader_repo import StudyReaderRepository
 from app.schemas.study_reader import (AnnotationCreate, AnnotationResponse,
                                       AnnotationUpdate, ExamLensResponse,
                                       FocusNextRecommendation, FocusResponse,
                                       KeyPointCreate, KeyPointResponse,
                                       KeyPointUpdate, PageCheckFeedbackItem,
-                                      PageCheckQuestion, PageCheckRequest,
-                                      PageCheckResponse,
+                                      PageCheckQuestion, PageCheckResponse,
                                       PageCheckSubmitRequest,
                                       PageCheckSubmitResponse, PageHeatItem,
                                       ReaderLearningUnitItem,
                                       ReaderMetadataResponse,
                                       ReadingProgressResponse,
                                       ReadingProgressUpdate,
-                                      RevisionSheetExportResponse, SkimBullet,
-                                      SkimResponse, WeakQuestionContext)
+                                      RevisionSheetExportResponse, SkimResponse, WeakQuestionContext)
 from app.services.student_service import StudentService
-from sqlalchemy import and_, asc, desc, or_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+
+def _read_pdf_page(path: str, page_number: int) -> str:
+    """Blocking: text of one 1-based PDF page, '' when the page is out of range."""
+    import fitz
+
+    with fitz.open(path) as doc:
+        if not 0 <= page_number - 1 < len(doc):
+            return ""
+        return doc.load_page(page_number - 1).get_text().strip()
 
 
 class StudyReaderService:
@@ -57,6 +62,7 @@ class StudyReaderService:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
         self.repo = StudyReaderRepository(db)
+        self.resource_repo = ResourceRepository(db)
         self.logger = logging.getLogger(__name__)
 
     # ── Authorization & Metadata ─────────────────────────────────────────────
@@ -206,6 +212,11 @@ class StudyReaderService:
         progress = await self.repo.get_progress(student_id, kind, source_id)
         if not progress:
             return None
+        return self._progress_response(progress)
+
+    @staticmethod
+    def _progress_response(progress: Any) -> ReadingProgressResponse:
+        """Every persisted view setting, so the reader reopens exactly as it was left."""
         return ReadingProgressResponse(
             id=progress.id,
             student_id=progress.student_id,
@@ -213,6 +224,10 @@ class StudyReaderService:
             source_id=progress.source_id,
             last_page=progress.last_page,
             last_scale=progress.last_scale,
+            rotation=progress.rotation,
+            zoom_mode=progress.zoom_mode,
+            two_page_view=progress.two_page_view,
+            furthest_page_reached=progress.furthest_page_reached,
             page_count_seen=progress.page_count_seen,
             updated_at=progress.updated_at,
         )
@@ -228,16 +243,7 @@ class StudyReaderService:
         progress = await self.repo.upsert_progress(student_id, kind, source_id, data)
         await self.db.commit()
         await self.db.refresh(progress)
-        return ReadingProgressResponse(
-            id=progress.id,
-            student_id=progress.student_id,
-            source_kind=progress.source_kind,
-            source_id=progress.source_id,
-            last_page=progress.last_page,
-            last_scale=progress.last_scale,
-            page_count_seen=progress.page_count_seen,
-            updated_at=progress.updated_at,
-        )
+        return self._progress_response(progress)
 
     # ── Annotations ──────────────────────────────────────────────────────────
 
@@ -519,32 +525,24 @@ class StudyReaderService:
         await self._assert_language_allowed_for_source(kind, source_id, action="study_reader_skim")
         await assert_student_ai_allowed(self.db, student_id)
 
-        # Fetch existing chunks to generate skim without re-reading entire raw PDF
+        # Read the document's indexed chunks (the RAG pipeline's ResourceChunk rows). Without
+        # them the model would only see the title and invent a "summary", so refuse instead.
+        academic_resource_id = await self.resource_repo.get_academic_resource_id(kind, source_id)
+        chunks = (
+            await self.resource_repo.list_source_chunks(academic_resource_id, limit=25)
+            if academic_resource_id
+            else []
+        )
         chunks_text = []
-        if kind == "lecturer_material":
-            stmt = (
-                select(LecturerMaterialChunk)
-                .where(LecturerMaterialChunk.lecturer_material_id == source_id)
-                .order_by(LecturerMaterialChunk.chunk_index.asc())
-                .limit(25)
+        for c in chunks:
+            page = (c.metadata_json or {}).get("page")
+            chunks_text.append(f"{c.content} [Page {page}]" if page else c.content)
+        if not chunks_text:
+            raise ValidationError(
+                "This document hasn't been processed yet, so it can't be skimmed. "
+                "Wait for processing to finish, or re-upload it if it failed.",
+                code="DOCUMENT_NOT_READY",
             )
-            res = await self.db.execute(stmt)
-            for c in res.scalars().all():
-                page_str = f" [Page {c.source_page}]" if c.source_page else ""
-                chunks_text.append(f"{c.content}{page_str}")
-        else:
-            stmt = (
-                select(StudentResourceChunk)
-                .where(StudentResourceChunk.student_resource_id == source_id)
-                .order_by(StudentResourceChunk.chunk_index.asc())
-                .limit(25)
-            )
-            res = await self.db.execute(stmt)
-            for c in res.scalars().all():
-                page_str = f" [Page {c.source_page}]" if c.source_page else ""
-                chunks_text.append(f"{c.content}{page_str}")
-
-        combined_context = "\n---\n".join(chunks_text) if chunks_text else f"Material Title: {title}"
 
         chat_provider = get_ai_provider()
         embed_provider = get_embedding_provider()
@@ -574,9 +572,7 @@ class StudyReaderService:
         from app.db.models.assessment import Assessment
         from app.db.models.question import Question
         from app.db.models.result import AssessmentResult, ResultBreakdown
-        from app.schemas.study_reader import (FocusNextRecommendation,
-                                              FocusResponse, PageHeatItem,
-                                              WeakQuestionContext)
+        from app.schemas.study_reader import (FocusResponse)
         from app.services.rag_service import RAGService
 
         page_heat_map: dict[int, float] = {}
@@ -781,7 +777,10 @@ class StudyReaderService:
             spaced_reviews=spaced_reviews,
             total_weak_points=len(high_heat_pages),
         )
-        self._focus_cache[cache_key] = (time.monotonic() + 10.0, response)
+        now = time.monotonic()
+        for stale in [k for k, (expires, _) in self._focus_cache.items() if expires <= now]:
+            del self._focus_cache[stale]
+        self._focus_cache[cache_key] = (now + 10.0, response)
         return response
 
     # ── Page-Check Quiz ──────────────────────────────────────────────────────
@@ -828,70 +827,37 @@ class StudyReaderService:
             pass
 
         import os
-        import fitz
         from app.core.config import settings
 
-        file_path = None
-        if kind == "lecturer_material":
-            stmt = select(LecturerMaterial.file_path).where(LecturerMaterial.id == source_id)
-            res = await self.db.execute(stmt)
-            file_path = res.scalar_one_or_none()
-        else:
-            stmt = select(StudentResource.file_path).where(StudentResource.id == source_id)
-            res = await self.db.execute(stmt)
-            file_path = res.scalar_one_or_none()
+        model = LecturerMaterial if kind == "lecturer_material" else StudentResource
+        file_path = (
+            await self.db.execute(select(model.file_path).where(model.id == source_id))
+        ).scalar_one_or_none()
 
         if file_path:
             abs_path = file_path if os.path.isabs(file_path) else os.path.join(settings.UPLOAD_DIR, file_path)
             if os.path.exists(abs_path) and abs_path.lower().endswith(".pdf"):
                 try:
-                    doc = fitz.open(abs_path)
-                    if 0 <= page_number - 1 < len(doc):
-                        page = doc.load_page(page_number - 1)
-                        extracted = page.get_text().strip()
-                        doc.close()
-                        if extracted:
-                            try:
-                                await cache.set("study_page_text", cache_key, extracted, ttl=86400)
-                            except Exception:
-                                pass
-                            return extracted
-                    doc.close()
+                    # PyMuPDF is blocking: keep it off the event loop.
+                    extracted = await asyncio.to_thread(_read_pdf_page, abs_path, page_number)
                 except Exception as exc:
                     self.logger.warning("PyMuPDF page extraction error for %s (p.%s): %s", source_id, page_number, exc)
+                    extracted = ""
+                if extracted:
+                    try:
+                        await cache.set("study_page_text", cache_key, extracted, ttl=86400)
+                    except Exception:
+                        pass
+                    return extracted
 
-        # Fallback to chunk text with STRICT page matching (only pull chunks specifically tagged with this page_number)
-        chunks_text = []
-        if kind == "lecturer_material":
-            stmt = (
-                select(LecturerMaterialChunk)
-                .where(
-                    and_(
-                        LecturerMaterialChunk.lecturer_material_id == source_id,
-                        LecturerMaterialChunk.source_page == page_number,
-                    )
-                )
-                .order_by(LecturerMaterialChunk.chunk_index.asc())
-                .limit(8)
-            )
-            res = await self.db.execute(stmt)
-            for c in res.scalars().all():
-                chunks_text.append(c.content)
-        else:
-            stmt = (
-                select(StudentResourceChunk)
-                .where(
-                    and_(
-                        StudentResourceChunk.student_resource_id == source_id,
-                        StudentResourceChunk.source_page == page_number,
-                    )
-                )
-                .order_by(StudentResourceChunk.chunk_index.asc())
-                .limit(8)
-            )
-            res = await self.db.execute(stmt)
-            for c in res.scalars().all():
-                chunks_text.append(c.content)
+        # Fallback to the indexed chunks with STRICT page matching (only chunks tagged with this page)
+        academic_resource_id = await self.resource_repo.get_academic_resource_id(kind, source_id)
+        chunks = (
+            await self.resource_repo.list_source_chunks(academic_resource_id, page=page_number, limit=8)
+            if academic_resource_id
+            else []
+        )
+        chunks_text = [c.content for c in chunks]
 
         combined_fallback = "\n\n".join(chunks_text).strip()
         if combined_fallback:
@@ -945,11 +911,62 @@ class StudyReaderService:
             selected_text=selected_text,
         )
 
-        self._page_check_cache[(student_id, kind, source_id, page_number)] = (
-            time.monotonic() + 300.0,
-            response.questions,
-        )
+        await self._store_page_check(student_id, kind, source_id, page_number, response.questions)
         return response
+
+    # ── Page-check quiz store ────────────────────────────────────────────────
+    # The answer key lives server-side between generate and submit. Redis makes it visible to
+    # every worker (a per-process dict made submit fail whenever it hit a different one); the
+    # local dict is only a bounded fallback for when Redis is unavailable.
+
+    _PAGE_CHECK_TTL_SECONDS: ClassVar[int] = 300
+    _PAGE_CHECK_LOCAL_MAX: ClassVar[int] = 500
+
+    @staticmethod
+    def _page_check_cache_key(student_id: uuid.UUID, kind: str, source_id: uuid.UUID, page: int) -> str:
+        return f"{student_id}:{kind}:{source_id}:{page}"
+
+    async def _store_page_check(
+        self,
+        student_id: uuid.UUID,
+        kind: str,
+        source_id: uuid.UUID,
+        page_number: int,
+        questions: list[PageCheckQuestion],
+    ) -> None:
+        from app.core.cache import cache
+
+        now = time.monotonic()
+        local = self._page_check_cache
+        for stale in [k for k, (expires, _) in local.items() if expires <= now]:
+            del local[stale]
+        while len(local) >= self._PAGE_CHECK_LOCAL_MAX:
+            del local[next(iter(local))]  # oldest insertion first
+        local[(student_id, kind, source_id, page_number)] = (
+            now + self._PAGE_CHECK_TTL_SECONDS,
+            questions,
+        )
+        await cache.set(
+            "study_page_check",
+            self._page_check_cache_key(student_id, kind, source_id, page_number),
+            [q.model_dump() for q in questions],
+            ttl=self._PAGE_CHECK_TTL_SECONDS,
+        )
+
+    async def _load_page_check(
+        self, student_id: uuid.UUID, kind: str, source_id: uuid.UUID, page_number: int
+    ) -> Optional[list[PageCheckQuestion]]:
+        from app.core.cache import cache
+
+        shared = await cache.get(
+            "study_page_check", self._page_check_cache_key(student_id, kind, source_id, page_number)
+        )
+        if shared:
+            return [PageCheckQuestion.model_validate(item) for item in shared]
+        local = self._page_check_cache.get((student_id, kind, source_id, page_number))
+        if local and local[0] > time.monotonic():
+            return local[1]
+        return None
 
     async def submit_page_check(
         self,
@@ -962,21 +979,26 @@ class StudyReaderService:
 
         from datetime import timedelta
 
-        from app.schemas.study_reader import (PageCheckFeedbackItem,
-                                              PageCheckSubmitResponse)
+        from app.schemas.study_reader import (PageCheckSubmitResponse)
 
-        cached = self._page_check_cache.get((student_id, kind, source_id, req.page_number))
-        if not cached or cached[0] <= time.monotonic():
+        quiz = await self._load_page_check(student_id, kind, source_id, req.page_number)
+        if not quiz:
             raise ValidationError("Page check has expired. Generate a new page check.", code="PAGE_CHECK_NOT_FOUND")
-        questions_by_id = {question.id: question for question in cached[1]}
+        questions_by_id = {question.id: question for question in quiz}
         score = 0
-        max_score = len(req.answers)
+        # Scored against the whole quiz: unanswered questions count as wrong, so answering one
+        # question of three correctly is 33%, not 100%.
+        max_score = len(quiz)
         feedback_list: list[PageCheckFeedbackItem] = []
+        seen_question_ids: set[str] = set()
 
         for a in req.answers:
             question = questions_by_id.get(a.question_id)
             if question is None:
                 raise ValidationError("Question is not part of this page check.", code="QUESTION_NOT_IN_PAGE_CHECK")
+            if a.question_id in seen_question_ids:
+                raise ValidationError("A question can only be answered once.", code="DUPLICATE_PAGE_CHECK_ANSWER")
+            seen_question_ids.add(a.question_id)
             if a.selected_option_index >= len(question.options):
                 raise ValidationError("Selected option is out of range.", code="OPTION_INDEX_OUT_OF_RANGE")
             is_correct = a.selected_option_index == question.correct_option_index

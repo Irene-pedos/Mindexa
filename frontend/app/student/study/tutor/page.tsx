@@ -1,6 +1,6 @@
 "use client";
 
-import React, { Suspense } from "react";
+import { Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { AISupportChat } from "@/components/mindexa/student/ai-support-chat";
 import { Skeleton } from "@/components/ui/skeleton";

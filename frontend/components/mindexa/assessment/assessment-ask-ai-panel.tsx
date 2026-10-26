@@ -20,18 +20,8 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { RichMessageRenderer } from "@/components/mindexa/common/rich-message-renderer";
-import { studentAiApi, SourceCitation } from "@/lib/api/student-ai";
-import { toast } from "sonner";
+import { useSupportThread } from "@/hooks/use-support-thread";
 import { SparklesIcon } from "@/components/ui/sparkles-icon";
-
-interface ChatMessage {
-  id: string;
-  sender: "user" | "ai";
-  text: string;
-  citations?: SourceCitation[];
-  timestamp: string;
-  fallbackUsed?: boolean;
-}
 
 interface AssessmentAskAiPanelProps {
   assessmentTitle: string;
@@ -44,6 +34,9 @@ interface AssessmentAskAiPanelProps {
   assessmentId?: string;
 }
 
+const formatTime = (iso: string) =>
+  new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
 export function AssessmentAskAiPanel({
   assessmentTitle,
   currentQuestionText,
@@ -55,19 +48,17 @@ export function AssessmentAskAiPanel({
   assessmentId,
 }: AssessmentAskAiPanelProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: "welcome",
-      sender: "ai",
-      text: `Hello! I am your AI Study Tutor. Ask me any conceptual question related to **${assessmentTitle}** or your course materials! I will reference your course resources and explain underlying principles.`,
-      timestamp: new Date().toLocaleTimeString([], {
-        hour: "2-digit",
-        minute: "2-digit",
-      }),
-    },
-  ]);
+  const { messages, loading: isLoading, send } = useSupportThread<object>({
+    initialMessages: [
+      {
+        id: "welcome",
+        role: "assistant",
+        content: `Hello! I am your AI Study Tutor. Ask me any conceptual question related to **${assessmentTitle}** or your course materials! I will reference your course resources and explain underlying principles.`,
+        createdAt: new Date().toISOString(),
+      },
+    ],
+  });
   const [inputQuestion, setInputQuestion] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -76,64 +67,23 @@ export function AssessmentAskAiPanel({
     }
   }, [messages, isOpen]);
 
-  const handleSend = async () => {
+  const handleSend = () => {
     if (!inputQuestion.trim() || isLoading) return;
-
-    const userText = inputQuestion.trim();
+    const question = inputQuestion;
     setInputQuestion("");
 
-    const userMsg: ChatMessage = {
-      id: Date.now().toString(),
-      sender: "user",
-      text: userText,
-      timestamp: new Date().toLocaleTimeString([], {
-        hour: "2-digit",
-        minute: "2-digit",
-      }),
-    };
-
-    const newHistory = [...messages, userMsg];
-    setMessages(newHistory);
-    setIsLoading(true);
-
-    try {
-      const historyPayload = newHistory
-        .filter((m) => m.id !== "welcome")
-        .map((m) => ({
-          role: m.sender === "user" ? "user" : "assistant",
-          content: m.text,
-        }));
-
-      const res = await studentAiApi.getSupport({
-        question: userText,
+    void send({
+      question,
+      request: {
         source_surface: "assessment_inline",
-        conversation_history: historyPayload,
         teaching_workspace_id: teachingWorkspaceId,
         selected_resource_ids: selectedResourceIds,
         attempt_id: attemptId,
         question_id: questionId,
         assessment_id: assessmentId,
         is_in_assessment: true,
-      });
-
-      const aiMsg: ChatMessage = {
-        id: (Date.now() + 1).toString(),
-        sender: "ai",
-        text: res.explanation,
-        citations: res.citations,
-        fallbackUsed: res.fallback_used,
-        timestamp: new Date().toLocaleTimeString([], {
-          hour: "2-digit",
-          minute: "2-digit",
-        }),
-      };
-
-      setMessages((prev) => [...prev, aiMsg]);
-    } catch (err: any) {
-      toast.error(err?.message || "Failed to get response from AI tutor");
-    } finally {
-      setIsLoading(false);
-    }
+      },
+    });
   };
 
   return (
@@ -166,7 +116,7 @@ export function AssessmentAskAiPanel({
                   </CardTitle>
                   <Badge
                     variant="outline"
-                    className="text-[9px] border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 py-0"
+                    className="text-[10px] border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 py-0"
                   >
                     AI Enabled
                   </Badge>
@@ -206,28 +156,28 @@ export function AssessmentAskAiPanel({
             {messages.map((msg) => (
               <div
                 key={msg.id}
-                className={`flex gap-2.5 ${msg.sender === "user" ? "justify-end" : "justify-start"}`}
+                className={`flex gap-2.5 ${msg.role === "user" ? "justify-end" : "justify-start"}`}
               >
-                {msg.sender === "ai" && (
+                {msg.role === "assistant" && (
                   <div className="size-6 rounded-full bg-primary/10 flex items-center justify-center text-primary shrink-0 mt-0.5">
                     <SparklesIcon size={12} className="text-primary" />
                   </div>
                 )}
                 <div
                   className={`max-w-[85%] rounded-2xl p-3 text-xs leading-relaxed ${
-                    msg.sender === "user"
+                    msg.role === "user"
                       ? "bg-primary text-primary-foreground font-medium rounded-tr-none"
                       : "bg-muted/60 text-foreground border border-border/40 rounded-tl-none space-y-2"
                   }`}
                 >
-                  {msg.sender === "user" ? (
-                    <p className="whitespace-pre-wrap">{msg.text}</p>
+                  {msg.role === "user" ? (
+                    <p className="whitespace-pre-wrap">{msg.content}</p>
                   ) : (
                     <>
-                      <RichMessageRenderer content={msg.text} />
+                      <RichMessageRenderer content={msg.content} />
                       {msg.citations && msg.citations.length > 0 && (
                         <div className="pt-2 border-t border-border/30 space-y-1">
-                          <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider">
+                          <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
                             Source References:
                           </p>
                           <div className="flex flex-wrap gap-1">
@@ -235,7 +185,7 @@ export function AssessmentAskAiPanel({
                               <Badge
                                 key={i}
                                 variant="secondary"
-                                className="text-[9px] py-0 font-normal bg-background/80 border border-border/50 text-foreground/80 flex items-center gap-1"
+                                className="text-[10px] py-0 font-normal bg-background/80 border border-border/50 text-foreground/80 flex items-center gap-1"
                                 title={c.excerpt}
                               >
                                 <BookOpen className="size-2.5 text-primary" />
@@ -249,7 +199,7 @@ export function AssessmentAskAiPanel({
                         </div>
                       )}
                       {msg.fallbackUsed && (
-                        <p className="text-[9px] text-muted-foreground/75 italic">
+                        <p className="text-[10px] text-muted-foreground/75 italic">
                           ℹ️ Sourced from general academic knowledge base.
                         </p>
                       )}
@@ -257,16 +207,16 @@ export function AssessmentAskAiPanel({
                   )}
 
                   <div
-                    className={`text-[9px] mt-1 ${
-                      msg.sender === "user"
+                    className={`text-[10px] mt-1 ${
+                      msg.role === "user"
                         ? "text-primary-foreground/70 text-right"
                         : "text-muted-foreground text-right"
                     }`}
                   >
-                    {msg.timestamp}
+                    {formatTime(msg.createdAt)}
                   </div>
                 </div>
-                {msg.sender === "user" && (
+                {msg.role === "user" && (
                   <div className="size-6 rounded-full bg-muted flex items-center justify-center text-muted-foreground shrink-0 mt-0.5">
                     <User className="size-3" />
                   </div>

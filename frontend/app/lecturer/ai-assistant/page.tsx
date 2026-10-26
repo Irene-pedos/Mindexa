@@ -1,19 +1,16 @@
 // app/lecturer/ai-assistant/page.tsx
 "use client";
 
-import React, {
+import {
   useState,
   useEffect,
   useMemo,
   useRef,
-  useCallback,
   Suspense,
 } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import {
@@ -29,7 +26,6 @@ import {
   BookOpen,
   BarChart2,
   Plus,
-  Trash2,
   Folder,
   Layers,
   Award,
@@ -42,27 +38,32 @@ import {
   AlertTriangle,
   FileText,
   ChevronDown,
-  Pin,
   Share2,
   Download,
   Printer,
   FileCode,
   Menu,
-  Loader2,
   PanelLeftClose,
   PanelLeftOpen,
   ArrowLeft,
   History,
 } from "lucide-react";
 import { AIChatInput, type Attachment } from "@/components/ui/ai-chat-input";
-import { ChatMessage } from "@/lib/api/gemini";
+import { useLecturerSessions } from "@/hooks/use-lecturer-sessions";
+import {
+  sanitizeSessionModule,
+  type AIModule,
+  type ChatMessage,
+} from "@/lib/lecturer-sessions";
 import {
   lecturerApi,
   WorkspaceListItem,
   WorkspaceDetail,
   LecturerMaterialResponse,
 } from "@/lib/api/lecturer";
+import { buildAttachmentPrompt } from "@/lib/chat-attachments";
 import { escapeHtml } from "@/lib/escape-html";
+import { safeRemoveItem, safeSetItem } from "@/lib/safe-storage";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { Separator } from "@/components/ui/separator";
@@ -98,30 +99,18 @@ import { QuestionGeneratorLauncher } from "@/components/mindexa/lecturer/questio
 import { SlideDeckGenerator } from "@/components/mindexa/lecturer/slide-deck-generator";
 import { RubricAssistant } from "@/components/mindexa/lecturer/rubric-assistant";
 import { ClassDigest } from "@/components/mindexa/lecturer/class-digest";
+import { SessionList } from "@/components/mindexa/lecturer/session-list";
 
-export type AIModule = "chat" | "questions" | "slides" | "rubric" | "digest";
-
-const VALID_MODULES: AIModule[] = ["chat", "questions", "slides", "rubric", "digest"];
-
-interface AISession {
-  id: string;
-  title: string;
-  module: AIModule;
-  workspaceId: string | null;
-  history: ChatMessage[];
-  generatedContent: string;
-  created_at: string;
+/** Wrapper for a tool pane: fills the main area like the tool itself used to, hidden when inactive. */
+function toolPaneClass(isActive: boolean): string {
+  return cn("flex min-h-0 flex-1 flex-col", !isActive && "hidden");
 }
 
-/**
- * Defensive migration for legacy session modules
- */
-function sanitizeSessionModule(rawModule: string): AIModule {
-  if (rawModule === "assessment") return "questions";
-  if (rawModule === "content") return "slides";
-  if (rawModule === "analytics" || rawModule === "insights") return "digest";
-  if (VALID_MODULES.includes(rawModule as AIModule)) return rawModule as AIModule;
-  return "chat";
+/** Plain-text transcript of a conversation, for pasting into an email or chat. */
+function buildTranscript(turns: Array<{ role: string; content: string }>): string {
+  return turns
+    .map((t) => `${t.role === "user" ? "Lecturer" : "AI Assistant"}:\n${t.content.trim()}`)
+    .join("\n\n");
 }
 
 function LecturerAIAssistantContent() {
@@ -129,27 +118,20 @@ function LecturerAIAssistantContent() {
   const searchParams = useSearchParams();
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Tab State with LocalStorage and URL synchronization
-  const [activeTab, setActiveTabState] = useState<AIModule>(() => {
-    if (typeof window !== "undefined") {
-      const urlModule = searchParams.get("module");
-      if (urlModule) {
-        const sanitized = sanitizeSessionModule(urlModule);
-        return sanitized;
-      }
-      const saved = localStorage.getItem("mindexa_lecturer_ai_module");
-      if (saved) {
-        const sanitized = sanitizeSessionModule(saved);
-        return sanitized;
-      }
-    }
-    return "chat";
-  });
+  // Tab State with LocalStorage and URL synchronization. The initial values are fixed defaults
+  // (so the server render and the first client render match); saved values are restored in the
+  // mount effect further down.
+  const [activeTab, setActiveTabState] = useState<AIModule>("chat");
+  // Tabs opened at least once; their tools are kept mounted (see the tool panes below).
+  const [visitedTabs, setVisitedTabs] = useState<ReadonlySet<AIModule>>(() => new Set<AIModule>(["chat"]));
+  useEffect(() => {
+    setVisitedTabs((prev) => (prev.has(activeTab) ? prev : new Set(prev).add(activeTab)));
+  }, [activeTab]);
 
   const setActiveTab = (tab: AIModule) => {
     setActiveTabState(tab);
     if (typeof window !== "undefined") {
-      localStorage.setItem("mindexa_lecturer_ai_module", tab);
+      safeSetItem("mindexa_lecturer_ai_module", tab);
       const params = new URLSearchParams(window.location.search);
       params.set("module", tab);
       router.replace(`?${params.toString()}`);
@@ -157,10 +139,15 @@ function LecturerAIAssistantContent() {
   };
 
   const [isGenerating, setIsGenerating] = useState(false);
-  const [generatedContent, setGeneratedContent] = useState("");
+  // Cancels the in-flight assistant request when the lecturer presses Stop.
+  const abortControllerRef = useRef<AbortController | null>(null);
   const [history, setHistory] = useState<ChatMessage[]>([]);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
-  const [prompt, setPrompt] = useState("");
+  // The draft text lives inside the chat input, so typing does not re-render this whole page (and
+  // every message in it). Bumping `nonce` replaces the draft from here ("edit message", or the
+  // text coming back after a failed send).
+  const [draftSeed, setDraftSeed] = useState({ text: "", nonce: 0 });
+  const setDraft = (text: string) => setDraftSeed((seed) => ({ text, nonce: seed.nonce + 1 }));
   const [isFullScreen, setIsFullScreen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -197,23 +184,15 @@ function LecturerAIAssistantContent() {
 
   // Workspaces list & active selection with persistence
   const [workspaces, setWorkspaces] = useState<WorkspaceListItem[]>([]);
-  const [selectedWorkspaceId, setSelectedWorkspaceIdState] = useState<string>(() => {
-    if (typeof window !== "undefined") {
-      const urlWs = searchParams.get("workspace");
-      if (urlWs) return urlWs;
-      const saved = localStorage.getItem("mindexa_lecturer_ai_workspace");
-      if (saved) return saved;
-    }
-    return "";
-  });
+  const [selectedWorkspaceId, setSelectedWorkspaceIdState] = useState<string>("");
 
   const setSelectedWorkspaceId = (id: string) => {
     setSelectedWorkspaceIdState(id);
     if (typeof window !== "undefined") {
       if (id) {
-        localStorage.setItem("mindexa_lecturer_ai_workspace", id);
+        safeSetItem("mindexa_lecturer_ai_workspace", id);
       } else {
-        localStorage.removeItem("mindexa_lecturer_ai_workspace");
+        safeRemoveItem("mindexa_lecturer_ai_workspace");
       }
       const params = new URLSearchParams(window.location.search);
       if (id) {
@@ -231,65 +210,68 @@ function LecturerAIAssistantContent() {
 
   // Resource / Materials Context Settings
   const [workspaceMaterials, setWorkspaceMaterials] = useState<LecturerMaterialResponse[]>([]);
-  const [selectedMaterials, setSelectedMaterialsState] = useState<string[]>(() => {
-    if (typeof window !== "undefined") {
-      try {
-        const saved = localStorage.getItem("mindexa_lecturer_ai_materials");
-        return saved ? JSON.parse(saved) : [];
-      } catch (e) {
-        return [];
-      }
-    }
-    return [];
-  });
+  const [selectedMaterials, setSelectedMaterialsState] = useState<string[]>([]);
+  const selectedMaterialsRef = useRef<string[]>([]);
+  selectedMaterialsRef.current = selectedMaterials;
 
   const setSelectedMaterials = (materials: string[]) => {
     setSelectedMaterialsState(materials);
-    if (typeof window !== "undefined") {
+    try {
       localStorage.setItem("mindexa_lecturer_ai_materials", JSON.stringify(materials));
+    } catch {
+      // storage unavailable or full: the selection simply isn't remembered
     }
   };
 
-  // Saved Sessions Memory & Pinning
-  const [sessions, setSessions] = useState<AISession[]>([]);
-  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
-  const [pinnedSessionIds, setPinnedSessionIds] = useState<Set<string>>(() => {
-    if (typeof window !== "undefined") {
-      try {
-        const saved = localStorage.getItem("mindexa_lecturer_pinned_sessions");
-        return saved ? new Set(JSON.parse(saved)) : new Set();
-      } catch (e) {
-        return new Set();
-      }
-    }
-    return new Set();
+  // Saved conversations: list, open one, pinning, deletion (state + persistence live in the hook).
+  const {
+    sortedSessions,
+    currentSessionId,
+    pinnedSessionIds,
+    sessionToDelete,
+    setSessionToDelete,
+    saveCurrentSession,
+    startNewSession,
+    loadSession,
+    togglePinSession,
+    confirmDeleteSession,
+  } = useLecturerSessions({
+    setHistory,
+    activeTab,
+    selectedWorkspaceId,
+    setActiveTab,
+    setSelectedWorkspaceId,
   });
 
-  const togglePinSession = (sessionId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setPinnedSessionIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(sessionId)) {
-        next.delete(sessionId);
-        toast.info("Session unpinned.");
-      } else {
-        next.add(sessionId);
-        toast.success("Session pinned to top.");
+  // Restore everything remembered from a previous visit. Done after mount rather than in the
+  // state initialisers above: those also run on the server, where there is no localStorage,
+  // so reading it there made the first client render differ from the server HTML.
+  useEffect(() => {
+    try {
+      const urlModule = searchParams.get("module");
+      const savedModule = urlModule || localStorage.getItem("mindexa_lecturer_ai_module");
+      if (savedModule) setActiveTabState(sanitizeSessionModule(savedModule));
+
+      const savedWorkspace = searchParams.get("workspace") || localStorage.getItem("mindexa_lecturer_ai_workspace");
+      if (savedWorkspace) setSelectedWorkspaceIdState(savedWorkspace);
+
+      const savedMaterials = localStorage.getItem("mindexa_lecturer_ai_materials");
+      if (savedMaterials) {
+        const parsed = JSON.parse(savedMaterials);
+        if (Array.isArray(parsed)) setSelectedMaterialsState(parsed.filter((id) => typeof id === "string"));
       }
-      if (typeof window !== "undefined") {
-        localStorage.setItem("mindexa_lecturer_pinned_sessions", JSON.stringify(Array.from(next)));
-      }
-      return next;
-    });
-  };
+    } catch {
+      // unreadable or unavailable storage: start from the defaults
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on mount
+  }, []);
 
   // Action states
   const [copiedActionId, setCopiedActionId] = useState<string | null>(null);
-  const [sessionToDelete, setSessionToDelete] = useState<string | null>(null);
   const [shareModalOpen, setShareModalOpen] = useState(false);
   const [exportModalOpen, setExportModalOpen] = useState(false);
 
-  // Load Workspaces & Saved Sessions on Mount (with defensive migration)
+  // Load the lecturer's workspaces on mount
   useEffect(() => {
     async function loadData() {
       try {
@@ -298,9 +280,13 @@ function LecturerAIAssistantContent() {
         setWorkspaces(wsData || []);
         if (wsData && wsData.length > 0) {
           setSelectedWorkspaceIdState((prev) => {
-            const finalId = prev || wsData[0].id;
-            if (typeof window !== "undefined") {
+            // A remembered workspace that no longer exists (or isn't theirs) falls back to the
+            // first one instead of silently failing every request afterwards.
+            const finalId = prev && wsData.some((w) => w.id === prev) ? prev : wsData[0].id;
+            try {
               localStorage.setItem("mindexa_lecturer_ai_workspace", finalId);
+            } catch {
+              // storage unavailable
             }
             return finalId;
           });
@@ -309,29 +295,6 @@ function LecturerAIAssistantContent() {
         console.error("Failed to load lecturer workspaces", err);
       } finally {
         setLoadingWorkspaces(false);
-      }
-
-      if (typeof window !== "undefined") {
-        const stored = localStorage.getItem("mindexa_lecturer_ai_sessions");
-        if (stored) {
-          try {
-            const parsed = JSON.parse(stored);
-            if (Array.isArray(parsed)) {
-              // Defensive sanitization of stored sessions
-              const sanitizedList: AISession[] = parsed.map((s: any) => ({
-                ...s,
-                module: sanitizeSessionModule(s.module),
-              }));
-              setSessions(sanitizedList);
-              localStorage.setItem(
-                "mindexa_lecturer_ai_sessions",
-                JSON.stringify(sanitizedList)
-              );
-            }
-          } catch (e) {
-            console.error("Failed to parse saved AI sessions", e);
-          }
-        }
       }
     }
     loadData();
@@ -353,6 +316,13 @@ function LecturerAIAssistantContent() {
 
         const materials = await lecturerApi.getWorkspaceMaterials(selectedWorkspaceId);
         setWorkspaceMaterials(materials || []);
+
+        // The remembered selection is global, but materials belong to one workspace: drop any
+        // that are not in this one so another workspace's files are never sent as context.
+        const available = new Set((materials || []).map((m) => m.id));
+        const current = selectedMaterialsRef.current;
+        const kept = current.filter((id) => available.has(id));
+        if (kept.length !== current.length) setSelectedMaterials(kept);
       } catch (err) {
         console.error("Failed to load workspace details/materials", err);
       } finally {
@@ -381,84 +351,6 @@ function LecturerAIAssistantContent() {
     );
   }, [activeWorkspaceDetail, activeWorkspace]);
 
-  // Session Management
-  const saveCurrentSession = useCallback(
-    (newHistory: ChatMessage[], newGeneratedContent: string, customTitle?: string) => {
-      if (newHistory.length === 0 && !newGeneratedContent) return;
-
-      const firstUserMsg = newHistory.find((m) => m.role === "user");
-      const title =
-        customTitle ||
-        firstUserMsg?.content.slice(0, 36) ||
-        `${activeTab.toUpperCase()} Session (${new Date().toLocaleDateString()})`;
-
-      const sessionObj: AISession = {
-        id: currentSessionId || crypto.randomUUID(),
-        title,
-        module: activeTab,
-        workspaceId: selectedWorkspaceId,
-        history: newHistory,
-        generatedContent: newGeneratedContent,
-        created_at: new Date().toISOString(),
-      };
-
-      setSessions((prev) => {
-        const existingIdx = prev.findIndex((s) => s.id === sessionObj.id);
-        let updated: AISession[];
-        if (existingIdx >= 0) {
-          updated = [...prev];
-          updated[existingIdx] = sessionObj;
-        } else {
-          updated = [sessionObj, ...prev];
-        }
-        if (typeof window !== "undefined") {
-          localStorage.setItem("mindexa_lecturer_ai_sessions", JSON.stringify(updated));
-        }
-        return updated;
-      });
-
-      if (!currentSessionId) {
-        setCurrentSessionId(sessionObj.id);
-      }
-    },
-    [activeTab, currentSessionId, selectedWorkspaceId]
-  );
-
-  const startNewSession = (tab?: AIModule) => {
-    setCurrentSessionId(null);
-    setHistory([]);
-    setGeneratedContent("");
-    if (tab) {
-      setActiveTab(tab);
-    }
-    toast.success("Started a new session.");
-  };
-
-  const loadSession = (s: AISession) => {
-    setCurrentSessionId(s.id);
-    setActiveTab(s.module);
-    if (s.workspaceId) setSelectedWorkspaceId(s.workspaceId);
-    setHistory(s.history || []);
-    setGeneratedContent(s.generatedContent || "");
-    toast.info(`Loaded session: ${s.title}`);
-  };
-
-  const confirmDeleteSession = () => {
-    if (!sessionToDelete) return;
-    setSessions((prev) => {
-      const updated = prev.filter((s) => s.id !== sessionToDelete);
-      if (typeof window !== "undefined") {
-        localStorage.setItem("mindexa_lecturer_ai_sessions", JSON.stringify(updated));
-      }
-      return updated;
-    });
-    if (currentSessionId === sessionToDelete) {
-      startNewSession();
-    }
-    setSessionToDelete(null);
-    toast.success("Session deleted successfully.");
-  };
-
   const handleCopyText = (text: string, id: string) => {
     navigator.clipboard.writeText(text);
     setCopiedActionId(id);
@@ -467,28 +359,26 @@ function LecturerAIAssistantContent() {
   };
 
   const handleEditUserMessage = (text: string) => {
-    setPrompt(text);
+    setDraft(text);
     toast.info("Prompt loaded into composer.");
   };
 
-  // Export Handlers
+  // Export Handlers. These export the chat conversation, whichever module is open: the other
+  // modules have their own outputs (PPTX download, saved rubric, digest) and nothing for a
+  // generic export to write.
   const handleExportMarkdown = () => {
-    const title = `lecturer-ai-${activeTab}-${new Date().toISOString().slice(0, 10)}.md`;
-    let content = `# Lecturer Academic AI — ${activeTab.toUpperCase()}\n\n`;
+    const title = `lecturer-ai-chat-${new Date().toISOString().slice(0, 10)}.md`;
+    let content = `# Lecturer Academic AI — Chat\n\n`;
     content += `- **Workspace**: ${activeWorkspaceName}\n`;
     content += `- **Date**: ${new Date().toLocaleString()}\n\n`;
     content += `---\n\n`;
 
-    if (activeTab === "chat") {
-      if (history.length === 0) {
-        content += `*No conversation history in this session.*\n`;
-      } else {
-        history.forEach((m) => {
-          content += `### ${m.role === "user" ? "Lecturer Prompt" : "AI Academic Copilot"}\n\n${m.content}\n\n`;
-        });
-      }
+    if (history.length === 0) {
+      content += `*No conversation history in this session.*\n`;
     } else {
-      content += generatedContent || "*No content generated yet.*";
+      history.forEach((m) => {
+        content += `### ${m.role === "user" ? "Lecturer Prompt" : "AI Academic Copilot"}\n\n${m.content}\n\n`;
+      });
     }
 
     const blob = new Blob([content], { type: "text/markdown;charset=utf-8" });
@@ -504,21 +394,17 @@ function LecturerAIAssistantContent() {
   };
 
   const handleExportPlainText = () => {
-    const title = `lecturer-ai-${activeTab}-${new Date().toISOString().slice(0, 10)}.txt`;
-    let content = `LECTURER ACADEMIC AI — ${activeTab.toUpperCase()}\n`;
+    const title = `lecturer-ai-chat-${new Date().toISOString().slice(0, 10)}.txt`;
+    let content = `LECTURER ACADEMIC AI — CHAT\n`;
     content += `Workspace: ${activeWorkspaceName}\n`;
     content += `Date: ${new Date().toLocaleString()}\n\n========================================\n\n`;
 
-    if (activeTab === "chat") {
-      if (history.length === 0) {
-        content += `No conversation history in this session.\n`;
-      } else {
-        history.forEach((m) => {
-          content += `[${m.role === "user" ? "LECTURER PROMPT" : "AI ACADEMIC COPILOT"}]:\n${m.content}\n\n----------------------------------------\n\n`;
-        });
-      }
+    if (history.length === 0) {
+      content += `No conversation history in this session.\n`;
     } else {
-      content += generatedContent || "No content generated yet.";
+      history.forEach((m) => {
+        content += `[${m.role === "user" ? "LECTURER PROMPT" : "AI ACADEMIC COPILOT"}]:\n${m.content}\n\n----------------------------------------\n\n`;
+      });
     }
 
     const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
@@ -534,7 +420,7 @@ function LecturerAIAssistantContent() {
   };
 
   const handleExportPDF = () => {
-    const title = `Lecturer Academic AI — ${activeTab.toUpperCase()}`;
+    const title = "Lecturer Academic AI — Chat";
     let bodyHtml = `
       <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 24px; color: #0f172a; line-height: 1.6;">
         <div style="border-bottom: 2px solid #e2e8f0; padding-bottom: 16px; margin-bottom: 24px;">
@@ -545,29 +431,20 @@ function LecturerAIAssistantContent() {
         </div>
     `;
 
-    if (activeTab === "chat") {
-      if (history.length === 0) {
-        bodyHtml += `<p style="font-size: 13px; color: #94a3b8; font-style: italic;">No conversation messages in this session.</p>`;
-      } else {
-        history.forEach((m) => {
-          const isUser = m.role === "user";
-          bodyHtml += `
-            <div style="margin-bottom: 18px; padding: 14px 18px; border-radius: 10px; background-color: ${isUser ? "#f8fafc" : "#ffffff"}; border: 1px solid #e2e8f0;">
-              <div style="font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; color: ${isUser ? "#475569" : "#2563eb"};">
-                ${isUser ? "Lecturer Prompt" : "AI Academic Copilot"}
-              </div>
-              <div style="font-size: 13px; white-space: pre-wrap; word-break: break-word;">${escapeHtml(m.content)}</div>
-            </div>
-          `;
-        });
-      }
+    if (history.length === 0) {
+      bodyHtml += `<p style="font-size: 13px; color: #94a3b8; font-style: italic;">No conversation messages in this session.</p>`;
     } else {
-      const content = generatedContent || "No generated content available.";
-      bodyHtml += `
-        <div style="font-size: 13px; white-space: pre-wrap; word-break: break-word; background: #ffffff; padding: 20px; border: 1px solid #e2e8f0; border-radius: 10px;">
-          ${escapeHtml(content)}
-        </div>
-      `;
+      history.forEach((m) => {
+        const isUser = m.role === "user";
+        bodyHtml += `
+          <div style="margin-bottom: 18px; padding: 14px 18px; border-radius: 10px; background-color: ${isUser ? "#f8fafc" : "#ffffff"}; border: 1px solid #e2e8f0;">
+            <div style="font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; color: ${isUser ? "#475569" : "#2563eb"};">
+              ${isUser ? "Lecturer Prompt" : "AI Academic Copilot"}
+            </div>
+            <div style="font-size: 13px; white-space: pre-wrap; word-break: break-word;">${escapeHtml(m.content)}</div>
+          </div>
+        `;
+      });
     }
 
     bodyHtml += `
@@ -611,11 +488,18 @@ function LecturerAIAssistantContent() {
   };
 
   // AI Chat execution engine
+  // Typed text plus the text of any attached files, as the backend expects it in `question`.
+  const composeQuestion = (text: string, files: Attachment[] = []) => {
+    if (files.length === 0) return text;
+    const fileDetails = buildAttachmentPrompt(files);
+    return text ? `${text}\n${fileDetails}` : fileDetails;
+  };
+
   const executeAIChatRequest = async (
     userPrompt: string,
-    systemInstruction: string,
     chatUserDisplay?: string,
-    chatAttachments?: Attachment[]
+    chatAttachments?: Attachment[],
+    options?: { replaceFromIndex?: number }
   ) => {
     if (!selectedWorkspaceId) {
       toast.error("Please select a Course Workspace from the Context panel.");
@@ -628,6 +512,13 @@ function LecturerAIAssistantContent() {
       return;
     }
 
+    // One request at a time: a second send would interleave two replies into one history.
+    if (isGenerating) return;
+
+    // "Try Again" replaces the previous exchange instead of stacking a duplicate below it.
+    const baseHistory =
+      options?.replaceFromIndex !== undefined ? history.slice(0, options.replaceFromIndex) : history;
+
     setIsGenerating(true);
 
     const userMessage: ChatMessage = {
@@ -636,86 +527,86 @@ function LecturerAIAssistantContent() {
       attachments: chatAttachments,
     };
 
-    const newHistory = [...history, userMessage];
+    const newHistory = [...baseHistory, userMessage];
     setHistory(newHistory);
 
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     try {
-      const response = await lecturerApi.getAISupport({
-        workspace_id: selectedWorkspaceId,
-        question: userPrompt,
-        mode: "chat",
-        selected_material_ids: selectedMaterials.length > 0 ? selectedMaterials : undefined,
-        conversation_history: history.map((h) => ({
-          role: h.role,
-          content: h.content,
-        })),
-        feature_payload: {
-          systemInstruction,
+      const response = await lecturerApi.getAISupport(
+        {
+          workspace_id: selectedWorkspaceId,
+          question: userPrompt,
+          mode: "chat",
+          selected_material_ids: selectedMaterials.length > 0 ? selectedMaterials : undefined,
+          conversation_history: baseHistory.map((h) => ({
+            role: h.role,
+            content: h.content,
+          })),
         },
-      });
+        { signal: controller.signal }
+      );
 
       const aiText = response.answer || "No response received.";
       const aiMessage: ChatMessage = {
         role: "model",
         content: aiText,
+        citations: response.citations,
+        fallbackUsed: response.fallback_used,
       };
 
       const finalHistory = [...newHistory, aiMessage];
       setHistory(finalHistory);
-      setGeneratedContent(aiText);
 
-      saveCurrentSession(finalHistory, aiText);
+      saveCurrentSession(finalHistory);
       toast.success("Response generated.");
     } catch (err: any) {
+      // Stop was pressed: cancelled on purpose, the lecturer's message simply stays unanswered.
+      if (err?.name === "AbortError") return;
       console.error("AI Error:", err);
+      // Take the unanswered message back out and return its text to the composer, so
+      // resending does not leave two copies of it in the conversation.
+      setHistory(baseHistory);
+      setDraft(chatUserDisplay || userPrompt);
       toast.error(err.message || "Failed to generate AI response.");
     } finally {
-      setIsGenerating(false);
+      // If Stop already released this request, the state is not ours to touch.
+      if (abortControllerRef.current === controller) {
+        abortControllerRef.current = null;
+        setIsGenerating(false);
+      }
     }
   };
 
+  const handleStopGenerating = () => {
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
+    setIsGenerating(false);
+  };
+
   const handleChatSendMessage = async (
-    params: string | { input: string; attachments?: Attachment[]; isThinking?: boolean; isDeepSearch?: boolean }
+    params: string | { input: string; attachments?: Attachment[] }
   ) => {
     const rawInput = typeof params === "string" ? params : params?.input || "";
     const attachmentList = typeof params === "string" ? [] : params?.attachments || [];
-    const isThinkingMode = typeof params === "object" ? params?.isThinking : false;
-    const isDeepSearchMode = typeof params === "object" ? params?.isDeepSearch : false;
 
     const userQuery = rawInput.trim();
-    let promptWithContext = userQuery;
-
-    if (attachmentList.length > 0) {
-      const fileDetails = attachmentList
-        .map((a) => {
-          if (a.extractedText) {
-            return `\n--- ATTACHED FILE: ${a.name} ---\n${a.extractedText.slice(0, 15000)}\n--- END FILE ---`;
-          }
-          return `\n[Attached File: ${a.name}]`;
-        })
-        .join("\n");
-
-      promptWithContext = userQuery ? `${userQuery}\n${fileDetails}` : fileDetails;
-    }
-
     if (!userQuery && attachmentList.length === 0) return;
 
-    setPrompt("");
+    executeAIChatRequest(composeQuestion(userQuery, attachmentList), userQuery, attachmentList);
+  };
 
-    let systemContext =
-      "You are an expert Mindexa Lecturer AI Assistant. Read all attached file contents carefully and help the lecturer by answering questions directly, explaining concepts, or helping them draft course materials.";
-
-    if (isThinkingMode) {
-      systemContext = `[THINKING & DEEP REASONING MODE ACTIVE]\nPerform step-by-step deep reasoning and detailed academic analysis before providing your final answer.\n${systemContext}`;
-      toast.info("Deep Reasoning mode active");
-    }
-
-    if (isDeepSearchMode) {
-      systemContext = `[DEEP RAG SEARCH ACTIVE]\nSearch all course documents, handouts, and lecture resources comprehensively.\n${systemContext}`;
-      toast.info("Deep Document RAG Search active");
-    }
-
-    executeAIChatRequest(promptWithContext, systemContext, userQuery, attachmentList);
+  // Regenerate the answer to the user message at `userIndex`, replacing that exchange.
+  const handleRegenerateFrom = (userIndex: number) => {
+    const userMsg = history[userIndex];
+    if (!userMsg || userMsg.role !== "user") return;
+    executeAIChatRequest(
+      composeQuestion(userMsg.content, userMsg.attachments),
+      userMsg.content,
+      userMsg.attachments,
+      { replaceFromIndex: userIndex }
+    );
   };
 
   // 4 Essential Quick Actions
@@ -745,16 +636,6 @@ function LecturerAIAssistantContent() {
       onClick: () => setActiveTab("digest"),
     },
   ];
-
-  const sortedSessions = useMemo(() => {
-    return [...sessions].sort((a, b) => {
-      const aPinned = pinnedSessionIds.has(a.id);
-      const bPinned = pinnedSessionIds.has(b.id);
-      if (aPinned && !bPinned) return -1;
-      if (!aPinned && bPinned) return 1;
-      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
-    });
-  }, [sessions, pinnedSessionIds]);
 
   // 5 Grounded Module Tabs
   const moduleTabs = [
@@ -878,56 +759,15 @@ function LecturerAIAssistantContent() {
           </div>
 
           <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1 narrow-scrollbar-dark">
-            {sortedSessions.length === 0 ? (
-              <div className="text-xs text-muted-foreground py-4 text-center italic">No saved sessions.</div>
-            ) : (
-              sortedSessions.map((s) => {
-                const isPinned = pinnedSessionIds.has(s.id);
-                return (
-                  <div
-                    key={s.id}
-                    className={cn(
-                      "flex items-center justify-between p-2 rounded-lg border text-xs cursor-pointer hover:bg-muted/50 transition-all group",
-                      currentSessionId === s.id
-                        ? "border-primary bg-primary/5 text-foreground font-semibold"
-                        : "border-border/60 text-muted-foreground bg-card"
-                    )}
-                    onClick={() => loadSession(s)}
-                  >
-                    <div className="truncate flex-1 text-left min-w-0 pr-2">
-                      <div className="truncate text-foreground text-[11px] font-medium flex items-center gap-1">
-                        {isPinned && <Pin className="size-2.5 text-primary fill-primary shrink-0" />}
-                        <span className="truncate">{s.title}</span>
-                      </div>
-                      <div className="text-[8px] text-muted-foreground uppercase font-semibold tracking-wider">{s.module}</div>
-                    </div>
-                    <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-6 w-6 text-muted-foreground hover:text-foreground rounded-md"
-                        onClick={(e) => togglePinSession(s.id, e)}
-                        title={isPinned ? "Unpin session" : "Pin session"}
-                      >
-                        <Pin className={cn("size-3", isPinned && "text-primary fill-primary")} />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-6 w-6 text-muted-foreground hover:text-destructive rounded-md"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSessionToDelete(s.id);
-                        }}
-                        title="Delete session"
-                      >
-                        <Trash2 className="size-3" />
-                      </Button>
-                    </div>
-                  </div>
-                );
-              })
-            )}
+            <SessionList
+              sessions={sortedSessions}
+              currentSessionId={currentSessionId}
+              pinnedIds={pinnedSessionIds}
+              onOpen={loadSession}
+              onTogglePin={togglePinSession}
+              onDelete={setSessionToDelete}
+              emptyText="No saved sessions yet."
+            />
           </div>
         </div>
       </div>
@@ -1029,7 +869,6 @@ function LecturerAIAssistantContent() {
                       key={tab.id}
                       onClick={() => {
                         setActiveTab(tab.id as AIModule);
-                        setGeneratedContent("");
                       }}
                       className={cn(
                         "w-full flex items-center gap-2 px-2.5 py-1.5 text-xs font-medium rounded-lg transition-all text-left cursor-pointer",
@@ -1052,68 +891,15 @@ function LecturerAIAssistantContent() {
                   <History className="size-3" />
                 </div>
 
-                {sortedSessions.length === 0 ? (
-                  <div className="p-4 text-center text-xs text-muted-foreground font-medium bg-muted/30 rounded-lg border border-dashed border-border/40 my-2">
-                    No session history yet.
-                  </div>
-                ) : (
-                  sortedSessions.map((s) => {
-                    const isPinned = pinnedSessionIds.has(s.id);
-                    const isCurrent = currentSessionId === s.id;
-                    const sessionDate = new Date(s.created_at).toLocaleDateString(undefined, {
-                      month: "short",
-                      day: "numeric",
-                    });
-
-                    return (
-                      <div
-                        key={s.id}
-                        onClick={() => loadSession(s)}
-                        className={cn(
-                          "group flex items-center justify-between gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium cursor-pointer transition-all border border-transparent",
-                          isCurrent
-                            ? "bg-muted text-foreground border-border/50 font-semibold"
-                            : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
-                        )}
-                        title={s.title}
-                      >
-                        <div className="flex items-center gap-2 min-w-0">
-                          {isPinned ? (
-                            <Pin className="size-3 text-primary fill-primary shrink-0" />
-                          ) : (
-                            <Sparkles className="size-3 text-muted-foreground shrink-0 opacity-60 group-hover:opacity-100" />
-                          )}
-                          <div className="truncate">
-                            <span className="truncate block text-xs">{s.title}</span>
-                            <span className="text-[10px] text-muted-foreground/60 block">{sessionDate}</span>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                          <button
-                            type="button"
-                            onClick={(e) => togglePinSession(s.id, e)}
-                            className="size-5 rounded flex items-center justify-center hover:bg-muted-foreground/10 text-muted-foreground hover:text-foreground cursor-pointer"
-                            title={isPinned ? "Unpin session" : "Pin session"}
-                          >
-                            <Pin className={cn("size-3", isPinned && "text-primary fill-primary")} />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setSessionToDelete(s.id);
-                            }}
-                            className="size-5 rounded flex items-center justify-center hover:bg-muted-foreground/10 text-muted-foreground hover:text-destructive cursor-pointer"
-                            title="Delete session"
-                          >
-                            <Trash2 className="size-3" />
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
+                <SessionList
+                  sessions={sortedSessions}
+                  currentSessionId={currentSessionId}
+                  pinnedIds={pinnedSessionIds}
+                  onOpen={loadSession}
+                  onTogglePin={togglePinSession}
+                  onDelete={setSessionToDelete}
+                  emptyText="No session history yet."
+                />
               </div>
 
               {/* Sidebar Footer Action Tools */}
@@ -1235,7 +1021,6 @@ function LecturerAIAssistantContent() {
                             type="button"
                             onClick={() => {
                               setActiveTab(tab.id as AIModule);
-                              setGeneratedContent("");
                             }}
                             className={cn(
                               "size-8 rounded-lg flex items-center justify-center transition-all cursor-pointer",
@@ -1307,7 +1092,7 @@ function LecturerAIAssistantContent() {
 
         {/* Mobile Navigation Drawer */}
         <Sheet open={isMobileMenuOpen} onOpenChange={setIsMobileMenuOpen}>
-          <SheetContent side="left" className="w-[280px] p-0 flex flex-col narrow-scrollbar-dark">
+          <SheetContent side="left" portalContainer={containerRef.current} className="w-[280px] p-0 flex flex-col narrow-scrollbar-dark">
             <SheetHeader className="p-3 border-b border-border/40 text-left">
               <div className="flex items-center justify-between">
                 <Link
@@ -1358,7 +1143,6 @@ function LecturerAIAssistantContent() {
                     key={tab.id}
                     onClick={() => {
                       setActiveTab(tab.id as AIModule);
-                      setGeneratedContent("");
                       setIsMobileMenuOpen(false);
                     }}
                     className={cn(
@@ -1381,18 +1165,18 @@ function LecturerAIAssistantContent() {
                 <span>Recent Sessions</span>
                 <History className="size-3" />
               </div>
-              {sortedSessions.map((s) => (
-                <div
-                  key={s.id}
-                  onClick={() => {
-                    loadSession(s);
-                    setIsMobileMenuOpen(false);
-                  }}
-                  className="flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-medium cursor-pointer text-muted-foreground hover:text-foreground hover:bg-muted/50"
-                >
-                  <span className="truncate">{s.title}</span>
-                </div>
-              ))}
+              <SessionList
+                sessions={sortedSessions}
+                currentSessionId={currentSessionId}
+                pinnedIds={pinnedSessionIds}
+                onOpen={(session) => {
+                  loadSession(session);
+                  setIsMobileMenuOpen(false);
+                }}
+                onTogglePin={togglePinSession}
+                onDelete={setSessionToDelete}
+                emptyText="No session history yet."
+              />
             </div>
 
             {/* Mobile Footer Tools */}
@@ -1462,11 +1246,11 @@ function LecturerAIAssistantContent() {
                         {/* Floating Center AI Input */}
                         <div className="w-full pt-2">
                           <AIChatInput
-                            value={prompt}
-                            onChange={setPrompt}
+                            key={draftSeed.nonce}
+                            initialValue={draftSeed.text}
                             onSend={handleChatSendMessage}
                             isGenerating={isGenerating}
-                            onStop={() => setIsGenerating(false)}
+                            onStop={handleStopGenerating}
                             attachments={attachments}
                             setAttachments={setAttachments}
                             disabled={isRwandaBlocked}
@@ -1565,7 +1349,12 @@ function LecturerAIAssistantContent() {
                                     </div>
                                   ) : (
                                     <div className="group relative flex flex-col max-w-[92%] sm:max-w-[88%] space-y-2 p-3.5 sm:p-4 rounded-2xl bg-card border border-border/70 text-foreground mr-auto rounded-tl-xs text-left shadow-2xs leading-relaxed whitespace-pre-wrap animate-in fade-in slide-in-from-bottom-2 duration-300">
-                                      <RichMessageRenderer content={msg.content} />
+                                      <RichMessageRenderer content={msg.content} citations={msg.citations} />
+                                      {msg.fallbackUsed && (
+                                        <p className="text-[11px] text-muted-foreground italic">
+                                          No matching course material was found, so this answer comes from general knowledge.
+                                        </p>
+                                      )}
 
                                       <div className="pt-2 border-t border-border/30 flex items-center justify-between text-muted-foreground">
                                         <div className="flex items-center gap-1">
@@ -1591,7 +1380,7 @@ function LecturerAIAssistantContent() {
                                             <Button
                                               variant="ghost"
                                               size="sm"
-                                              onClick={() => handleChatSendMessage(history[index - 1]?.content || "")}
+                                              onClick={() => handleRegenerateFrom(index - 1)}
                                               className="h-6 px-2 text-[10px] gap-1 text-muted-foreground hover:text-foreground rounded-lg"
                                               title="Regenerate explanation"
                                             >
@@ -1642,11 +1431,11 @@ function LecturerAIAssistantContent() {
                             </div>
                           )}
                           <AIChatInput
-                            value={prompt}
-                            onChange={setPrompt}
+                            key={draftSeed.nonce}
+                            initialValue={draftSeed.text}
                             onSend={handleChatSendMessage}
                             isGenerating={isGenerating}
-                            onStop={() => setIsGenerating(false)}
+                            onStop={handleStopGenerating}
                             attachments={attachments}
                             setAttachments={setAttachments}
                             disabled={isRwandaBlocked}
@@ -1664,43 +1453,57 @@ function LecturerAIAssistantContent() {
               </MessageScrollerProvider>
             </div>
           )}
-{/* TOOL 2: Question Generator */}
-          {activeTab === "questions" && (
-            <QuestionGeneratorLauncher
-              workspaceId={selectedWorkspaceId}
-              workspaceName={activeWorkspaceName}
-              language={activeWorkspace?.language || activeWorkspaceDetail?.language || "EN"}
-              isRwandaBlocked={isRwandaBlocked}
-            />
+          {/*
+            Tools stay mounted once opened and are only hidden while another tab is active, so a
+            running generation, its polling and unsaved edits survive switching tabs.
+          */}
+
+          {/* TOOL 2: Question Generator */}
+          {visitedTabs.has("questions") && (
+            <div className={toolPaneClass(activeTab === "questions")}>
+              <QuestionGeneratorLauncher
+                workspaceId={selectedWorkspaceId}
+                workspaceName={activeWorkspaceName}
+                language={activeWorkspace?.language || activeWorkspaceDetail?.language || "EN"}
+                isRwandaBlocked={isRwandaBlocked}
+                onOpenChat={() => setActiveTab("chat")}
+              />
+            </div>
           )}
 
           {/* TOOL 3: Slide Deck Generator (From Learning Unit) */}
-          {activeTab === "slides" && (
-            <SlideDeckGenerator
-              workspaceId={selectedWorkspaceId}
-              workspaceName={activeWorkspaceName}
-              isRwandaBlocked={isRwandaBlocked}
-            />
+          {visitedTabs.has("slides") && (
+            <div className={toolPaneClass(activeTab === "slides")}>
+              <SlideDeckGenerator
+                workspaceId={selectedWorkspaceId}
+                workspaceName={activeWorkspaceName}
+                isRwandaBlocked={isRwandaBlocked}
+              />
+            </div>
           )}
 
           {/* TOOL 4: Rubric Assistant */}
-          {activeTab === "rubric" && (
-            <RubricAssistant
-              workspaceId={selectedWorkspaceId}
-              isRwandaBlocked={isRwandaBlocked}
-            />
+          {visitedTabs.has("rubric") && (
+            <div className={toolPaneClass(activeTab === "rubric")}>
+              <RubricAssistant
+                workspaceId={selectedWorkspaceId}
+                isRwandaBlocked={isRwandaBlocked}
+              />
+            </div>
           )}
 
           {/* TOOL 5: Class Digest */}
-          {activeTab === "digest" && (
-            <ClassDigest workspaceId={selectedWorkspaceId} />
+          {visitedTabs.has("digest") && (
+            <div className={toolPaneClass(activeTab === "digest")}>
+              <ClassDigest workspaceId={selectedWorkspaceId} />
+            </div>
           )}
         </main>
       </div>
 
       {/* Context Panel Drawer */}
       <Sheet open={isContextSheetOpen} onOpenChange={setIsContextSheetOpen}>
-        <SheetContent side="right" className="w-full sm:max-w-md p-0 overflow-y-auto">
+        <SheetContent side="right" portalContainer={containerRef.current} className="w-full sm:max-w-md p-0 overflow-y-auto">
           <SheetHeader className="p-4 border-b border-border/40 text-left">
             <SheetTitle className="text-sm font-semibold flex items-center gap-1.5">
               <Folder className="size-4 text-primary" /> Course Context & Sources
@@ -1715,7 +1518,7 @@ function LecturerAIAssistantContent() {
 
       {/* Delete Confirmation Modal */}
       <Dialog open={!!sessionToDelete} onOpenChange={(open) => !open && setSessionToDelete(null)}>
-        <DialogContent className="sm:max-w-[400px]">
+        <DialogContent portalContainer={containerRef.current} className="sm:max-w-[400px]">
           <DialogHeader>
             <DialogTitle className="text-base font-semibold">Delete AI Session</DialogTitle>
             <DialogDescription className="text-xs text-muted-foreground">
@@ -1735,18 +1538,31 @@ function LecturerAIAssistantContent() {
 
       {/* Share Modal */}
       <Dialog open={shareModalOpen} onOpenChange={setShareModalOpen}>
-        <DialogContent className="sm:max-w-[480px]">
+        <DialogContent portalContainer={containerRef.current} className="sm:max-w-[480px]">
           <DialogHeader>
             <DialogTitle className="text-base font-semibold flex items-center gap-2">
-              <Share2 className="size-4 text-primary" /> Share AI Session
+              <Share2 className="size-4 text-primary" /> Share this conversation
             </DialogTitle>
             <DialogDescription className="text-xs text-muted-foreground">
-              Copy a markdown transcript or shareable link to collaborate with faculty colleagues.
+              Conversations are stored in your own browser, so a link can&apos;t open them for someone else.
+              Copy the text to send it to a colleague.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3 py-2">
+            <Button
+              size="sm"
+              disabled={history.length === 0}
+              onClick={() => {
+                navigator.clipboard.writeText(buildTranscript(history));
+                toast.success("Conversation copied to clipboard!");
+              }}
+              className="h-8.5 w-full px-3 text-xs"
+            >
+              <Copy className="size-3.5 mr-1" />
+              {history.length === 0 ? "Nothing to copy yet" : "Copy conversation as text"}
+            </Button>
             <div className="space-y-1.5">
-              <Label className="text-xs font-semibold">Session Link</Label>
+              <Label className="text-xs font-semibold">Page link (does not include the conversation)</Label>
               <div className="flex gap-2">
                 <Input
                   readOnly
@@ -1755,6 +1571,7 @@ function LecturerAIAssistantContent() {
                 />
                 <Button
                   size="sm"
+                  variant="outline"
                   onClick={() => {
                     if (typeof window !== "undefined") {
                       navigator.clipboard.writeText(window.location.href);
@@ -1778,7 +1595,7 @@ function LecturerAIAssistantContent() {
 
       {/* Export Modal */}
       <Dialog open={exportModalOpen} onOpenChange={setExportModalOpen}>
-        <DialogContent className="sm:max-w-[440px]">
+        <DialogContent portalContainer={containerRef.current} className="sm:max-w-[440px]">
           <DialogHeader>
             <DialogTitle className="text-base font-semibold flex items-center gap-2">
               <Download className="size-4 text-primary" /> Export AI Output

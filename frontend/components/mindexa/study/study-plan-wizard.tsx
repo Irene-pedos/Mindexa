@@ -418,7 +418,7 @@ export function StudyPlanWizard({
                   </DialogTitle>
                   <Badge
                     variant="outline"
-                    className="text-[9px] font-semibold bg-primary/5 text-primary border-primary/20 px-1.5 py-0"
+                    className="text-[10px] font-semibold bg-primary/5 text-primary border-primary/20 px-1.5 py-0"
                   >
                     {mode === "ai" ? "Automated Sync" : "Manual"}
                   </Badge>
@@ -483,7 +483,7 @@ export function StudyPlanWizard({
                   {assessments.length > 0 && (
                     <Badge
                       variant="secondary"
-                      className="text-[9px] font-medium px-1.5 py-0"
+                      className="text-[10px] font-medium px-1.5 py-0"
                     >
                       {assessments.length} Active
                     </Badge>
@@ -647,7 +647,7 @@ export function StudyPlanWizard({
                             <Check className="size-2.5 text-primary" />
                           )}
                         </div>
-                        <p className="text-[9px] text-muted-foreground leading-tight line-clamp-2">
+                        <p className="text-[10px] text-muted-foreground leading-tight line-clamp-2">
                           {opt.description}
                         </p>
                       </button>
@@ -709,7 +709,7 @@ export function StudyPlanWizard({
                   <div className="space-y-1">
                     <Label className="text-[11px] text-muted-foreground">
                       Target End Date{" "}
-                      <span className="text-[9px] opacity-70">(Optional)</span>
+                      <span className="text-[10px] opacity-70">(Optional)</span>
                     </Label>
                     <Input
                       type="date"

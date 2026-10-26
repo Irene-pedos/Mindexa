@@ -1,14 +1,7 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
-import {
-  Card,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-  CardContent,
-  CardFooter,
-} from "@/components/ui/card";
+import { useState, useEffect } from "react";
+import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
@@ -20,13 +13,11 @@ import {
   CheckCircle2,
   Copy,
   Check,
-  Download,
   Loader2,
   RefreshCw,
   Sparkles,
   Users,
   Target,
-  FileSpreadsheet,
   PanelLeftClose,
   PanelLeftOpen,
 } from "lucide-react";

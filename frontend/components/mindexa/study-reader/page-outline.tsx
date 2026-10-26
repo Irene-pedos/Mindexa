@@ -229,7 +229,7 @@ export function PageOutline({ outline, numPages, currentPage, onSelectPage, sour
                     <div className="flex items-center gap-1.5 min-w-0">
                       <Badge
                         variant={inRange ? "default" : "secondary"}
-                        className="text-[9px] px-1.5 py-0 shrink-0 font-mono font-semibold"
+                        className="text-[10px] px-1.5 py-0 shrink-0 font-mono font-semibold"
                       >
                         Unit {lu.order_index}
                       </Badge>
