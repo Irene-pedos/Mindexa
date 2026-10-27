@@ -294,4 +294,5 @@ class ResourceService:
         if deleted and resource.academic_resource_id:
             # The text of a deleted upload must no longer be retrievable by the tutor.
             await self.repo.soft_delete_chunks(resource.academic_resource_id)
+            await self.repo.soft_delete_academic_resource(resource.academic_resource_id)
         return deleted

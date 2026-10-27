@@ -49,6 +49,18 @@ class ResourceRepository(BaseRepository[LecturerMaterial]):
         )
         return (await self.db.execute(stmt)).rowcount or 0
 
+    async def soft_delete_academic_resource(self, academic_resource_id: uuid.UUID) -> None:
+        """Retire the indexed-document record that backs a deleted upload."""
+        from sqlalchemy import update
+
+        from app.db.models.academic_resource import AcademicResource
+
+        await self.db.execute(
+            update(AcademicResource)
+            .where(AcademicResource.id == academic_resource_id, AcademicResource.is_deleted == False)  # noqa: E712
+            .values(is_deleted=True, deleted_at=func.now())
+        )
+
     async def list_source_chunks(
         self,
         academic_resource_id: uuid.UUID,

@@ -87,13 +87,17 @@ class AIGenerationRepository:
     ) -> tuple[list[AIGenerationBatch], int]:
         count_q = await self.db.execute(
             select(func.count(col(AIGenerationBatch.id))).where(
-                col(AIGenerationBatch.created_by_id) == created_by_id
+                col(AIGenerationBatch.created_by_id) == created_by_id,
+                col(AIGenerationBatch.is_deleted).is_(False),
             )
         )
         total = int(count_q.scalar_one() or 0)
         result = await self.db.execute(
             select(AIGenerationBatch)
-            .where(col(AIGenerationBatch.created_by_id) == created_by_id)
+            .where(
+                col(AIGenerationBatch.created_by_id) == created_by_id,
+                col(AIGenerationBatch.is_deleted).is_(False),
+            )
             .order_by(col(AIGenerationBatch.created_at).desc())
             .offset((page - 1) * page_size)
             .limit(page_size)
