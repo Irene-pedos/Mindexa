@@ -172,10 +172,10 @@ export default function AdminAnalyticsPage() {
         <Card className="lg:col-span-2 border border-border/50 shadow-none rounded-xl bg-card p-3 sm:p-3.5">
           <div className="pb-2 border-b border-border/40">
             <h3 className="text-xs sm:text-sm font-semibold text-foreground">
-              AI Grading Adoption
+              Grading Modes
             </h3>
             <p className="text-[11px] text-muted-foreground">
-              Workload distribution across autonomous, hybrid co-pilot, and rubric grading
+              How assessments are graded: automatic, manual, rubric-based or hybrid
             </p>
           </div>
 

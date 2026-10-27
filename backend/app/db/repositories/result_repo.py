@@ -368,9 +368,15 @@ class ResultRepository:
         page: int = 1,
         page_size: int = 20,
     ) -> tuple[list[AssessmentResult], int]:
+        from app.db.models.assessment import Assessment
+
         filters = [
             AssessmentResult.student_id == student_id,
             AssessmentResult.is_deleted == False,  # noqa: E712
+            # results of a deleted assessment must not linger in the student's record
+            AssessmentResult.assessment_id.in_(
+                select(Assessment.id).where(Assessment.is_deleted.is_(False))
+            ),
         ]
         if is_released is not None:
             filters.append(AssessmentResult.is_released == is_released)

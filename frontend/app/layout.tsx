@@ -1,5 +1,8 @@
 import type { Metadata } from "next";
-import { Geist_Mono, Outfit } from "next/font/google";
+// Fonts are bundled with the app (not fetched from Google at build time), so the
+// production build works offline and on restricted networks.
+import "@fontsource-variable/outfit";
+import "@fontsource-variable/geist-mono";
 import { cn } from "@/lib/utils";
 import "./globals.css";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -10,19 +13,11 @@ import { RoleGuard } from "@/components/mindexa/layout/role-guard";
 import { GuidedTourModal } from "@/components/mindexa/onboarding/guided-tour-modal";
 import { Toaster } from "@/components/ui/sonner";
 
-const outfit = Outfit({
-  subsets: ["latin"],
-  variable: "--font-sans",
-  display: "swap",
-  preload: true,
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-  display: "swap",
-  preload: false,
-});
+const fontVariables = {
+  "--font-sans": "'Outfit Variable', ui-sans-serif, system-ui, sans-serif",
+  "--font-geist-mono":
+    "'Geist Mono Variable', ui-monospace, SFMono-Regular, Menlo, monospace",
+} as React.CSSProperties;
 
 export const metadata: Metadata = {
   title: "Mindexa - Secure Academic Integrity Platform",
@@ -42,15 +37,12 @@ export default function RootLayout({
     <html
       lang="en"
       suppressHydrationWarning
-      className={cn("font-sans", outfit.variable)}
+      className="font-sans"
+      style={fontVariables}
     >
       <body
         suppressHydrationWarning
-        className={cn(
-          outfit.variable,
-          geistMono.variable,
-          "antialiased bg-background text-foreground",
-        )}
+        className={cn("antialiased bg-background text-foreground")}
       >
         {/* Global Error Suppression for Browser Extensions (e.g., MetaMask) */}
         <script

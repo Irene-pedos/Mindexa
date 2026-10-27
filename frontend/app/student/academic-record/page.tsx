@@ -9,6 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Award, Download, Loader2 } from "lucide-react"
 import { studentApi } from "@/lib/api/student"
 import { resultApi } from "@/lib/api/result"
+import { formatLetterGrade } from "@/lib/letter-grade"
 import { Skeleton } from "@/components/ui/skeleton"
 import { toast } from "sonner"
 
@@ -76,7 +77,7 @@ export default function AcademicRecordPage() {
         const records: CourseRecord[] = items.map((r: any) => ({
           code: r.course_code || "—",
           name: r.assessment_title || "Assessment",
-          grade: r.letter_grade || getLetterGrade(r.percentage ?? 0),
+          grade: r.letter_grade ? formatLetterGrade(r.letter_grade) : getLetterGrade(r.percentage ?? 0),
           percentage: r.percentage ?? 0,
           academic_year: r.academic_year || "N/A",
           assessment_type: (r.assessment_type || "").replace(/_/g, " "),

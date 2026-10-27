@@ -67,6 +67,24 @@ export const BLOCK_MATH_REGEX = /\$\$([\s\S]+?)\$\$/g;
 /**
  * Helper to render string containing mixed text, LaTeX formulas ($...$, $$...$$), bold, and code.
  */
+/** AI-written question text uses **bold** and `code`; show them instead of the raw markers. */
+function renderInlineMarks(text: string): React.ReactNode {
+  if (!text.includes("**") && !text.includes("`")) return text;
+  return text.split(/(\*\*[^*\n]+\*\*|`[^`\n]+`)/g).map((piece, i) => {
+    if (piece.length > 4 && piece.startsWith("**") && piece.endsWith("**")) {
+      return <strong key={i}>{piece.slice(2, -2)}</strong>;
+    }
+    if (piece.length > 2 && piece.startsWith("`") && piece.endsWith("`")) {
+      return (
+        <code key={i} className="rounded bg-muted px-1 py-0.5 font-mono text-[0.9em]">
+          {piece.slice(1, -1)}
+        </code>
+      );
+    }
+    return piece;
+  });
+}
+
 export function renderRichMathText(text: string): React.ReactNode {
   if (!text) return null;
 
@@ -97,7 +115,7 @@ export function renderRichMathText(text: string): React.ReactNode {
 
           // Unescape any escaped \$ to literal $
           const unescaped = part.replace(/\\\$/g, "$");
-          return <span key={`plain-${inlineIdx}`}>{unescaped}</span>;
+          return <span key={`plain-${inlineIdx}`}>{renderInlineMarks(unescaped)}</span>;
         })}
       </React.Fragment>
     );

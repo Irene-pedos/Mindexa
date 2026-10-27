@@ -237,7 +237,7 @@ class LecturerService:
                 academic_year=ws.academic_period.name if ws.academic_period else "GLOBAL",
                 student_count=student_count,
                 status=ws.status,
-                performance_avg=float(avg_perf),
+                performance_avg=round(float(avg_perf), 1),
                 lecturer_name=f"{lect_p.first_name} {lect_p.last_name}",
                 institution_name=ws.course.institution.name,
                 class_name=ws.class_section.name if ws.class_section else "GLOBAL",
@@ -357,7 +357,7 @@ class LecturerService:
             code=ws.course.code,
             description=ws.description or ws.course.description,
             student_count=student_count,
-            performance_avg=float(avg_perf),
+            performance_avg=round(float(avg_perf), 1),
             institution_name=ws.course.institution.name,
             academic_year=ws.academic_period.name if ws.academic_period else "GLOBAL",
             lecturer_name=f"{lect_p.first_name} {lect_p.last_name}",
@@ -723,7 +723,7 @@ class LecturerService:
                 lecturer_name=role_label, # Use the role as the label
                 student_count=student_count,
                 status="Active" if not c.is_deleted else "Deleted",
-                performance_avg=float(avg_perf),
+                performance_avg=round(float(avg_perf), 1),
                 academic_year=c.academic_year
             ))
 
@@ -897,7 +897,7 @@ class LecturerService:
             title=course.name,
             description=course.description,
             student_count=count,
-            performance_avg=float(avg_perf),
+            performance_avg=round(float(avg_perf), 1),
             institution_id=course.institution_id,
             academic_year=course.academic_year,
             roster=roster,

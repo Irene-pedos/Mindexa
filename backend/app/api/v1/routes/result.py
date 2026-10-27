@@ -92,6 +92,9 @@ async def list_my_results(
     also includes submitted attempts whose marks are still under review or
     held for integrity audit, without exposing unreleased scores.
     """
+    # Results and attempts of a deleted assessment must not linger in a student's record.
+    live_assessment_ids = select(Assessment.id).where(Assessment.is_deleted.is_(False))
+
     if not include_pending:
         stmt = (
             select(AssessmentResult)
@@ -100,6 +103,7 @@ async def list_my_results(
                 AssessmentResult.student_id == current_user.id,
                 AssessmentResult.is_released,
                 not_(AssessmentResult.is_deleted),
+                AssessmentResult.assessment_id.in_(live_assessment_ids),
             )
             .order_by(AssessmentResult.released_at.desc())
         )
@@ -108,6 +112,7 @@ async def list_my_results(
             AssessmentResult.student_id == current_user.id,
             AssessmentResult.is_released,
             not_(AssessmentResult.is_deleted),
+            AssessmentResult.assessment_id.in_(live_assessment_ids),
         )
         total = (await db.execute(count_stmt)).scalar_one()
 
@@ -144,6 +149,7 @@ async def list_my_results(
         .where(
             AssessmentResult.student_id == current_user.id,
             AssessmentResult.is_deleted == False,  # noqa: E712
+            AssessmentResult.assessment_id.in_(live_assessment_ids),
         )
         .order_by(AssessmentResult.calculated_at.desc())
     )
@@ -163,6 +169,7 @@ async def list_my_results(
             AssessmentAttempt.student_id == current_user.id,
             AssessmentAttempt.status.in_([AttemptStatus.SUBMITTED, AttemptStatus.AUTO_SUBMITTED]),
             AssessmentAttempt.is_deleted == False,  # noqa: E712
+            AssessmentAttempt.assessment_id.in_(live_assessment_ids),
         )
         .order_by(AssessmentAttempt.submitted_at.desc().nullslast(), AssessmentAttempt.created_at.desc())
     )

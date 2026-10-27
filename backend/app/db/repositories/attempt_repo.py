@@ -179,9 +179,14 @@ class AttemptRepository:
         page: int = 1,
         page_size: int = 20,
     ) -> tuple[list[AssessmentAttempt], int]:
+        from app.db.models.assessment import Assessment
+
         filters = [
             AssessmentAttempt.student_id == student_id,
             AssessmentAttempt.is_deleted.is_(False),
+            AssessmentAttempt.assessment_id.in_(
+                select(Assessment.id).where(Assessment.is_deleted.is_(False))
+            ),
         ]
         if status:
             filters.append(AssessmentAttempt.status == status)

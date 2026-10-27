@@ -95,7 +95,8 @@ class AdminService:
             AdminAnalyticsMetric(label="Active Students", value=total_students),
             AdminAnalyticsMetric(label="Total Lecturers", value=total_lecturers),
             AdminAnalyticsMetric(label="Active Courses", value=active_courses),
-            AdminAnalyticsMetric(label="Integrity Incidents", value=total_flags, trend="4.2% decrease", trend_direction="down"),
+            # No trend: the previous figure "4.2% decrease" was a hard-coded placeholder, not a measurement.
+            AdminAnalyticsMetric(label="Integrity Incidents", value=total_flags),
         ]
 
         user_distribution = [
@@ -156,6 +157,7 @@ class AdminService:
             select(Course.name, func.count(IntegrityFlag.id))
             .join(Assessment, Assessment.course_id == Course.id)
             .join(IntegrityFlag, IntegrityFlag.assessment_id == Assessment.id)
+            .where(Assessment.is_deleted == False, IntegrityFlag.is_deleted == False)  # noqa: E712
             .group_by(Course.name)
             .order_by(func.count(IntegrityFlag.id).desc())
             .limit(5)
@@ -164,13 +166,26 @@ class AdminService:
         integrity_hotspots = [{"course": row[0], "flags": row[1]} for row in hotspot_res.all()]
 
         # AI Grading Stats
-        grading_stmt = select(Assessment.grading_mode, func.count(Assessment.id)).group_by(Assessment.grading_mode)
+        grading_stmt = (
+            select(Assessment.grading_mode, func.count(Assessment.id))
+            .where(Assessment.is_deleted == False)  # noqa: E712 - deleted assessments are not part of the platform
+            .group_by(Assessment.grading_mode)
+        )
         grading_res = await self.db.execute(grading_stmt)
-        ai_grading_stats = [{"mode": str(row[0]), "count": row[1]} for row in grading_res.all()]
+        # `str(enum)` would give "GradingMode.MANUAL"; the UI wants the plain value.
+        ai_grading_stats = [
+            {"mode": getattr(row[0], "value", str(row[0])), "count": row[1]} for row in grading_res.all()
+        ]
 
+        assessment_total = sum(s["count"] for s in ai_grading_stats)
+        most_used = max(ai_grading_stats, key=lambda s: s["count"])["mode"].title() if ai_grading_stats else None
         key_insights = [
             f"Total platform reach: {total_students} students across {active_courses} active modules.",
-            f"AI adoption: {sum(s['count'] for s in ai_grading_stats)} assessments using diverse grading modes.",
+            (
+                f"Grading: {assessment_total} assessments, most use {most_used.lower()} grading."
+                if most_used
+                else "Grading: no assessments yet."
+            ),
             f"Integrity monitoring active: {total_flags} events recorded for faculty review."
         ]
 

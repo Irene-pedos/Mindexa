@@ -39,6 +39,7 @@ import { toast } from "sonner";
 import { assessmentApi } from "@/lib/api/assessment";
 import { attemptApi } from "@/lib/api/attempt";
 import { resultApi } from "@/lib/api/result";
+import { formatLetterGrade } from "@/lib/letter-grade";
 import { appealApi, APPEAL_REASON_MIN_LENGTH } from "@/lib/api/appeals";
 import { submissionApi } from "@/lib/api/submission";
 import {
@@ -1163,7 +1164,7 @@ export default function ResultDetailPage() {
                 <p className="text-xs font-medium text-muted-foreground">
                   Grade Classification:{" "}
                   <span className="font-bold text-foreground">
-                    {result.letter_grade}
+                    {formatLetterGrade(result.letter_grade)}
                   </span>
                 </p>
               )}

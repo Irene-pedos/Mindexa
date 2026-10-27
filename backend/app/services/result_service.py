@@ -1196,7 +1196,18 @@ class ResultService:
         # Map for section titles
         aq_rows = await self.assessment_repo.list_assessment_questions(result.assessment_id)
         aq_map = {aq.question_id: aq for aq in aq_rows}
-        
+
+        # Show questions in the assessment's own order (section, then position), not DB order.
+        def _paper_position(item) -> tuple[int, int]:
+            aq = aq_map.get(item.question_id)
+            if aq is None:
+                return (10**6, 10**6)
+            section = aq.assessment_section
+            section_pos = section.order_index if section is not None and section.order_index is not None else 0
+            return (section_pos, aq.order_index or 0)
+
+        resp.breakdowns.sort(key=_paper_position)
+
         for bd in resp.breakdowns:
             response = response_map.get(bd.question_id)
             if not response:

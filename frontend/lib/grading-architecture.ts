@@ -432,6 +432,21 @@ export function getResultLifecycleSummary(result: {
     };
   }
 
+  // Summary lists carry no per-question data, so nothing here proves the result
+  // was graded automatically; don't claim it.
+  if (totalQuestions === 0 && breakdowns.length === 0) {
+    return {
+      label: "Result Published",
+      description:
+        "Your final result is available. Open the details to see how each question was marked.",
+      tone: "success" as const,
+      autoGradedCount,
+      lecturerReviewedCount,
+      pendingReviewCount,
+      hasOpenReview,
+    };
+  }
+
   return {
     label: "Automatically Finalized",
     description:

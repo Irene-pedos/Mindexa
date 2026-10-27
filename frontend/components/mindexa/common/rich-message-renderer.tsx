@@ -235,7 +235,9 @@ function ParsedContentBlock({ text }: { text: string }) {
 
     const lines = text.split("\n");
     const result: React.ReactNode[] = [];
-    let listItems: { text: string; indent: number }[] = [];
+    // `num` is the number the author wrote: items separated by blank lines each form their
+    // own list, so counting within the list would show 1, 1, 1.
+    let listItems: { text: string; indent: number; num?: number }[] = [];
     let isNumberedList = false;
 
     const flushList = (keyPrefix: string) => {
@@ -252,7 +254,7 @@ function ParsedContentBlock({ text }: { text: string }) {
               >
                 {isNumberedList ? (
                   <span className="flex size-4 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[10px] font-bold text-primary mt-0.5">
-                    {idx + 1}
+                    {item.num ?? idx + 1}
                   </span>
                 ) : (
                   <span className="size-1.5 rounded-full bg-primary shrink-0 mt-2" />
@@ -350,7 +352,8 @@ function ParsedContentBlock({ text }: { text: string }) {
         if (listItems.length === 0) {
           isNumberedList = /^\d+\./.test(marker);
         }
-        listItems.push({ text: itemContent, indent: indentLevel > 2 ? 1 : 0 });
+        const written = /^\d+/.test(marker) ? Number.parseInt(marker, 10) : undefined;
+        listItems.push({ text: itemContent, indent: indentLevel > 2 ? 1 : 0, num: written });
         continue;
       }
 

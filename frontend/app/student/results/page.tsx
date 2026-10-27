@@ -23,6 +23,7 @@ import { ContextualExplainer } from "@/components/mindexa/common/contextual-expl
 import Link from "next/link";
 import { studentApi, StudentRecentResult } from "@/lib/api/student";
 import { resultApi } from "@/lib/api/result";
+import { formatLetterGrade } from "@/lib/letter-grade";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { getResultLifecycleSummary, getAssessmentCategory } from "@/lib/grading-architecture";
@@ -176,7 +177,7 @@ export default function StudentResultsPage() {
                   result.percentage >= 70 ? "text-emerald-600" :
                   result.percentage >= 40 ? "text-primary" : "text-amber-600"
                 )}>
-                  {result.letter_grade || lifecycle.label.split(",")[0]}
+                  {result.letter_grade ? formatLetterGrade(result.letter_grade) : lifecycle.label.split(",")[0]}
                   <span className="ml-1.5 opacity-55">({result.percentage}%)</span>
                 </div>
               </>

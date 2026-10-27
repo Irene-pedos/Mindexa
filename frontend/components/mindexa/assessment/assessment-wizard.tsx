@@ -8,6 +8,7 @@ import React, {
   useRef,
 } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
+import { useIsMobile } from "@/hooks/use-mobile";
 import {
   Card,
   CardContent,
@@ -2496,10 +2497,16 @@ const STEPS_DATA = [
 export function AssessmentWizard({ editId }: { editId?: string }) {
   const searchParams = useSearchParams();
   const router = useRouter();
+  const isMobile = useIsMobile();
   const isEditMode = Boolean(editId);
   const draftId = editId ?? searchParams.get("draft");
   const draftIdRef = useRef<string | null>(draftId);
-  if (draftId !== draftIdRef.current) {
+  // Follow the URL only when the URL itself changes. Comparing against the ref directly would
+  // wipe a draft id that autosave just created, in the render before router.replace updates
+  // the URL, and the next autosave would then create a duplicate draft.
+  const urlDraftIdRef = useRef<string | null>(draftId);
+  if (draftId !== urlDraftIdRef.current) {
+    urlDraftIdRef.current = draftId;
     draftIdRef.current = draftId;
   }
 
@@ -9467,6 +9474,9 @@ export function AssessmentWizard({ editId }: { editId?: string }) {
       )}
 
       {/* Mobile Accordion Stepper (visible on mobile, hidden on desktop) */}
+      {/* Only one stepper is mounted: rendering both duplicated every field and id in the DOM,
+          so label clicks hit the hidden copy and every step rendered twice. */}
+      {isMobile && (
       <div className="md:hidden block space-y-4">
         {STEPS_DATA.map((s, index) => {
           const stepNum = index + 1;
@@ -9514,8 +9524,10 @@ export function AssessmentWizard({ editId }: { editId?: string }) {
           );
         })}
       </div>
+      )}
 
       {/* Desktop Stepper (visible on desktop, hidden on mobile) */}
+      {!isMobile && (
       <div className="hidden md:block">
         <Stepper
           value={activeStep}
@@ -9552,6 +9564,7 @@ export function AssessmentWizard({ editId }: { editId?: string }) {
           </StepperPanel>
         </Stepper>
       </div>
+      )}
 
       {/* AI GENERATION CONFIG SHEET */}
       <Sheet open={aiDrawerOpen} onOpenChange={setAiDrawerOpen}>

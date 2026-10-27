@@ -93,6 +93,7 @@ import {
 } from "@/lib/api/grading";
 import { lecturerApi, WorkspaceListItem } from "@/lib/api/lecturer";
 import { assessmentApi } from "@/lib/api/assessment";
+import { formatLetterGrade } from "@/lib/letter-grade";
 import { attemptApi } from "@/lib/api/attempt";
 import { submissionApi } from "@/lib/api/submission";
 import { integrityApi } from "@/lib/api/integrity";
@@ -4244,7 +4245,7 @@ function LecturerGradingQueueContent() {
                         <TableCell className="py-2.5 text-center">
                           <div className="flex flex-col items-center gap-1">
                             <span className="text-xs font-mono font-medium text-foreground/80">
-                              {ws.performance_avg}%
+                              {Math.round(ws.performance_avg)}%
                             </span>
                             <div className="w-16 h-1 bg-muted rounded-full overflow-hidden">
                               <div
@@ -4300,7 +4301,7 @@ function LecturerGradingQueueContent() {
                     <div className="flex items-center justify-between text-[11px] pt-1 border-t border-border/30">
                       <span className="text-muted-foreground">Class Avg</span>
                       <span className="font-mono font-bold text-emerald-600">
-                        {ws.performance_avg}%
+                        {Math.round(ws.performance_avg)}%
                       </span>
                     </div>
                   </div>
@@ -5263,7 +5264,7 @@ function LecturerGradingQueueContent() {
                                   : "—"}
                               </TableCell>
                               <TableCell className="py-2.5 text-center font-mono text-xs font-semibold">
-                                {item.letter_grade || "—"}
+                                {formatLetterGrade(item.letter_grade)}
                               </TableCell>
                               <TableCell className="py-2.5 text-center">
                                 <Badge

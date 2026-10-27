@@ -23,6 +23,7 @@ import {
 import { StudentRecentResult } from "@/lib/api/student";
 import { getResultLifecycleSummary } from "@/lib/grading-architecture";
 import { cn } from "@/lib/utils";
+import { formatLetterGrade } from "@/lib/letter-grade";
 
 interface RecentResultsProps {
   results?: StudentRecentResult[];
@@ -146,7 +147,7 @@ export function RecentResults({ results = [] }: RecentResultsProps) {
                             res.letter_grade.startsWith("F") && "bg-destructive/10 text-destructive border-destructive/20"
                           )}
                         >
-                          {res.letter_grade}
+                          {formatLetterGrade(res.letter_grade)}
                         </Badge>
                       ) : (
                         <Badge variant="outline" className="text-[10px] text-muted-foreground px-1.5 py-0.5 rounded">

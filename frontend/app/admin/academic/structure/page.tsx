@@ -68,6 +68,17 @@ const STEPS = [
   { id: "sections", label: "Classes & Cohorts", icon: Users, description: "Student cohorts" },
 ]
 
+/** Singular name of a structure level for buttons and toasts ("campuses" -> "campus", not "campuse"). */
+const ENTITY_NAMES: Record<string, string> = {
+  campuses: "campus",
+  colleges: "college",
+  departments: "department",
+  options: "degree program",
+  "class-groups": "year level",
+  sections: "class",
+}
+const entityName = (step: string) => ENTITY_NAMES[step] ?? step
+
 export default function AcademicStructurePage() {
   const [activeStep, setActiveStep] = useState("campuses")
   const [loading, setLoading] = useState(false)
@@ -257,12 +268,12 @@ export default function AcademicStructurePage() {
           })
           break
       }
-      toast.success(`${activeStep.slice(0, -1)} created successfully`)
+      toast.success(`${entityName(activeStep)} created successfully`)
       setCreateDialogOpen(false)
       setFormData({ location_type: "PHYSICAL_ROOM" })
       loadData()
     } catch (err: any) {
-      toast.error(err.message || `Failed to create ${activeStep.slice(0, -1)}`)
+      toast.error(err.message || `Failed to create ${entityName(activeStep)}`)
     } finally {
       setIsCreating(false)
     }
@@ -286,12 +297,12 @@ export default function AcademicStructurePage() {
     setIsCreating(true)
     try {
         await adminAcademicApi.updateEntity(activeStep, editingItem.id, formData)
-        toast.success(`${activeStep.slice(0, -1)} updated successfully`)
+        toast.success(`${entityName(activeStep)} updated successfully`)
         setEditDialogOpen(false)
         setEditingItem(null)
         loadData()
     } catch (err) {
-        toast.error(`Failed to update ${activeStep.slice(0, -1)}`)
+        toast.error(`Failed to update ${entityName(activeStep)}`)
     } finally {
         setIsCreating(false)
     }
@@ -301,7 +312,7 @@ export default function AcademicStructurePage() {
     setIsProcessingRow(item.id)
     try {
         await adminAcademicApi.updateEntity(activeStep, item.id, { is_active: !item.is_active })
-        toast.success(`${activeStep.slice(0, -1)} ${item.is_active ? "deactivated" : "activated"} successfully`)
+        toast.success(`${entityName(activeStep)} ${item.is_active ? "deactivated" : "activated"} successfully`)
         loadData()
     } catch (err) {
         toast.error(`Failed to toggle status`)
@@ -516,7 +527,7 @@ export default function AcademicStructurePage() {
                         }}
                     >
                         <Plus className="size-3.5" />
-                        New {activeStep === "sections" ? "Cohort / Section" : activeStep.slice(0, -1)}
+                        New {activeStep === "sections" ? "Cohort / Section" : entityName(activeStep)}
                     </Button>
                 </div>
             </div>
@@ -648,7 +659,7 @@ export default function AcademicStructurePage() {
           <DialogContent className="sm:max-w-md max-h-[85vh] overflow-y-auto rounded-2xl p-0 overflow-hidden border border-border bg-card shadow-xl">
               <div className="bg-primary p-5 text-primary-foreground">
                   <DialogTitle className="text-sm font-semibold uppercase tracking-widest">
-                      New {activeStep === "sections" ? "Class Group / Cohort" : activeStep.slice(0, -1)}
+                      New {activeStep === "sections" ? "Class Group / Cohort" : entityName(activeStep)}
                   </DialogTitle>
                   <DialogDescription className="text-primary-foreground/60 text-[10px] mt-0.5 font-medium uppercase tracking-tighter">
                       Registering entity into institutional registry
@@ -754,7 +765,7 @@ export default function AcademicStructurePage() {
               <div className="bg-primary p-5 text-primary-foreground">
                   <DialogTitle className="text-sm font-semibold uppercase tracking-widest">Update Metadata</DialogTitle>
                   <DialogDescription className="text-primary-foreground/60 text-[10px] mt-0.5 font-medium uppercase tracking-tighter">
-                      Modifying record for {activeStep.slice(0, -1)}
+                      Modifying record for {entityName(activeStep)}
                   </DialogDescription>
               </div>
               <div className="p-5 space-y-4 bg-card">
