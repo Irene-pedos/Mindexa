@@ -36,6 +36,47 @@ export interface AssessmentConfig {
   appeal_window_days?: number;
 }
 
+/** One row of the student's assessment list (`GET /assessments` as a student). */
+export interface StudentAssessment {
+  id: string;
+  title: string;
+  assessment_type: string;
+  status: string;
+  total_marks: number;
+  duration_minutes: number | null;
+  window_start: string | null;
+  window_end: string | null;
+  max_attempts: number;
+  attempts_used: number;
+  result_release_mode?: string | null;
+  is_group_assessment: boolean;
+  teaching_workspace_id?: string | null;
+  course_name?: string | null;
+  course_code?: string | null;
+  subject?: string | null;
+  student_status?: string | null;
+  student_attempt_id?: string | null;
+  student_attempt_expires_at?: string | null;
+  is_password_protected: boolean;
+  ai_assistance_allowed: boolean;
+  is_open_book: boolean;
+  late_submission_allowed: boolean;
+  is_supervised: boolean;
+  integrity_monitoring_enabled: boolean;
+  fullscreen_required: boolean;
+  allow_resume: boolean;
+  /** Set when an eligibility rule currently stops this student from starting. */
+  blocked_reason?: string | null;
+}
+
+export interface StudentAssessmentPage {
+  items: StudentAssessment[];
+  total: number;
+  page: number;
+  page_size: number;
+  has_next: boolean;
+}
+
 export interface MarksSummary {
   assessment_id: string;
   required_marks: number;
@@ -65,6 +106,17 @@ export const assessmentApi = {
     return apiClient(queryString ? `/assessments?${queryString}` : "/assessments");
   },
   
+  /** Every assessment the signed-in student can see, fetched page by page (the server caps a page at 100). */
+  getAllStudentAssessments: async (): Promise<StudentAssessment[]> => {
+    const items: StudentAssessment[] = [];
+    for (let page = 1; page <= 10; page++) {
+      const data: StudentAssessmentPage = await apiClient(`/assessments?page=${page}&page_size=100`);
+      items.push(...data.items);
+      if (!data.has_next) break;
+    }
+    return items;
+  },
+
   getAssessmentById: (id: string) => apiClient(`/assessments/${id}`),
   
   getAssessmentQuestions: (id: string) => apiClient(`/assessments/${id}/questions`),

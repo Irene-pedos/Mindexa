@@ -157,6 +157,18 @@ export const authApi = {
     });
   },
 
+  /** Ends every session on success, so the caller signs the user out afterwards. */
+  changePassword: async (data: {
+    current_password: string;
+    new_password: string;
+    confirm_password: string;
+  }): Promise<{ message: string; success: boolean }> => {
+    return apiClient("/auth/me/change-password", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+
   uploadAvatar: async (file: File) => {
     const formData = new FormData();
     formData.append("file", file);

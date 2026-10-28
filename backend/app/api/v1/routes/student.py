@@ -6,7 +6,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.dependencies.auth import require_student
-from app.schemas.student import StudentDashboardResponse, StudentScheduleResponse, StudentCourseListItem
+from app.schemas.student import (
+    StudentAcademicContext,
+    StudentCourseListItem,
+    StudentDashboardResponse,
+    StudentScheduleResponse,
+)
 from app.services.student_service import StudentService
 
 router = APIRouter(prefix="/students", tags=["Students"])
@@ -43,6 +48,18 @@ async def list_my_workspaces(
     """Returns a list of all teaching workspaces the current student is enrolled in."""
     service = StudentService(db)
     return await service.list_workspaces(current_user.id)
+
+
+@router.get(
+    "/me/academic-context",
+    response_model=StudentAcademicContext,
+    summary="Where the student studies (campus, faculty, department, programme, year, class)",
+)
+async def get_my_academic_context(
+    current_user=Depends(require_student),
+    db: AsyncSession = Depends(get_db),
+) -> StudentAcademicContext:
+    return await StudentService(db).get_academic_context(current_user.id)
 
 
 @router.get(

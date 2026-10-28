@@ -20,7 +20,9 @@ import {
   TrendingUp,
   GraduationCap,
   Bookmark,
+  CalendarClock,
 } from "lucide-react";
+import { format } from "date-fns";
 import Link from "next/link";
 import { studentApi, StudentCourseDetail } from "@/lib/api/student";
 import { LecturerMaterialResponse } from "@/lib/api/lecturer";
@@ -37,6 +39,12 @@ import {
   AttachmentTitle,
 } from "@/components/ui/attachment";
 import { getStoredProgress } from "@/components/mindexa/study-reader/hooks/use-reader-progress";
+
+const STATUS_BADGE: Record<string, { label: string; className: string }> = {
+  ACTIVE: { label: "In progress", className: "text-success bg-success/10 border-success/20" },
+  COMPLETED: { label: "Finished", className: "text-muted-foreground bg-muted border-border/60" },
+  UPCOMING: { label: "Starts soon", className: "text-sky-700 bg-sky-500/10 border-sky-500/25 dark:text-sky-400" },
+};
 
 export default function StudentCourseDetailPage() {
   const params = useParams();
@@ -126,15 +134,20 @@ export default function StudentCourseDetailPage() {
           </Button>
           <div className="min-w-0">
             <h1 className="text-lg font-semibold tracking-tight text-foreground truncate">{workspace.title}</h1>
-            <div className="flex items-center gap-2 mt-0.5">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-0.5">
               <Badge variant="outline" className="text-[9px] font-mono px-1.5 h-4 border-border/50">{workspace.code}</Badge>
-              <span className="text-xs text-muted-foreground font-medium">{workspace.academic_year || "Global"}</span>
+              {[workspace.academic_year, workspace.class_name].filter(Boolean).map((text) => (
+                <span key={text} className="text-xs text-muted-foreground font-medium">{text}</span>
+              ))}
             </div>
           </div>
         </div>
-        <Badge variant="outline" className="px-2.5 py-1 text-xs text-success bg-success/10 border-success/20 flex items-center gap-1.5 self-start sm:self-auto">
-          <span className="size-1.5 rounded-full bg-success animate-pulse" />
-          Active
+        <Badge
+          variant="outline"
+          className={`px-2.5 py-1 text-xs flex items-center gap-1.5 self-start sm:self-auto ${STATUS_BADGE[workspace.status]?.className ?? STATUS_BADGE.ACTIVE.className}`}
+        >
+          {workspace.status === "ACTIVE" && <span className="size-1.5 rounded-full bg-success motion-safe:animate-pulse" />}
+          {STATUS_BADGE[workspace.status]?.label ?? STATUS_BADGE.ACTIVE.label}
         </Badge>
       </div>
 
@@ -142,7 +155,7 @@ export default function StudentCourseDetailPage() {
       {workspace.banner_image_url ? (
         <div
           className="h-36 rounded-xl bg-cover bg-center border border-border/40 overflow-hidden"
-          style={{ backgroundImage: `url(${workspace.banner_image_url})` }}
+          style={{ backgroundImage: `url(${JSON.stringify(workspace.banner_image_url)})` }}
         />
       ) : (
         <div className="h-36 rounded-xl bg-gradient-to-br from-primary/15 via-primary/5 to-muted border border-border/40 flex items-center justify-center">
@@ -156,10 +169,11 @@ export default function StudentCourseDetailPage() {
           <CardContent className="p-3.5">
             <div className="flex items-center gap-1.5 mb-2">
               <TrendingUp className="size-3.5 text-primary" />
-              <span className="text-[10px] text-muted-foreground font-medium">Progress</span>
+              <span className="text-[10px] text-muted-foreground font-medium">Completed</span>
             </div>
             <p className="text-xl font-bold text-foreground tabular-nums">{workspace.progress}%</p>
             <Progress value={workspace.progress} className="h-1.5 mt-1.5" />
+            <p className="text-[10px] text-muted-foreground mt-1">of the assessments</p>
           </CardContent>
         </Card>
         <Card className="border-border/60 shadow-xs">
@@ -179,7 +193,7 @@ export default function StudentCourseDetailPage() {
               <span className="text-[10px] text-muted-foreground font-medium">Assessments</span>
             </div>
             <p className="text-xl font-bold text-foreground tabular-nums">{workspace.assessments}</p>
-            <p className="text-[10px] text-muted-foreground mt-0.5">total evaluations</p>
+            <p className="text-[10px] text-muted-foreground mt-0.5">published for you</p>
           </CardContent>
         </Card>
       </div>
@@ -288,6 +302,22 @@ export default function StudentCourseDetailPage() {
 
         {/* Sidebar */}
         <div className="lg:col-span-3 space-y-4">
+          {workspace.next_assessment && (
+            <Card className="border-border/60 shadow-xs">
+              <CardContent className="p-4 space-y-1.5">
+                <p className="text-[10px] text-muted-foreground uppercase font-semibold tracking-wider flex items-center gap-1.5">
+                  <CalendarClock className="size-3.5 text-primary" /> Next assessment
+                </p>
+                <p className="text-xs font-semibold text-foreground leading-snug">{workspace.next_assessment.title}</p>
+                <p className="text-[11px] text-muted-foreground">
+                  {workspace.next_assessment.window_start
+                    ? `Opens ${format(new Date(workspace.next_assessment.window_start), "MMM d, HH:mm")}`
+                    : "Open now"}
+                </p>
+              </CardContent>
+            </Card>
+          )}
+
           <Card className="border-primary/15 bg-primary/5 shadow-xs">
             <CardHeader className="px-4 pt-3.5 pb-2">
               <CardTitle className="text-[10px] font-semibold uppercase tracking-wider text-primary">
@@ -296,7 +326,7 @@ export default function StudentCourseDetailPage() {
             </CardHeader>
             <CardContent className="px-4 pb-4 space-y-2">
               <Button asChild size="sm" className="w-full justify-between h-8 text-xs font-semibold rounded-lg shadow-none">
-                <Link href="/student/assessments">Assessments <ArrowRight className="size-3.5" /></Link>
+                <Link href={`/student/assessments?course=${workspaceId}`}>Assessments <ArrowRight className="size-3.5" /></Link>
               </Button>
               <Button asChild variant="outline" size="sm" className="w-full h-8 text-xs font-medium rounded-lg border-border/60">
                 <Link href="/student/study" className="flex items-center gap-2 justify-center">
@@ -315,9 +345,6 @@ export default function StudentCourseDetailPage() {
                 <p className="text-[10px] text-muted-foreground uppercase font-semibold tracking-wider">Lead Instructor</p>
                 <p className="text-xs font-semibold text-foreground mt-0.5">{workspace.lecturer}</p>
               </div>
-              <Button variant="outline" size="sm" className="w-full h-7 text-xs font-medium rounded-lg border-border/60">
-                Contact Instructor
-              </Button>
             </CardContent>
           </Card>
         </div>

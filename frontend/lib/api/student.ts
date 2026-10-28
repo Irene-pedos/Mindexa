@@ -77,10 +77,34 @@ export interface StudentCourseListItem {
   lecturer_name: string;
   status: string;
   progress: number;
+  /** Name of the academic period, empty when the course is not placed in one. */
   academic_year: string;
   language?: "EN" | "RW" | "FR" | "SW";
   workspace_id?: string | null;
   banner_image_url?: string | null;
+  period_start?: string | null;
+  period_end?: string | null;
+  class_name?: string | null;
+}
+
+export type StudentCourseStatus = "ACTIVE" | "COMPLETED" | "UPCOMING";
+
+export interface StudentContextLevel {
+  key: string;
+  /** The institution's own word for the level, e.g. "Faculty" or "Division". */
+  label: string;
+  name: string;
+}
+
+export interface StudentAcademicContext {
+  institution_name: string | null;
+  levels: StudentContextLevel[];
+  current_period: {
+    name: string;
+    period_type: string;
+    start_date: string;
+    end_date: string;
+  } | null;
 }
 
 export interface StudentDashboardResponse {
@@ -101,10 +125,17 @@ export interface StudentCourseDetail {
   description: string;
   progress: number;
   enrolled: number;
-  nextAssessment: string;
+  next_assessment: {
+    id: string;
+    title: string;
+    window_start: string | null;
+    window_end: string | null;
+  } | null;
   materials: number;
   assessments: number;
   academic_year: string;
+  status: StudentCourseStatus;
+  class_name?: string | null;
   language?: "EN" | "RW" | "FR" | "SW" | string;
   banner_image_url?: string | null;
 }
@@ -149,6 +180,9 @@ export const studentApi = {
   },
   getWorkspaces: async (): Promise<StudentCourseListItem[]> => {
     return apiClient("/students/me/workspaces");
+  },
+  getAcademicContext: async (): Promise<StudentAcademicContext> => {
+    return apiClient("/students/me/academic-context");
   },
   getWorkspaceDetail: async (workspaceId: string): Promise<StudentCourseDetail> => {
     return apiClient("/students/me/workspaces/" + workspaceId);

@@ -193,7 +193,11 @@ async def get_periods(
     db: AsyncSession = Depends(get_db)
 ):
     """List academic periods (semesters) within an institution, or all if none provided."""
-    stmt = select(AcademicPeriod).where(AcademicPeriod.is_active == True)
+    stmt = (
+        select(AcademicPeriod)
+        .where(AcademicPeriod.is_active == True, AcademicPeriod.is_deleted == False)
+        .order_by(AcademicPeriod.start_date.desc())
+    )
     if institution_id:
         stmt = stmt.where(AcademicPeriod.institution_id == institution_id)
         

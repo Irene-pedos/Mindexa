@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.enums import EnrollmentStatus
 from app.db.models.academic import (
+    AcademicPeriod,
     Campus,
     ClassGroup,
     ClassSection,
@@ -26,6 +27,7 @@ from app.db.models.academic import (
     Institution,
     Option,
     StudentEnrollment,
+    TeachingAssignment,
 )
 
 
@@ -59,6 +61,63 @@ class AcademicStructureRepository:
             ClassSection.department_id.in_(self._department_ids(institution_id)),
             ClassSection.class_group_id.in_(self._group_ids(institution_id)),
         )
+
+    # ── academic periods ──────────────────────────────────────────────────────
+
+    async def list_periods(self, institution_id: uuid.UUID | None) -> list[dict[str, Any]]:
+        """Live periods (newest first) with the number of courses and assignments using each."""
+        courses = (
+            select(Course.academic_period_id, func.count(Course.id).label("n"))
+            .where(Course.is_deleted.is_(False), Course.academic_period_id.is_not(None))
+            .group_by(Course.academic_period_id)
+            .subquery()
+        )
+        assignments = (
+            select(TeachingAssignment.academic_period_id, func.count(TeachingAssignment.id).label("n"))
+            .where(
+                TeachingAssignment.is_deleted.is_(False),
+                TeachingAssignment.academic_period_id.is_not(None),
+            )
+            .group_by(TeachingAssignment.academic_period_id)
+            .subquery()
+        )
+        stmt = (
+            select(
+                AcademicPeriod,
+                func.coalesce(courses.c.n, 0),
+                func.coalesce(assignments.c.n, 0),
+            )
+            .outerjoin(courses, courses.c.academic_period_id == AcademicPeriod.id)
+            .outerjoin(assignments, assignments.c.academic_period_id == AcademicPeriod.id)
+            .where(AcademicPeriod.is_deleted.is_(False))
+            .order_by(AcademicPeriod.start_date.desc(), AcademicPeriod.name)
+        )
+        if institution_id:
+            stmt = stmt.where(AcademicPeriod.institution_id == institution_id)
+        rows = (await self.db.execute(stmt)).all()
+        return [
+            {
+                "id": period.id,
+                "institution_id": period.institution_id,
+                "name": period.name,
+                "period_type": getattr(period.period_type, "value", period.period_type),
+                "start_date": period.start_date,
+                "end_date": period.end_date,
+                "is_active": period.is_active,
+                "course_count": int(course_count),
+                "assignment_count": int(assignment_count),
+            }
+            for period, course_count, assignment_count in rows
+        ]
+
+    async def live_periods(self, institution_id: uuid.UUID) -> list[AcademicPeriod]:
+        result = await self.db.execute(
+            select(AcademicPeriod).where(
+                AcademicPeriod.institution_id == institution_id,
+                AcademicPeriod.is_deleted.is_(False),
+            )
+        )
+        return list(result.scalars().all())
 
     # ── single institution ────────────────────────────────────────────────────
 

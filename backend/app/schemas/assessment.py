@@ -409,6 +409,10 @@ class AssessmentSummaryResponse(BaseModel):
     is_open_book: bool = False
     late_submission_allowed: bool = False
     is_supervised: bool = False
+    # Rules the student reads in the pre-start checklist (practice sessions switch monitoring off).
+    integrity_monitoring_enabled: bool = True
+    fullscreen_required: bool = True
+    allow_resume: bool = True
     attempts_used: int = 0
     blocked_reason: str | None = None
     created_at: datetime

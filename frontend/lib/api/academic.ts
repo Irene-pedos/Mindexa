@@ -22,6 +22,21 @@ export type AcademicClassSection = ClassSectionResponse
 export type AcademicCourse = CourseResponse
 export type AcademicPeriod = AcademicPeriodResponse
 
+/** A period as the admin list returns it: with the number of courses and assignments using it. */
+export interface AcademicPeriodItem extends AcademicPeriodResponse {
+  course_count: number
+  assignment_count: number
+}
+
+export interface AcademicPeriodPayload {
+  institution_id: string
+  name: string
+  period_type: string
+  start_date: string
+  end_date: string
+  is_active: boolean
+}
+
 export type TeachingAssignmentRole =
   | "MAIN_LECTURER"
   | "ASSISTANT_LECTURER"
@@ -203,15 +218,22 @@ export const adminAcademicApi = {
       body: JSON.stringify(data),
     });
   },
-  getAcademicPeriods: async (institutionId?: string): Promise<AcademicPeriod[]> => {
-    const url = institutionId 
+  /** Every period (active or not), newest first, with how many courses and assignments use it. */
+  getAcademicPeriods: async (institutionId?: string): Promise<AcademicPeriodItem[]> => {
+    const url = institutionId
       ? `/admin/academic/academic-periods?institution_id=${institutionId}`
       : "/admin/academic/academic-periods";
     return apiClient(url);
   },
-  createAcademicPeriod: async (data: any) => {
+  createAcademicPeriod: async (data: AcademicPeriodPayload): Promise<AcademicPeriod> => {
     return apiClient("/admin/academic/academic-periods", {
       method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+  updateAcademicPeriod: async (id: string, data: Partial<Omit<AcademicPeriodPayload, "institution_id">>): Promise<AcademicPeriod> => {
+    return apiClient(`/admin/academic/academic-periods/${id}`, {
+      method: "PATCH",
       body: JSON.stringify(data),
     });
   },

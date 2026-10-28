@@ -11,10 +11,11 @@ campuses, colleges, programmes or year levels) without one request per node.
 from __future__ import annotations
 
 import uuid
+from datetime import date
 
 from pydantic import BaseModel, Field, field_validator
 
-from app.db.enums import LocationType
+from app.db.enums import AcademicPeriodType, LocationType
 from app.db.schemas.base import MindexaSchema
 
 
@@ -150,3 +151,30 @@ class ClassSectionUpdate(MindexaSchema):
     @classmethod
     def _blank_to_none(cls, value: str | None) -> str | None:
         return value or None
+
+
+# ── Academic periods ──────────────────────────────────────────────────────────
+
+
+class AcademicPeriodUpdate(MindexaSchema):
+    """Every field optional; the service re-checks the dates and names against the stored row."""
+
+    name: str | None = Field(default=None, min_length=2, max_length=255)
+    period_type: AcademicPeriodType | None = None
+    start_date: date | None = None
+    end_date: date | None = None
+    is_active: bool | None = None
+
+
+class AcademicPeriodItem(BaseModel):
+    """A period with how much of the system already depends on it."""
+
+    id: uuid.UUID
+    institution_id: uuid.UUID
+    name: str
+    period_type: str
+    start_date: date
+    end_date: date
+    is_active: bool
+    course_count: int = 0
+    assignment_count: int = 0

@@ -86,6 +86,7 @@ class AcademicPeriodCreate(MindexaSchema):
     period_type: AcademicPeriodType
     start_date: date
     end_date: date
+    is_active: bool = True
 
     @field_validator("end_date")
     @classmethod

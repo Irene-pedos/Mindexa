@@ -1,269 +1,333 @@
 // app/student/courses/page.tsx
 "use client";
 
-import React, { useEffect, useState, useMemo } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import {
+  ArrowRight,
+  BookOpen,
+  Calendar,
+  ChevronDown,
+  GraduationCap,
+  Search,
+  Users,
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
-import {
-  BookOpen,
-  Search,
-  GraduationCap,
-  ChevronDown,
-  ChevronRight,
-  Calendar,
-  Layers,
-  ArrowRight,
-} from "lucide-react";
-import Link from "next/link";
-import { studentApi, StudentCourseListItem } from "@/lib/api/student";
 import { Skeleton } from "@/components/ui/interfaces-skeleton";
+import {
+  studentApi,
+  type StudentCourseListItem,
+  type StudentCourseStatus,
+} from "@/lib/api/student";
+import { errorMessage } from "@/lib/error-message";
 import { cn } from "@/lib/utils";
 
-const STATUS_COLORS: Record<string, string> = {
-  ACTIVE: "text-emerald-600 bg-emerald-500/10 border-emerald-500/20",
-  COMPLETED: "text-primary bg-primary/10 border-primary/20",
-  INACTIVE: "text-muted-foreground bg-muted border-border/60",
+const STATUS_STYLE: Record<StudentCourseStatus, { label: string; className: string }> = {
+  ACTIVE: { label: "In progress", className: "text-emerald-700 bg-emerald-500/10 border-emerald-500/25 dark:text-emerald-400" },
+  COMPLETED: { label: "Finished", className: "text-muted-foreground bg-muted border-border/60" },
+  UPCOMING: { label: "Starts soon", className: "text-sky-700 bg-sky-500/10 border-sky-500/25 dark:text-sky-400" },
 };
 
-function statusLabel(s: string) {
-  if (s === "ACTIVE") return "Active";
-  if (s === "COMPLETED") return "Completed";
-  return s ?? "Active";
+const NO_PERIOD = "No academic period";
+
+type StatusFilter = "ALL" | StudentCourseStatus;
+
+const statusOf = (course: StudentCourseListItem): StudentCourseStatus =>
+  course.status in STATUS_STYLE ? (course.status as StudentCourseStatus) : "ACTIVE";
+
+interface PeriodGroup {
+  name: string;
+  start: string | null;
+  courses: StudentCourseListItem[];
+}
+
+/** Courses grouped by academic period, the newest period first and courses without one last. */
+function groupByPeriod(courses: StudentCourseListItem[]): PeriodGroup[] {
+  const map = new Map<string, PeriodGroup>();
+  for (const course of courses) {
+    const name = course.academic_year || NO_PERIOD;
+    const group = map.get(name) ?? { name, start: course.period_start ?? null, courses: [] };
+    group.courses.push(course);
+    map.set(name, group);
+  }
+  return [...map.values()].sort((a, b) => {
+    if (a.name === NO_PERIOD) return 1;
+    if (b.name === NO_PERIOD) return -1;
+    return (b.start ?? "").localeCompare(a.start ?? "") || a.name.localeCompare(b.name);
+  });
 }
 
 export default function StudentCoursesPage() {
-  const [workspaces, setWorkspaces] = useState<StudentCourseListItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [courses, setCourses] = useState<StudentCourseListItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
-  const [collapsedYears, setCollapsedYears] = useState<Record<string, boolean>>({});
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
+  // Only groups the student opened or closed by hand; the rest follow the default (finished periods fold away).
+  const [toggled, setToggled] = useState<Record<string, boolean>>({});
 
-  const loadWorkspaces = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      setWorkspaces(await studentApi.getWorkspaces());
-    } catch (err) {
-      console.error(err);
-      setError("Unable to load your enrolled courses.");
-    } finally {
-      setLoading(false);
-    }
-  };
+  // Bumped by "Try again" to run the load effect once more.
+  const [reloadKey, setReloadKey] = useState(0);
+  const reload = useCallback(() => setReloadKey((k) => k + 1), []);
 
   useEffect(() => {
-    loadWorkspaces();
-  }, []);
+    let live = true;
+    studentApi
+      .getWorkspaces()
+      .then((list) => {
+        if (!live) return;
+        setCourses(list);
+        setError(null);
+      })
+      .catch((err: unknown) => {
+        if (!live) return;
+        setError(errorMessage(err, "Unable to load your courses."));
+        setCourses((current) => current ?? []);
+      });
+    return () => {
+      live = false;
+    };
+  }, [reloadKey]);
+
+  const counts = useMemo(() => {
+    const result: Record<StatusFilter, number> = { ALL: 0, ACTIVE: 0, COMPLETED: 0, UPCOMING: 0 };
+    for (const course of courses ?? []) {
+      result.ALL += 1;
+      result[statusOf(course)] += 1;
+    }
+    return result;
+  }, [courses]);
 
   const filtered = useMemo(() => {
-    const q = searchQuery.toLowerCase();
-    if (!q) return workspaces;
-    return workspaces.filter(
-      (w) =>
-        w.title?.toLowerCase().includes(q) || w.code?.toLowerCase().includes(q)
+    const q = searchQuery.trim().toLowerCase();
+    return (courses ?? []).filter(
+      (c) =>
+        (statusFilter === "ALL" || statusOf(c) === statusFilter) &&
+        (!q ||
+          c.title?.toLowerCase().includes(q) ||
+          c.code?.toLowerCase().includes(q) ||
+          c.lecturer_name?.toLowerCase().includes(q)),
     );
-  }, [workspaces, searchQuery]);
+  }, [courses, searchQuery, statusFilter]);
 
-  const grouped = useMemo(() => {
-    const map: Record<string, StudentCourseListItem[]> = {};
-    filtered.forEach((ws) => {
-      const key = ws.academic_year || "Ongoing Academic Period";
-      if (!map[key]) map[key] = [];
-      map[key].push(ws);
-    });
-    return Object.entries(map).sort(([a], [b]) => b.localeCompare(a));
-  }, [filtered]);
+  const groups = useMemo(() => groupByPeriod(filtered), [filtered]);
+  const periodCount = useMemo(() => groupByPeriod(courses ?? []).length, [courses]);
+  const searching = Boolean(searchQuery.trim()) || statusFilter !== "ALL";
 
-  const toggleYear = (year: string) =>
-    setCollapsedYears((prev) => ({ ...prev, [year]: !prev[year] }));
+  const isOpen = (group: PeriodGroup): boolean => {
+    if (searching) return true; // never hide a search hit inside a folded group
+    const manual = toggled[group.name];
+    if (manual !== undefined) return manual;
+    return group.courses.some((c) => statusOf(c) !== "COMPLETED");
+  };
 
-  if (loading) {
-    return (
-      <div className="w-full space-y-4 animate-pulse">
-        <div className="flex justify-between items-center border-b pb-3">
-          <Skeleton className="h-6 w-44 rounded-md" />
-          <Skeleton className="h-8 w-52 rounded-lg" />
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {[...Array(6)].map((_, i) => (
-            <Skeleton key={i} className="h-48 rounded-xl" />
-          ))}
-        </div>
-      </div>
-    );
-  }
+  const loading = courses === null;
 
   return (
-    <div className="w-full space-y-4 animate-in fade-in duration-200">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border/40 pb-3">
+    <div className="w-full space-y-4 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-300">
+      <div className="flex flex-col gap-3 border-b border-border/40 pb-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="space-y-0.5">
-          <h1 className="text-lg font-semibold text-foreground flex items-center gap-2">
+          <h1 className="flex items-center gap-2 text-lg font-semibold text-foreground">
             <GraduationCap className="size-5 text-primary" />
             My Courses
           </h1>
-          <p className="text-xs text-muted-foreground font-medium">
-            {filtered.length} enrolled course{filtered.length !== 1 ? "s" : ""} across academic periods
+          <p className="text-xs font-medium text-muted-foreground">
+            {loading
+              ? "Loading your courses…"
+              : counts.ALL === 0
+                ? "Courses appear here once your lecturer sets them up."
+                : `${counts.ALL} course${counts.ALL === 1 ? "" : "s"} across ${periodCount} academic period${periodCount === 1 ? "" : "s"}`}
           </p>
         </div>
-        <div className="relative w-full sm:w-64">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
+        <div className="relative w-full sm:w-72">
+          <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
-            placeholder="Search courses or codes…"
+            placeholder="Search by course, code or lecturer"
+            aria-label="Search your courses"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-8 h-8 text-xs bg-background border-border/60"
+            className="h-8 border-border/60 bg-background pl-8 text-xs"
           />
         </div>
       </div>
 
-      {error ? (
-        <div className="py-16 text-center border-2 border-dashed rounded-xl border-destructive/30 bg-destructive/5">
-          <BookOpen className="size-9 mx-auto mb-3 text-destructive/50" />
+      {counts.COMPLETED + counts.UPCOMING > 0 && (
+        <div
+          role="group"
+          aria-label="Filter by status"
+          className="flex w-fit max-w-full items-center overflow-x-auto rounded-lg border bg-muted/60 p-0.5"
+        >
+          {(["ALL", "ACTIVE", "UPCOMING", "COMPLETED"] as const)
+            .filter((s) => s === "ALL" || counts[s] > 0)
+            .map((s) => (
+              <button
+                key={s}
+                type="button"
+                aria-pressed={statusFilter === s}
+                onClick={() => setStatusFilter(s)}
+                className={cn(
+                  "flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-all duration-200",
+                  statusFilter === s ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {s === "ALL" ? "All" : STATUS_STYLE[s].label}
+                <span className="text-[10px] tabular-nums opacity-70">{counts[s]}</span>
+              </button>
+            ))}
+        </div>
+      )}
+
+      {loading ? (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {[...Array(3)].map((_, i) => (
+            <Skeleton key={i} className="h-60 rounded-xl" />
+          ))}
+        </div>
+      ) : error ? (
+        <div role="alert" className="rounded-xl border-2 border-dashed border-destructive/30 bg-destructive/5 py-14 text-center">
+          <BookOpen className="mx-auto mb-3 size-9 text-destructive/50" />
           <p className="text-xs font-medium text-destructive">{error}</p>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="mt-3 text-xs"
-            onClick={loadWorkspaces}
-          >
-            Retry
+          <Button type="button" variant="outline" size="sm" className="mt-3 text-xs" onClick={reload}>
+            Try again
           </Button>
         </div>
       ) : filtered.length === 0 ? (
-        <div className="py-16 text-center border-2 border-dashed rounded-xl border-border/50 bg-muted/10">
-          <BookOpen className="size-9 mx-auto mb-3 text-muted-foreground/40" />
-          <p className="text-xs font-semibold text-foreground">
-            No courses found
-          </p>
-          {searchQuery && (
-            <p className="text-[11px] text-muted-foreground mt-1">
-              Try adjusting your search query
-            </p>
+        <div className="mx-auto max-w-md rounded-xl border-2 border-dashed border-border/50 bg-muted/10 px-6 py-14 text-center">
+          <BookOpen className="mx-auto mb-3 size-9 text-muted-foreground/40" />
+          {searching ? (
+            <>
+              <p className="text-sm font-semibold text-foreground">No course matches</p>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="mt-3 text-xs"
+                onClick={() => {
+                  setSearchQuery("");
+                  setStatusFilter("ALL");
+                }}
+              >
+                Clear search
+              </Button>
+            </>
+          ) : (
+            <>
+              <p className="text-sm font-semibold text-foreground">You are not in any course yet</p>
+              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                A course shows up once your lecturer sets it up for your class. If you expected one, check that your
+                class is correct in your profile.
+              </p>
+              <Button asChild variant="outline" size="sm" className="mt-3 text-xs">
+                <Link href="/student/profile">Open my profile</Link>
+              </Button>
+            </>
           )}
         </div>
       ) : (
         <div className="space-y-4">
-          {grouped.map(([year, courses]) => {
-            const isCollapsed = !!collapsedYears[year];
+          {groups.map((group) => {
+            const open = isOpen(group);
             return (
-              <div
-                key={year}
-                className="border border-border/60 rounded-2xl overflow-hidden bg-card/40 shadow-2xs"
-              >
+              <section key={group.name} className="overflow-hidden rounded-2xl border border-border/60 bg-card/40">
                 <button
                   type="button"
-                  onClick={() => toggleYear(year)}
-                  className="w-full flex items-center justify-between px-4 py-2.5 bg-muted/20 border-b border-border/40 hover:bg-muted/40 transition-colors"
+                  aria-expanded={open}
+                  onClick={() => setToggled((prev) => ({ ...prev, [group.name]: !open }))}
+                  className="flex w-full items-center justify-between gap-2 border-b border-border/40 bg-muted/20 px-4 py-2.5 text-left transition-colors hover:bg-muted/40"
                 >
-                  <div className="flex items-center gap-2">
-                    {isCollapsed ? (
-                      <ChevronRight className="size-3.5 text-muted-foreground" />
-                    ) : (
-                      <ChevronDown className="size-3.5 text-muted-foreground" />
-                    )}
-                    <Calendar className="size-3.5 text-muted-foreground" />
-                    <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
-                      Academic Period: {year}
-                    </span>
-                    <Badge
-                      variant="secondary"
-                      className="text-[10px] font-semibold h-4 px-1.5 bg-muted/60"
-                    >
-                      {courses.length} {courses.length === 1 ? "course" : "courses"}
+                  <span className="flex min-w-0 items-center gap-2">
+                    <Calendar className="size-3.5 shrink-0 text-muted-foreground" />
+                    <span className="truncate text-xs font-semibold text-foreground">{group.name}</span>
+                    <Badge variant="secondary" className="h-4 shrink-0 bg-muted/60 px-1.5 text-[10px] font-semibold">
+                      {group.courses.length} {group.courses.length === 1 ? "course" : "courses"}
                     </Badge>
-                  </div>
+                  </span>
+                  <ChevronDown
+                    className={cn("size-4 shrink-0 text-muted-foreground transition-transform duration-200", open && "rotate-180")}
+                  />
                 </button>
 
-                {!isCollapsed && (
-                  <div className="p-3.5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 animate-in fade-in duration-150">
-                    {courses.map((ws) => (
-                      <Card
-                        key={ws.id}
-                        className="group flex flex-col overflow-hidden hover:border-primary/40 hover:shadow-xs transition-all duration-200 border-border/60 rounded-xl bg-card"
-                      >
-                        {/* Course Banner: Image or Book Placeholder */}
-                        {ws.banner_image_url ? (
-                          <div
-                            className="h-24 w-full bg-cover bg-center shrink-0 border-b border-border/40 relative overflow-hidden group-hover:scale-[1.01] transition-transform duration-300"
-                            style={{
-                              backgroundImage: `url(${ws.banner_image_url})`,
-                            }}
-                          >
-                            <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent" />
-                          </div>
-                        ) : (
-                          <div className="h-24 w-full bg-gradient-to-br from-primary/10 via-muted/30 to-muted/60 flex items-center justify-center shrink-0 border-b border-border/40">
-                            <BookOpen className="size-8 text-primary/30" />
-                          </div>
-                        )}
-
-                        <CardHeader className="p-3.5 pb-1">
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="min-w-0 flex-1 space-y-1">
-                              <Badge
-                                variant="outline"
-                                className="text-[10px] font-mono px-1.5 h-4 border-border/60 bg-muted/40"
-                              >
-                                {ws.code}
-                              </Badge>
-                              <CardTitle className="text-xs sm:text-sm font-semibold leading-snug text-foreground line-clamp-2 group-hover:text-primary transition-colors">
-                                {ws.title}
-                              </CardTitle>
-                            </div>
-                            <Badge
-                              variant="outline"
-                              className={cn(
-                                "text-[10px] h-4.5 px-1.5 shrink-0 font-medium capitalize",
-                                STATUS_COLORS[ws.status] ?? STATUS_COLORS.INACTIVE
-                              )}
-                            >
-                              {statusLabel(ws.status)}
-                            </Badge>
-                          </div>
-                        </CardHeader>
-
-                        <CardContent className="p-3.5 pt-1.5 flex flex-col gap-2.5 flex-1">
-                          {ws.lecturer_name && (
-                            <p className="text-[11px] text-muted-foreground flex items-center gap-1.5 font-medium">
-                              <GraduationCap className="size-3.5 shrink-0 text-muted-foreground/80" />
-                              <span className="truncate">{ws.lecturer_name}</span>
-                            </p>
-                          )}
-
-                          <div className="space-y-1 mt-auto pt-1">
-                            <div className="flex justify-between text-[11px] text-muted-foreground font-medium">
-                              <span>Course Progress</span>
-                              <span className="text-foreground font-semibold">
-                                {ws.progress}%
-                              </span>
-                            </div>
-                            <Progress value={ws.progress} className="h-1.5" />
-                          </div>
-
-                          <Button
-                            asChild
-                            size="sm"
-                            className="w-full h-8 text-xs font-semibold rounded-lg shadow-2xs mt-2"
-                          >
-                            <Link href={`/student/courses/${ws.id}`}>
-                              View Course <ArrowRight className="size-3 ml-1" />
-                            </Link>
-                          </Button>
-                        </CardContent>
-                      </Card>
+                {open && (
+                  <div className="grid grid-cols-1 gap-3 p-3.5 sm:grid-cols-2 xl:grid-cols-3">
+                    {group.courses.map((course, index) => (
+                      <CourseCard key={course.id} course={course} index={index} />
                     ))}
                   </div>
                 )}
-              </div>
+              </section>
             );
           })}
         </div>
       )}
     </div>
+  );
+}
+
+function CourseCard({ course, index }: { course: StudentCourseListItem; index: number }) {
+  const status = STATUS_STYLE[statusOf(course)];
+  return (
+    <Link
+      href={`/student/courses/${course.id}`}
+      style={{ animationDelay: `${Math.min(index, 8) * 40}ms` }}
+      className="group flex flex-col overflow-hidden rounded-xl border border-border/60 bg-card transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1 motion-safe:duration-300 motion-safe:fill-mode-backwards"
+    >
+      {course.banner_image_url ? (
+        <div className="relative h-24 w-full shrink-0 overflow-hidden border-b border-border/40">
+          <div
+            className="size-full bg-cover bg-center transition-transform duration-500 group-hover:scale-105"
+            style={{ backgroundImage: `url(${JSON.stringify(course.banner_image_url)})` }}
+          />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent" />
+        </div>
+      ) : (
+        <div className="flex h-24 w-full shrink-0 items-center justify-center border-b border-border/40 bg-gradient-to-br from-primary/10 via-muted/30 to-muted/60">
+          <BookOpen className="size-8 text-primary/30" />
+        </div>
+      )}
+
+      <div className="flex flex-1 flex-col gap-3 p-3.5">
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0 flex-1 space-y-1">
+            <Badge variant="outline" className="h-4 border-border/60 bg-muted/40 px-1.5 font-mono text-[10px]">
+              {course.code}
+            </Badge>
+            <h2 className="line-clamp-2 text-sm font-semibold leading-snug text-foreground transition-colors group-hover:text-primary">
+              {course.title}
+            </h2>
+          </div>
+          <Badge variant="outline" className={cn("h-5 shrink-0 px-1.5 text-[10px] font-medium", status.className)}>
+            {status.label}
+          </Badge>
+        </div>
+
+        <div className="space-y-1 text-[11px] font-medium text-muted-foreground">
+          <p className="flex items-center gap-1.5">
+            <GraduationCap className="size-3.5 shrink-0" />
+            <span className="truncate">{course.lecturer_name}</span>
+          </p>
+          {course.class_name && (
+            <p className="flex items-center gap-1.5">
+              <Users className="size-3.5 shrink-0" />
+              <span className="truncate">{course.class_name}</span>
+            </p>
+          )}
+        </div>
+
+        <div className="mt-auto space-y-1 pt-1">
+          <div className="flex justify-between text-[11px] font-medium text-muted-foreground">
+            <span>Assessments completed</span>
+            <span className="font-semibold tabular-nums text-foreground">{course.progress}%</span>
+          </div>
+          <Progress value={course.progress} className="h-1.5" />
+        </div>
+
+        <span className="flex items-center justify-end gap-1 text-xs font-semibold text-primary">
+          Open course
+          <ArrowRight className="size-3.5 transition-transform duration-200 group-hover:translate-x-0.5" />
+        </span>
+      </div>
+    </Link>
   );
 }

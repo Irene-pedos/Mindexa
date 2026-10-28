@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import random
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 from app.db.enums import AssessmentStatus, AssessmentType, AttemptStatus
-from app.db.models.academic import (ClassSection, Course, StudentEnrollment,
+from app.db.models.academic import (AcademicPeriod, Campus, ClassGroup,
+                                    ClassSection, College, Course, Department,
+                                    Institution, Option, StudentEnrollment,
                                     TeachingWorkspace)
 from app.db.models.assessment import Assessment
 from app.db.models.attempt import AssessmentAttempt
+from app.db.models.auth import UserProfile
 from app.db.models.resource import LecturerMaterial
 from app.db.models.result import AssessmentResult
 from app.db.repositories.assessment_repo import AssessmentRepository
@@ -16,8 +19,9 @@ from app.db.repositories.attempt_repo import AttemptRepository
 from app.db.repositories.course_repo import CourseRepository
 from app.db.repositories.result_repo import ResultRepository
 from app.db.repositories.workspace_repo import WorkspaceRepository
-from app.schemas.student import (PerformanceTrendItem, StudentActiveAttempt,
-                                 StudentCourseListItem,
+from app.schemas.student import (PerformanceTrendItem, StudentAcademicContext,
+                                 StudentActiveAttempt, StudentContextLevel,
+                                 StudentContextPeriod, StudentCourseListItem,
                                  StudentDashboardResponse,
                                  StudentDashboardSummary, StudentRecentResult,
                                  StudentScheduleEvent, StudentScheduleResponse,
@@ -25,6 +29,30 @@ from app.schemas.student import (PerformanceTrendItem, StudentActiveAttempt,
 from sqlalchemy import and_, exists, func, not_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+
+
+# What a student can see and take (mirrors AssessmentRepository._student_visibility_filters).
+_STUDENT_VISIBLE_STATUSES = [AssessmentStatus.PUBLISHED, AssessmentStatus.ACTIVE]
+
+_DEFAULT_LEVEL_LABELS = {
+    "campus": "Campus",
+    "college": "College",
+    "department": "Department",
+    "program": "Programme",
+    "year": "Year level",
+    "class": "Class",
+}
+
+
+def _period_status(period: AcademicPeriod | None, today: date) -> str:
+    """ACTIVE while the period runs, COMPLETED once it ended, UPCOMING before it starts."""
+    if period is None:
+        return "ACTIVE"
+    if period.end_date < today:
+        return "COMPLETED"
+    if period.start_date > today:
+        return "UPCOMING"
+    return "ACTIVE"
 
 
 class StudentService:
@@ -229,22 +257,143 @@ class StudentService:
         workspaces = await self.workspace_repo.list_by_student(student_id)
 
         items = []
+        today = datetime.now(UTC).date()
         for ws in workspaces:
             progress = await self._calculate_workspace_progress(student_id, ws.id)
-
-            lecturer = ws.teaching_assignment.lecturer.profile
+            period = ws.academic_period
             items.append(StudentCourseListItem(
                 id=ws.id,
                 code=ws.course.code,
                 title=ws.title,
-                lecturer_name=f"{lecturer.first_name} {lecturer.last_name}",
-                status="Active",
+                lecturer_name=self._lecturer_name(ws),
+                status=_period_status(period, today),
                 progress=progress,
-                academic_year=ws.academic_period.name if ws.academic_period else "GLOBAL",
+                academic_year=period.name if period else "",
                 workspace_id=ws.id,
                 banner_image_url=ws.banner_image_url,
+                period_start=period.start_date if period else None,
+                period_end=period.end_date if period else None,
+                class_name=ws.class_section.name if ws.class_section else None,
             ))
         return items
+
+    @staticmethod
+    def _lecturer_name(ws: TeachingWorkspace) -> str:
+        profile = ws.teaching_assignment.lecturer.profile if ws.teaching_assignment else None
+        name = f"{profile.first_name} {profile.last_name}".strip() if profile else ""
+        return name or "Instructor to be announced"
+
+    async def _next_assessment(self, student_id: uuid.UUID, workspace_id: uuid.UUID) -> dict | None:
+        """The soonest assessment of the course the student can still take."""
+        now = datetime.now(UTC)
+        done = exists().where(
+            AssessmentAttempt.assessment_id == Assessment.id,
+            AssessmentAttempt.student_id == student_id,
+            AssessmentAttempt.status.in_([AttemptStatus.SUBMITTED, AttemptStatus.AUTO_SUBMITTED]),
+            AssessmentAttempt.is_deleted == False,
+        )
+        row = (await self.db.execute(
+            select(Assessment.id, Assessment.title, Assessment.window_start, Assessment.window_end)
+            .where(
+                Assessment.teaching_workspace_id == workspace_id,
+                Assessment.status.in_(_STUDENT_VISIBLE_STATUSES),
+                Assessment.is_deleted == False,
+                (Assessment.window_end.is_(None)) | (Assessment.window_end > now),
+                not_(done),
+            )
+            .order_by(Assessment.window_start.asc().nulls_last())
+            .limit(1)
+        )).first()
+        if not row:
+            return None
+        return {
+            "id": str(row.id),
+            "title": row.title,
+            "window_start": row.window_start.isoformat() if row.window_start else None,
+            "window_end": row.window_end.isoformat() if row.window_end else None,
+        }
+
+    async def get_academic_context(self, student_id: uuid.UUID) -> StudentAcademicContext:
+        """Campus > faculty > department > programme > year > class, named by the institution."""
+        profile = (await self.db.execute(
+            select(UserProfile).where(UserProfile.user_id == student_id)
+        )).scalar_one_or_none()
+        if profile is None:
+            return StudentAcademicContext()
+
+        section = await self.db.get(ClassSection, profile.class_section_id) if profile.class_section_id else None
+        group = await self.db.get(ClassGroup, section.class_group_id) if section and section.class_group_id else None
+        option_id = group.option_id if group else profile.option_id
+        option = await self.db.get(Option, option_id) if option_id else None
+        department_id = (
+            (option.department_id if option else None)
+            or (section.department_id if section else None)
+            or profile.department_id
+        )
+        department = await self.db.get(Department, department_id) if department_id else None
+        college_id = (department.college_id if department else None) or profile.college_id
+        college = await self.db.get(College, college_id) if college_id else None
+        campus_id = (
+            (department.campus_id if department else None)
+            or (college.campus_id if college else None)
+            or profile.campus_id
+        )
+        campus = await self.db.get(Campus, campus_id) if campus_id else None
+        institution_id = (
+            (department.institution_id if department else None) or profile.institution_id
+        )
+        institution = await self.db.get(Institution, institution_id) if institution_id else None
+
+        saved = (institution.settings or {}).get("structure_profile") if institution else None
+        labels = saved.get("labels", {}) if isinstance(saved, dict) else {}
+
+        def label_for(key: str) -> str:
+            custom = labels.get(key) if isinstance(labels, dict) else None
+            text = custom.get("singular") if isinstance(custom, dict) else None
+            return text.strip() if isinstance(text, str) and text.strip() else _DEFAULT_LEVEL_LABELS[key]
+
+        found: list[tuple[str, str | None]] = [
+            ("campus", campus.name if campus else None),
+            ("college", college.name if college else None),
+            ("department", department.name if department else None),
+            ("program", option.name if option else None),
+            ("year", group.name if group else None),
+            ("class", section.name if section else None),
+        ]
+        levels = [
+            StudentContextLevel(key=key, label=label_for(key), name=name)
+            for key, name in found
+            if name
+        ]
+
+        current_period = None
+        if institution:
+            today = datetime.now(UTC).date()
+            period = (await self.db.execute(
+                select(AcademicPeriod)
+                .where(
+                    AcademicPeriod.institution_id == institution.id,
+                    AcademicPeriod.is_deleted == False,
+                    AcademicPeriod.is_active == True,
+                    AcademicPeriod.start_date <= today,
+                    AcademicPeriod.end_date >= today,
+                )
+                .order_by(AcademicPeriod.start_date.desc())
+                .limit(1)
+            )).scalar_one_or_none()
+            if period:
+                current_period = StudentContextPeriod(
+                    name=period.name,
+                    period_type=str(getattr(period.period_type, "value", period.period_type)),
+                    start_date=period.start_date,
+                    end_date=period.end_date,
+                )
+
+        return StudentAcademicContext(
+            institution_name=institution.name if institution else None,
+            levels=levels,
+            current_period=current_period,
+        )
 
     async def get_workspace_detail(self, student_id: uuid.UUID, workspace_id: uuid.UUID) -> dict:
         """Get detailed information for a specific teaching workspace."""
@@ -265,23 +414,25 @@ class StudentService:
 
         assessments_count = (await self.db.execute(select(func.count(Assessment.id)).where(
             Assessment.teaching_workspace_id == workspace_id,
-            Assessment.status == AssessmentStatus.PUBLISHED,
+            Assessment.status.in_(_STUDENT_VISIBLE_STATUSES),
             Assessment.is_deleted == False
         ))).scalar_one()
 
-        lecturer = ws.teaching_assignment.lecturer.profile
+        period = ws.academic_period
         return {
             "id": str(ws.id),
             "code": ws.course.code,
             "title": ws.title,
-            "lecturer": f"{lecturer.first_name} {lecturer.last_name}",
+            "lecturer": self._lecturer_name(ws),
             "description": ws.description or ws.course.description,
             "progress": progress,
             "enrolled": student_count,
-            "nextAssessment": "Check Assessment Registry",
+            "next_assessment": await self._next_assessment(student_id, workspace_id),
             "materials": materials_count,
             "assessments": assessments_count,
-            "academic_year": ws.academic_period.name if ws.academic_period else "GLOBAL",
+            "academic_year": period.name if period else "",
+            "status": _period_status(period, datetime.now(UTC).date()),
+            "class_name": ws.class_section.name if ws.class_section else None,
             "banner_image_url": ws.banner_image_url,
         }
 
@@ -289,17 +440,19 @@ class StudentService:
         """(Completed Workspace Assessments / Total Published Workspace Assessments) * 100"""
         total_stmt = select(func.count(Assessment.id)).where(
             Assessment.teaching_workspace_id == workspace_id,
-            Assessment.status == AssessmentStatus.PUBLISHED,
+            Assessment.status.in_(_STUDENT_VISIBLE_STATUSES),
             Assessment.is_deleted == False
         )
-        total_count = (await self.db.execute(total_stmt)).scalar_one() or 1
+        total_count = (await self.db.execute(total_stmt)).scalar_one()
+        if not total_count:
+            return 0
 
         comp_stmt = select(func.count(func.distinct(AssessmentAttempt.assessment_id))).where(
             AssessmentAttempt.student_id == student_id,
             AssessmentAttempt.assessment_id.in_(
                 select(Assessment.id).where(
                     Assessment.teaching_workspace_id == workspace_id,
-                    Assessment.status == AssessmentStatus.PUBLISHED,
+                    Assessment.status.in_(_STUDENT_VISIBLE_STATUSES),
                     Assessment.is_deleted == False
                 )
             ),
@@ -307,7 +460,7 @@ class StudentService:
             AssessmentAttempt.is_deleted == False
         )
         comp_count = (await self.db.execute(comp_stmt)).scalar_one() or 0
-        return int((comp_count / total_count) * 100)
+        return min(100, int((comp_count / total_count) * 100))
 
     async def get_schedule_data(self, student_id: uuid.UUID) -> StudentScheduleResponse:
         assessments, _ = await self.assessment_repo.list_available_for_student(

@@ -35,7 +35,10 @@ from app.db.schemas.academic import (
     CourseCreate,
     CourseResponse,
 )
+from app.services.academic_period_service import AcademicPeriodService
 from app.schemas.academic_structure import (
+    AcademicPeriodItem,
+    AcademicPeriodUpdate,
     AcademicStructureResponse,
     CampusUpdate,
     ClassGroupUpdate,
@@ -294,37 +297,22 @@ async def update_class_group(id: uuid.UUID, body: ClassGroupUpdate, db: AsyncSes
 async def update_section(id: uuid.UUID, body: ClassSectionUpdate, db: AsyncSession = Depends(get_db)):
     return await AcademicStructureService(db).update(ClassSection, id, "Class", body.model_dump(exclude_unset=True))
 
-@router.get("/academic-periods", response_model=List[AcademicPeriodResponse])
+@router.get("/academic-periods", response_model=List[AcademicPeriodItem])
 async def get_all_periods(
     institution_id: uuid.UUID | None = None,
     db: AsyncSession = Depends(get_db)
 ):
-    """List all academic periods for admin management."""
-    stmt = select(AcademicPeriod)
-    if institution_id:
-        stmt = stmt.where(AcademicPeriod.institution_id == institution_id)
-    
-    result = await db.execute(stmt)
-    return result.scalars().all()
+    """List academic periods (newest first) with how many courses and assignments use each."""
+    return await AcademicPeriodService(db).list_periods(institution_id)
 
 
 @router.post("/academic-periods", response_model=AcademicPeriodResponse)
 async def create_period(body: AcademicPeriodCreate, db: AsyncSession = Depends(get_db)):
-    new_period = AcademicPeriod(**body.model_dump())
-    db.add(new_period)
-    await db.commit()
-    await db.refresh(new_period)
-    return new_period
+    return await AcademicPeriodService(db).create(body)
 
 @router.patch("/academic-periods/{id}", response_model=AcademicPeriodResponse)
-async def update_period(id: uuid.UUID, body: dict, db: AsyncSession = Depends(get_db)):
-    period = await db.get(AcademicPeriod, id)
-    if not period: raise HTTPException(status_code=404, detail="Period not found")
-    for k, v in body.items():
-        if hasattr(period, k): setattr(period, k, v)
-    await db.commit()
-    await db.refresh(period)
-    return period
+async def update_period(id: uuid.UUID, body: AcademicPeriodUpdate, db: AsyncSession = Depends(get_db)):
+    return await AcademicPeriodService(db).update(id, body)
 
 
 @router.post("/courses", response_model=CourseResponse)

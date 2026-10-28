@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import List, Optional
 
 from pydantic import BaseModel, Field
@@ -98,6 +98,30 @@ class StudentCourseListItem(BaseModel):
     academic_year: str
     workspace_id: Optional[uuid.UUID] = None
     banner_image_url: Optional[str] = None
+    period_start: Optional[date] = None
+    period_end: Optional[date] = None
+    class_name: Optional[str] = None
+
+
+class StudentContextLevel(BaseModel):
+    """One step of the student's place in the institution, named the way the institution names it."""
+    key: str
+    label: str
+    name: str
+
+
+class StudentContextPeriod(BaseModel):
+    name: str
+    period_type: str
+    start_date: date
+    end_date: date
+
+
+class StudentAcademicContext(BaseModel):
+    """Where the student studies, derived live from their class (not from text typed at sign-up)."""
+    institution_name: Optional[str] = None
+    levels: List[StudentContextLevel] = []
+    current_period: Optional[StudentContextPeriod] = None
 
 class StudentDashboardResponse(BaseModel):
     """Complete aggregated data for the student dashboard."""
