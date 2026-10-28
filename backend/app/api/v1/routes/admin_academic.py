@@ -35,6 +35,18 @@ from app.db.schemas.academic import (
     CourseCreate,
     CourseResponse,
 )
+from app.schemas.academic_structure import (
+    AcademicStructureResponse,
+    CampusUpdate,
+    ClassGroupUpdate,
+    ClassSectionUpdate,
+    CollegeUpdate,
+    DepartmentUpdate,
+    InstitutionOverviewItem,
+    OptionUpdate,
+)
+from app.services.academic_structure_service import AcademicStructureService
+from app.services.teaching_assignment_service import TeachingAssignmentService
 from app.db.repositories.notification_repo import NotificationRepository
 from app.db.enums import NotificationType
 from app.core import links as frontend_links
@@ -99,13 +111,14 @@ async def create_bulk_assignments(
     body: List[TeachingAssignmentCreate],
     db: AsyncSession = Depends(get_db)
 ):
-    """Create multiple teaching assignments at once and notify the lecturer."""
-    new_assignments = []
-    for item in body:
-        assignment = TeachingAssignment(**item.model_dump())
-        db.add(assignment)
-        new_assignments.append(assignment)
-    
+    """Create multiple teaching assignments at once and notify the lecturer.
+
+    All or nothing: each assignment is validated first (lecturer, course, department, class,
+    period must fit together, and no duplicates), and nothing is saved if any one is refused.
+    """
+    new_assignments = await TeachingAssignmentService(db).build(body)
+    db.add_all(new_assignments)
+
     await db.flush() # Get IDs
     
     # Send notifications (Lecturer is the same for all in this context from UI)
@@ -124,8 +137,8 @@ async def create_assignment(
     body: TeachingAssignmentCreate,
     db: AsyncSession = Depends(get_db)
 ):
-    """Create a new teaching assignment for a lecturer."""
-    new_assignment = TeachingAssignment(**body.model_dump())
+    """Create a new teaching assignment for a lecturer (validated like the bulk route)."""
+    (new_assignment,) = await TeachingAssignmentService(db).build([body])
     db.add(new_assignment)
     await db.flush() # Get ID
     
@@ -217,115 +230,69 @@ async def remove_assignment(
 
 # ── Academic Structure Management ──────────────────────────────────────────
 
+@router.get("/structure", response_model=AcademicStructureResponse)
+async def get_structure(institution_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    """The whole organisation of one institution in a single response (inactive records included)."""
+    return await AcademicStructureService(db).get_structure(institution_id)
+
+
+@router.get("/overview", response_model=List[InstitutionOverviewItem])
+async def get_structure_overview(db: AsyncSession = Depends(get_db)):
+    """Per-institution counts (campuses, departments, classes, students, ...)."""
+    return await AcademicStructureService(db).overview()
+
+
 @router.post("/campuses", response_model=CampusResponse)
 async def create_campus(body: CampusCreate, db: AsyncSession = Depends(get_db)):
-    new_campus = Campus(**body.model_dump())
-    db.add(new_campus)
-    await db.commit()
-    await db.refresh(new_campus)
-    return new_campus
+    return await AcademicStructureService(db).create_campus(body)
 
 @router.post("/colleges", response_model=CollegeResponse)
 async def create_college(body: CollegeCreate, db: AsyncSession = Depends(get_db)):
-    new_college = College(**body.model_dump())
-    db.add(new_college)
-    await db.commit()
-    await db.refresh(new_college)
-    return new_college
+    return await AcademicStructureService(db).create_college(body)
 
 @router.post("/departments", response_model=DepartmentResponse)
 async def create_department(body: DepartmentCreate, db: AsyncSession = Depends(get_db)):
-    new_dept = Department(**body.model_dump())
-    db.add(new_dept)
-    await db.commit()
-    await db.refresh(new_dept)
-    return new_dept
+    return await AcademicStructureService(db).create_department(body)
 
 @router.post("/options", response_model=OptionResponse)
 async def create_option(body: OptionCreate, db: AsyncSession = Depends(get_db)):
-    new_opt = Option(**body.model_dump())
-    db.add(new_opt)
-    await db.commit()
-    await db.refresh(new_opt)
-    return new_opt
+    return await AcademicStructureService(db).create_option(body)
 
 @router.post("/class-groups", response_model=ClassGroupResponse)
 async def create_class_group(body: ClassGroupCreate, db: AsyncSession = Depends(get_db)):
-    new_group = ClassGroup(**body.model_dump())
-    db.add(new_group)
-    await db.commit()
-    await db.refresh(new_group)
-    return new_group
+    return await AcademicStructureService(db).create_class_group(body)
 
 @router.post("/sections", response_model=ClassSectionResponse)
 async def create_section(body: ClassSectionCreate, db: AsyncSession = Depends(get_db)):
-    new_section = ClassSection(**body.model_dump())
-    db.add(new_section)
-    await db.commit()
-    await db.refresh(new_section)
-    return new_section
+    return await AcademicStructureService(db).create_section(body)
 
 # ── Update & Deactivate Academic Structure ────────────────────────────────────
+# Bodies are validated schemas, so only name / status / the few editable details can change;
+# ids, parents, codes and soft-delete flags can no longer be overwritten through these routes.
 
 @router.patch("/campuses/{id}", response_model=CampusResponse)
-async def update_campus(id: uuid.UUID, body: dict, db: AsyncSession = Depends(get_db)):
-    campus = await db.get(Campus, id)
-    if not campus: raise HTTPException(status_code=404, detail="Campus not found")
-    for k, v in body.items():
-        if hasattr(campus, k): setattr(campus, k, v)
-    await db.commit()
-    await db.refresh(campus)
-    return campus
+async def update_campus(id: uuid.UUID, body: CampusUpdate, db: AsyncSession = Depends(get_db)):
+    return await AcademicStructureService(db).update(Campus, id, "Campus", body.model_dump(exclude_unset=True))
 
 @router.patch("/colleges/{id}", response_model=CollegeResponse)
-async def update_college(id: uuid.UUID, body: dict, db: AsyncSession = Depends(get_db)):
-    college = await db.get(College, id)
-    if not college: raise HTTPException(status_code=404, detail="College not found")
-    for k, v in body.items():
-        if hasattr(college, k): setattr(college, k, v)
-    await db.commit()
-    await db.refresh(college)
-    return college
+async def update_college(id: uuid.UUID, body: CollegeUpdate, db: AsyncSession = Depends(get_db)):
+    return await AcademicStructureService(db).update(College, id, "College", body.model_dump(exclude_unset=True))
 
 @router.patch("/departments/{id}", response_model=DepartmentResponse)
-async def update_department(id: uuid.UUID, body: dict, db: AsyncSession = Depends(get_db)):
-    department = await db.get(Department, id)
-    if not department: raise HTTPException(status_code=404, detail="Department not found")
-    for k, v in body.items():
-        if hasattr(department, k): setattr(department, k, v)
-    await db.commit()
-    await db.refresh(department)
-    return department
+async def update_department(id: uuid.UUID, body: DepartmentUpdate, db: AsyncSession = Depends(get_db)):
+    return await AcademicStructureService(db).update(Department, id, "Department", body.model_dump(exclude_unset=True))
 
 @router.patch("/options/{id}", response_model=OptionResponse)
-async def update_option(id: uuid.UUID, body: dict, db: AsyncSession = Depends(get_db)):
-    option = await db.get(Option, id)
-    if not option: raise HTTPException(status_code=404, detail="Option not found")
-    for k, v in body.items():
-        if hasattr(option, k): setattr(option, k, v)
-    await db.commit()
-    await db.refresh(option)
-    return option
+async def update_option(id: uuid.UUID, body: OptionUpdate, db: AsyncSession = Depends(get_db)):
+    return await AcademicStructureService(db).update(Option, id, "Programme", body.model_dump(exclude_unset=True))
 
 @router.patch("/class-groups/{id}", response_model=ClassGroupResponse)
-async def update_class_group(id: uuid.UUID, body: dict, db: AsyncSession = Depends(get_db)):
-    class_group = await db.get(ClassGroup, id)
-    if not class_group: raise HTTPException(status_code=404, detail="Class Group not found")
-    for k, v in body.items():
-        if hasattr(class_group, k): setattr(class_group, k, v)
-    await db.commit()
-    await db.refresh(class_group)
-    return class_group
+async def update_class_group(id: uuid.UUID, body: ClassGroupUpdate, db: AsyncSession = Depends(get_db)):
+    return await AcademicStructureService(db).update(ClassGroup, id, "Year level", body.model_dump(exclude_unset=True))
 
 @router.patch("/sections/{id}", response_model=ClassSectionResponse)
-async def update_section(id: uuid.UUID, body: dict, db: AsyncSession = Depends(get_db)):
-    section = await db.get(ClassSection, id)
-    if not section: raise HTTPException(status_code=404, detail="Section not found")
-    for k, v in body.items():
-        if hasattr(section, k): setattr(section, k, v)
-    await db.commit()
-    await db.refresh(section)
-    return section
+async def update_section(id: uuid.UUID, body: ClassSectionUpdate, db: AsyncSession = Depends(get_db)):
+    return await AcademicStructureService(db).update(ClassSection, id, "Class", body.model_dump(exclude_unset=True))
 
 @router.get("/academic-periods", response_model=List[AcademicPeriodResponse])
 async def get_all_periods(

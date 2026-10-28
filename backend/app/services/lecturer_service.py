@@ -9,7 +9,7 @@ from app.db.enums import (AIGradeDecision, AssessmentStatus, AttemptStatus,
                           GradingMode, GradingQueueStatus, LanguageEnum)
 from app.db.models.academic import (AcademicPeriod, ClassGroup, ClassSection,
                                     Course, CourseDepartment, CourseOption,
-                                    Institution, LecturerCourseAssignment,
+                                    Department, Institution, LecturerCourseAssignment,
                                     Option, StudentEnrollment,
                                     TeachingAssignment, TeachingWorkspace)
 from app.db.models.assessment import Assessment
@@ -131,14 +131,15 @@ class LecturerService:
         # 1. Fetch Workspace (must be one this lecturer teaches)
         ws = await self._get_owned_workspace(lecturer_id, workspace_id)
 
-        # 2. Fetch Student Profile and Enrollment in this section
+        # 2. Fetch Student Profile and Enrollment in any class this workspace covers
+        sections = await self.workspace_repo.resolve_workspace_sections(workspace_id)
         stmt = (
             select(User, UserProfile, StudentEnrollment)
             .join(UserProfile, UserProfile.user_id == User.id)
             .join(StudentEnrollment, StudentEnrollment.student_id == User.id)
             .where(
                 User.id == student_id,
-                StudentEnrollment.class_section_id == ws.class_section_id,
+                StudentEnrollment.class_section_id.in_([s.id for s in sections]),
                 StudentEnrollment.is_deleted == False
             )
         )
@@ -187,9 +188,56 @@ class LecturerService:
             student_id=profile.student_id or "N/A",
             email=user.email,
             enrolled_at=enrollment.enrolled_at,
-            overall_progress=85, # Mocked
+            overall_progress=(await self._workspace_progress(workspace_id, [student_id]))[
+                student_id
+            ][0],
             attempts=attempts_data
         )
+
+    async def _workspace_progress(
+        self, workspace_id: uuid.UUID, student_ids: list[uuid.UUID]
+    ) -> dict[uuid.UUID, tuple[int, datetime | None]]:
+        """Per student: share of the workspace's published assessments submitted, and the latest
+        submission time. Two grouped queries instead of two per student."""
+        published = (
+            await self.db.execute(
+                select(func.count(Assessment.id)).where(
+                    Assessment.teaching_workspace_id == workspace_id,
+                    Assessment.status == AssessmentStatus.PUBLISHED,
+                    Assessment.is_deleted == False,
+                )
+            )
+        ).scalar_one() or 0
+
+        stats: dict[uuid.UUID, tuple[int, datetime | None]] = {
+            sid: (0, None) for sid in student_ids
+        }
+        if not student_ids:
+            return stats
+
+        rows = await self.db.execute(
+            select(
+                AssessmentAttempt.student_id,
+                func.count(func.distinct(AssessmentAttempt.assessment_id)),
+                func.max(AssessmentAttempt.submitted_at),
+            )
+            .join(Assessment, Assessment.id == AssessmentAttempt.assessment_id)
+            .where(
+                Assessment.teaching_workspace_id == workspace_id,
+                Assessment.status == AssessmentStatus.PUBLISHED,
+                Assessment.is_deleted == False,
+                AssessmentAttempt.student_id.in_(student_ids),
+                AssessmentAttempt.status.in_(
+                    [AttemptStatus.SUBMITTED, AttemptStatus.AUTO_SUBMITTED]
+                ),
+                AssessmentAttempt.is_deleted == False,
+            )
+            .group_by(AssessmentAttempt.student_id)
+        )
+        for sid, done, last in rows.all():
+            pct = min(100, round(done / published * 100)) if published else 0
+            stats[sid] = (pct, last)
+        return stats
 
     async def list_workspaces(
         self, lecturer_id: uuid.UUID, page: int = 1, page_size: int = 20
@@ -286,35 +334,19 @@ class LecturerService:
             )
             rows = (await self.db.execute(roster_stmt)).all()
 
+        progress_by_student = await self._workspace_progress(
+            workspace_id, [user.id for user, _, _ in rows]
+        )
         roster = []
         for user, profile, section in rows:
-            total_ass_stmt = select(func.count(Assessment.id)).where(
-                Assessment.teaching_workspace_id == workspace_id,
-                Assessment.status == AssessmentStatus.PUBLISHED,
-                Assessment.is_deleted == False
-            )
-            total_ass_count = (await self.db.execute(total_ass_stmt)).scalar_one() or 1
-
-            comp_ass_stmt = (
-                select(func.count(AssessmentAttempt.id))
-                .join(Assessment, Assessment.id == AssessmentAttempt.assessment_id)
-                .where(
-                    Assessment.teaching_workspace_id == workspace_id,
-                    AssessmentAttempt.student_id == user.id,
-                    AssessmentAttempt.status.in_([AttemptStatus.SUBMITTED, AttemptStatus.AUTO_SUBMITTED]),
-                    AssessmentAttempt.is_deleted == False
-                )
-            )
-            comp_ass_count = (await self.db.execute(comp_ass_stmt)).scalar_one() or 0
-            progress = int((comp_ass_count / total_ass_count) * 100)
-
+            progress, last = progress_by_student[user.id]
             roster.append(LecturerCourseRosterItem(
                 id=user.id,
                 student_id=profile.student_id or "N/A",
                 name=f"{profile.first_name} {profile.last_name}",
                 email=user.email,
                 progress=progress,
-                last_submission="N/A",
+                last_submission=last.isoformat() if last else None,
                 class_section_id=section.id,
                 class_section_name=section.name,
                 class_group_id=section.class_group_id,
@@ -350,6 +382,17 @@ class LecturerService:
                 class_group_name=s.class_group.name if s.class_group else None
             ))
 
+        # Department / programme come from the assignment the admin made, not from the class.
+        assignment = ws.teaching_assignment
+        department_name = None
+        option_name = None
+        if assignment.department_id:
+            dept = await self.db.get(Department, assignment.department_id)
+            department_name = dept.name if dept else None
+        if assignment.option_id:
+            opt = await self.db.get(Option, assignment.option_id)
+            option_name = opt.name if opt else None
+
         lect_p = ws.teaching_assignment.lecturer.profile
         return WorkspaceDetail(
             id=ws.id,
@@ -365,8 +408,9 @@ class LecturerService:
             class_name=ws.class_section.name if ws.class_section else "GLOBAL",
             language=ws.language,
             banner_image_url=ws.banner_image_url,
-            department_name=ws.class_section.department.name if ws.class_section and ws.class_section.department else "N/A",
-            option_name=ws.class_section.class_group.option.name if ws.class_section and ws.class_section.class_group and ws.class_section.class_group.option else "N/A",
+            department_name=department_name,
+            option_name=option_name,
+            teaching_assignment_id=ws.teaching_assignment_id,
             roster=roster,
             sections=sections_response,
             course_id=ws.course_id
@@ -392,8 +436,13 @@ class LecturerService:
             from app.core.exceptions import ValidationError
             raise ValidationError("Workspace for this assignment already exists.")
 
-        course = await self.db.get(Course, assignment.course_id)
-        section_name = "GLOBAL"
+        from app.core.exceptions import ValidationError
+        course = await self.db.get(Course, assignment.course_id) if assignment.course_id else None
+        if course is None or course.is_deleted:
+            raise ValidationError("This assignment has no course yet. Ask your administrator to attach one.")
+        if not course.is_active:
+            raise ValidationError(f"{course.code} is suspended, so a workspace can't be created for it.")
+        section_name = "All classes"
         if assignment.class_section_id:
             section = await self.db.get(ClassSection, assignment.class_section_id)
             if section:
@@ -406,6 +455,7 @@ class LecturerService:
             academic_period_id=assignment.academic_period_id,
             title=data.title or f"{course.name} ({section_name})",
             description=data.description or course.description,
+            banner_image_url=data.banner_image_url,
             status="ACTIVE",
             language=course.language if (course and hasattr(course, "language") and course.language) else LanguageEnum.EN,
             created_by_id=lecturer_id

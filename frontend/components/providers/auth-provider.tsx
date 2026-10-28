@@ -33,6 +33,9 @@ export type AuthUser = {
     student_id?: string | null;
     staff_id?: string | null;
     phone_number?: string | null;
+    bio?: string | null;
+    campus_id?: string | null;
+    college_id?: string | null;
     institution_id?: string | null;
     department_id?: string | null;
     option_id?: string | null;

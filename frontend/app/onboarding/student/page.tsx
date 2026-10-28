@@ -1,10 +1,9 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { 
   Select, 
   SelectContent, 
@@ -14,6 +13,7 @@ import {
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { ModeToggle } from "@/components/ui/mode-toggle";
 import { 
   ArrowRight, 
   ArrowLeft,
@@ -26,16 +26,16 @@ import {
   BookOpen,
   Calendar,
   Layers,
-  LayoutGrid,
   MapPin,
   Library,
-  Users
+  Users,
+  LogOut,
+  Check
 } from "lucide-react";
 import { academicApi } from "@/lib/api/academic";
 import { authApi } from "@/lib/api/auth";
 import { toast } from "sonner";
-import { cn } from "@/lib/utils";
-import Image from "next/image";
+import { motion, AnimatePresence } from "framer-motion";
 import { 
   InstitutionResponse as AcademicInstitution, 
   CampusResponse as AcademicCampus, 
@@ -43,22 +43,24 @@ import {
   DepartmentResponse as AcademicDepartment, 
   OptionResponse as AcademicOption, 
   ClassGroupResponse as AcademicClassGroup, 
-  ClassSectionResponse as AcademicClassSection 
+  ClassSectionResponse as AcademicClassSection,
+  AcademicPeriodResponse as AcademicPeriod
 } from "@/lib/api/academic-types";
 
 const STEPS = [
-  { id: 1, title: "Institution", icon: School, description: "Select University" },
-  { id: 2, title: "Program", icon: BookOpen, description: "Degree & Specialization" },
-  { id: 3, title: "Profile", icon: GraduationCap, description: "Finalize Identity" },
+  { id: 1, title: "Institution", subtitle: "University & Dept", icon: School },
+  { id: 2, title: "Program", subtitle: "Degree & Cohort", icon: BookOpen },
+  { id: 3, title: "Photo & Finalize", subtitle: "ID & Review", icon: GraduationCap },
 ];
 
 export default function StudentOnboarding() {
   const router = useRouter();
   const { user, checkAuth } = useAuth();
-  const [activeStep, setActiveStep] = useState(1);
+  const [activeStep, setActiveStep] = useState<1 | 2 | 3>(1);
   const [submitting, setSubmitting] = useState(false);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
   
-  // Data State
+  // Academic Data State
   const [institutions, setInstitutions] = useState<AcademicInstitution[]>([]);
   const [campuses, setCampuses] = useState<AcademicCampus[]>([]);
   const [colleges, setColleges] = useState<AcademicCollege[]>([]);
@@ -66,6 +68,8 @@ export default function StudentOnboarding() {
   const [options, setOptions] = useState<AcademicOption[]>([]);
   const [classGroups, setClassGroups] = useState<AcademicClassGroup[]>([]);
   const [sections, setSections] = useState<AcademicClassSection[]>([]);
+  const [periods, setPeriods] = useState<AcademicPeriod[]>([]);
+  const [dbLevels, setDbLevels] = useState<number[]>([]);
   
   // Selections
   const [selectedInst, setSelectedInst] = useState<string>("");
@@ -80,122 +84,163 @@ export default function StudentOnboarding() {
   const [year, setYear] = useState<string>("");
   const [profilePic, setProfilePic] = useState<string | null>(null);
 
-  const [periods, setPeriods] = useState<any[]>([]);
-  const [dbLevels, setDbLevels] = useState<number[]>([]);
-
   // Loading states
-  const [loading, setLoading] = useState<Record<string, boolean>>({});
+  const [loading, setLoading] = useState<Record<string, boolean>>({
+    init: true,
+    depts: false,
+    options: false,
+    groups: false,
+  });
 
+  const displayName = [user?.profile?.first_name, user?.profile?.last_name]
+    .filter(Boolean)
+    .join(" ") || user?.profile?.display_name || user?.email?.split("@")[0] || "Student";
+
+  const initials = [user?.profile?.first_name?.[0], user?.profile?.last_name?.[0]]
+    .filter(Boolean)
+    .join("")
+    .toUpperCase() || user?.email?.[0]?.toUpperCase() || "S";
+
+  const currentAvatarUrl = profilePic || (user?.profile?.avatar_url
+    ? `${process.env.NEXT_PUBLIC_API_URL?.replace("/api/v1", "") || "http://localhost:8000"}${user.profile.avatar_url}`
+    : undefined);
+
+  // Load institutions
   useEffect(() => {
     async function init() {
       try {
         const data = await academicApi.getInstitutions();
         setInstitutions(data);
-      } catch (err) {
-        toast.error("Failed to load academic institutions");
+      } catch {
+        toast.error("Failed to load institutions");
+      } finally {
+        setLoading(prev => ({ ...prev, init: false }));
       }
     }
     init();
   }, []);
 
-  // Cascading Logic
+  // When institution is selected: load related hierarchy
   useEffect(() => {
-    if (selectedInst) {
-      setLoading(prev => ({ ...prev, campuses: true, colleges: true, periods: true, levels: true }));
-      
-      academicApi.getCampuses(selectedInst)
-        .then(setCampuses)
-        .finally(() => setLoading(prev => ({ ...prev, campuses: false })));
+    if (!selectedInst) return;
 
-      academicApi.getColleges({ institution_id: selectedInst })
-        .then(setColleges)
-        .finally(() => setLoading(prev => ({ ...prev, colleges: false })));
+    setLoading(prev => ({ ...prev, depts: true }));
 
-      academicApi.getPeriods(selectedInst)
-        .then(setPeriods)
-        .finally(() => setLoading(prev => ({ ...prev, periods: false })));
+    Promise.allSettled([
+      academicApi.getCampuses(selectedInst),
+      academicApi.getColleges({ institution_id: selectedInst }),
+      academicApi.getPeriods(selectedInst),
+      academicApi.getLevels(selectedInst),
+      academicApi.getDepartments({ institution_id: selectedInst })
+    ]).then(([campusesRes, collegesRes, periodsRes, levelsRes, deptsRes]) => {
+      if (campusesRes.status === "fulfilled") setCampuses(campusesRes.value);
+      if (collegesRes.status === "fulfilled") setColleges(collegesRes.value);
+      if (periodsRes.status === "fulfilled") setPeriods(periodsRes.value);
+      if (levelsRes.status === "fulfilled") setDbLevels(levelsRes.value);
+      if (deptsRes.status === "fulfilled") setDepartments(deptsRes.value);
+      setLoading(prev => ({ ...prev, depts: false }));
+    });
 
-      academicApi.getLevels(selectedInst)
-        .then(setDbLevels)
-        .finally(() => setLoading(prev => ({ ...prev, levels: false })));
-
-      setSelectedCampus("none");
-      setSelectedCollege("none");
-      setSelectedDept("");
-      setSelectedOpt("");
-      setSelectedGroup("");
-      setYear("");
-    }
+    setSelectedCampus("none");
+    setSelectedCollege("none");
+    setSelectedDept("");
+    setSelectedOpt("");
+    setSelectedGroup("");
+    setSelectedSection("none");
+    setLevel("");
+    setYear("");
   }, [selectedInst]);
 
+  // When department changes: load options
   useEffect(() => {
-    if (selectedCampus && selectedCampus !== "none") {
-      setLoading(prev => ({ ...prev, colleges: true }));
-      academicApi.getColleges({ campus_id: selectedCampus })
-        .then(setColleges)
-        .finally(() => setLoading(prev => ({ ...prev, colleges: false })));
-      setSelectedCollege("none");
-    } else if (selectedInst) {
-      setLoading(prev => ({ ...prev, colleges: true }));
-      academicApi.getColleges({ institution_id: selectedInst })
-        .then(setColleges)
-        .finally(() => setLoading(prev => ({ ...prev, colleges: false })));
-    }
-  }, [selectedCampus, selectedInst]);
-
-  useEffect(() => {
-    if (selectedInst) {
-        setLoading(prev => ({ ...prev, depts: true }));
-        const params: any = { institution_id: selectedInst };
-        if (selectedCampus !== "none") params.campus_id = selectedCampus;
-        if (selectedCollege !== "none") params.college_id = selectedCollege;
-
-        academicApi.getDepartments(params)
-            .then(setDepartments)
-            .finally(() => setLoading(prev => ({ ...prev, depts: false })));
-        setSelectedDept("");
-    }
-  }, [selectedCollege, selectedCampus, selectedInst]);
-
-  useEffect(() => {
-    if (selectedDept) {
-      setLoading(prev => ({ ...prev, options: true }));
-      academicApi.getOptions(selectedDept)
-        .then(setOptions)
-        .finally(() => setLoading(prev => ({ ...prev, options: false })));
+    if (!selectedDept) {
+      setOptions([]);
       setSelectedOpt("");
+      return;
     }
+    setLoading(prev => ({ ...prev, options: true }));
+    academicApi.getOptions(selectedDept)
+      .then(setOptions)
+      .catch(() => setOptions([]))
+      .finally(() => setLoading(prev => ({ ...prev, options: false })));
+
+    setSelectedOpt("");
+    setSelectedGroup("");
+    setSelectedSection("none");
+    setLevel("");
   }, [selectedDept]);
 
+  // When option changes: load class groups
   useEffect(() => {
-    if (selectedOpt) {
-      setLoading(prev => ({ ...prev, groups: true }));
-      academicApi.getClassGroups(selectedOpt)
-        .then(setClassGroups)
-        .finally(() => setLoading(prev => ({ ...prev, groups: false })));
+    if (!selectedOpt) {
+      setClassGroups([]);
       setSelectedGroup("");
+      return;
     }
+    setLoading(prev => ({ ...prev, groups: true }));
+    academicApi.getClassGroups(selectedOpt)
+      .then(setClassGroups)
+      .catch(() => setClassGroups([]))
+      .finally(() => setLoading(prev => ({ ...prev, groups: false })));
+
+    setSelectedGroup("");
+    setSelectedSection("none");
+    setLevel("");
   }, [selectedOpt]);
 
+  // When class group changes: set level and load sections
   useEffect(() => {
-    if (selectedGroup) {
-      setLoading(prev => ({ ...prev, sections: true }));
-      academicApi.getSections(selectedGroup)
-        .then(setSections)
-        .finally(() => setLoading(prev => ({ ...prev, sections: false })));
+    if (!selectedGroup) {
+      setSections([]);
       setSelectedSection("none");
-
-      // Auto-populate Final Level if the selected group has a level defined
-      const group = classGroups.find(g => g.id === selectedGroup);
-      if (group && group.level) {
-        setLevel(`Level ${group.level}`);
-      }
+      return;
     }
+
+    const group = classGroups.find(g => g.id === selectedGroup);
+    if (group) {
+      setLevel(group.level ? `Level ${group.level}` : group.name);
+    }
+
+    academicApi.getSections(selectedGroup)
+      .then(setSections)
+      .catch(() => setSections([]));
+
+    setSelectedSection("none");
   }, [selectedGroup, classGroups]);
+
+  // Upload student ID photo
+  const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      toast.error("Please upload an image file (PNG, JPG, WebP)");
+      return;
+    }
+
+    if (file.size > 2 * 1024 * 1024) {
+      toast.error("Photo must be under 2MB");
+      return;
+    }
+
+    const preview = URL.createObjectURL(file);
+    setProfilePic(preview);
+    setUploadingAvatar(true);
+
+    try {
+      await authApi.uploadAvatar(file);
+      await checkAuth();
+      toast.success("ID photo uploaded successfully");
+    } catch (err: any) {
+      toast.error(err.message || "Failed to upload photo");
+    } finally {
+      setUploadingAvatar(false);
+    }
+  };
 
   const handleFinish = async () => {
     if (!selectedInst || !selectedDept || !selectedOpt || !level || !year) {
-      toast.error("Please fill in all required academic fields.");
+      toast.error("Please complete all required fields.");
       return;
     }
 
@@ -209,10 +254,10 @@ export default function StudentOnboarding() {
         option_id: selectedOpt,
         level: level,
         year: year,
-        class_section_id: selectedSection !== "none" ? selectedSection : undefined
+        class_section_id: selectedSection !== "none" ? selectedSection : undefined,
       });
-      
-      toast.success("Academic profile verified successfully!");
+
+      toast.success("Student profile verified!");
       await checkAuth();
       router.push("/student/dashboard");
     } catch (err: any) {
@@ -222,326 +267,483 @@ export default function StudentOnboarding() {
     }
   };
 
+  const handleSignOut = async () => {
+    try {
+      await authApi.logout();
+    } catch {
+      // Continue to login
+    }
+    router.push("/login");
+  };
+
+  const currentInstitution = institutions.find(i => i.id === selectedInst);
+  const currentDepartment = departments.find(d => d.id === selectedDept);
+  const currentOption = options.find(o => o.id === selectedOpt);
+
+  const fallbackYears = [
+    `${new Date().getFullYear()} - ${new Date().getFullYear() + 1}`,
+    `${new Date().getFullYear() - 1} - ${new Date().getFullYear()}`,
+  ];
+
+  const stepsLeft = 3 - activeStep;
+  const progressPercent = activeStep === 1 ? "33.3%" : activeStep === 2 ? "66.6%" : "100%";
+
   return (
-    <div className="min-h-screen bg-muted/5 flex flex-col items-center justify-center p-4 sm:p-6 md:p-8">
-      <div className="max-w-5xl w-full flex flex-col gap-5">
-        {/* Header */}
-        <div className="flex items-center justify-between px-1">
-            <div>
-                <h1 className="text-xl font-semibold text-primary tracking-tight uppercase">Student Onboarding</h1>
-                <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-widest">Complete your academic profile</p>
-            </div>
-            
-            <div className="flex items-center gap-1">
-                {STEPS.map((step) => {
-                    const isActive = activeStep === step.id;
-                    const isCompleted = activeStep > step.id;
-                    return (
-                        <div key={step.id} className="flex items-center">
-                            <div className={cn(
-                                "size-6 rounded-full border transition-all flex items-center justify-center",
-                                isActive ? "bg-primary text-primary-foreground border-primary" : 
-                                isCompleted ? "bg-emerald-50 text-emerald-600 border-emerald-200" : 
-                                "border-muted/60 text-muted-foreground bg-white"
-                            )}>
-                                {isCompleted ? <CheckCircle2 className="size-3.5" /> : <span className="text-[10px] font-bold">{step.id}</span>}
-                            </div>
-                            {step.id < 3 && <div className={cn("w-8 h-[1px] mx-1", isCompleted ? "bg-emerald-200" : "bg-muted/30")} />}
-                        </div>
-                    );
-                })}
-            </div>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-start">
-            {/* Sidebar Navigation */}
-            <div className="md:col-span-4 flex flex-col gap-2">
-                {STEPS.map((step) => {
-                    const Icon = step.icon;
-                    const isActive = activeStep === step.id;
-                    const isCompleted = activeStep > step.id;
-                    return (
-                        <div 
-                            key={step.id}
-                            className={cn(
-                                "p-3 rounded-xl border transition-all flex items-center gap-3",
-                                isActive ? "bg-white border-primary/20 shadow-none ring-1 ring-primary/5" : 
-                                "bg-white/50 border-muted/20 opacity-80"
-                            )}
-                        >
-                            <div className={cn(
-                                "size-8 rounded-lg flex items-center justify-center border",
-                                isActive ? "bg-primary text-primary-foreground border-primary" : 
-                                isCompleted ? "bg-emerald-50 text-emerald-600 border-emerald-100" :
-                                "bg-muted/10 border-muted/40"
-                            )}>
-                                <Icon className="size-4" />
-                            </div>
-                            <div>
-                                <p className={cn("text-[11px] font-semibold uppercase tracking-tight leading-none", isActive ? "text-primary" : "text-muted-foreground")}>{step.title}</p>
-                                <p className="text-[9px] text-muted-foreground mt-0.5 leading-none">{step.description}</p>
-                            </div>
-                        </div>
-                    );
-                })}
-                
-                <div className="mt-4 p-4 bg-primary/5 rounded-xl border border-primary/10">
-                    <div className="flex items-center gap-2 mb-2">
-                        <CheckCircle2 className="size-3.5 text-primary" />
-                        <span className="text-[10px] font-semibold text-primary uppercase">Institutional Trust</span>
-                    </div>
-                    <p className="text-[10px] text-muted-foreground leading-relaxed">
-                        Mindexa uses this data to verify your academic standing and provide tailored assessment tools for your specific program.
-                    </p>
-                </div>
-            </div>
-
-            {/* Main Step Content */}
-            <div className="md:col-span-8 bg-white border border-muted/20 rounded-2xl overflow-hidden flex flex-col min-h-[420px]">
-                <div className="p-6 flex-1">
-                    {activeStep === 1 && (
-                        <div className="space-y-6 animate-in fade-in duration-300">
-                            <div className="space-y-1.5">
-                                <Label className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground ml-1">University / Institution</Label>
-                                <Select value={selectedInst} onValueChange={setSelectedInst}>
-                                    <SelectTrigger className="h-10 rounded-xl border-muted/30 bg-muted/5 font-medium text-sm">
-                                        <div className="flex items-center gap-2">
-                                            <Building2 className="size-3.5 text-muted-foreground" />
-                                            <SelectValue placeholder="Search Registry..." />
-                                        </div>
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {institutions.map(inst => (
-                                            <SelectItem key={inst.id} value={inst.id} className="text-sm font-medium">{inst.name}</SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                            </div>
-
-                            <div className="grid grid-cols-2 gap-4">
-                                <div className="space-y-1.5">
-                                    <Label className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground ml-1">Campus (Optional)</Label>
-                                    <Select value={selectedCampus} onValueChange={setSelectedCampus} disabled={loading.campuses || !selectedInst}>
-                                        <SelectTrigger className="h-10 rounded-xl border-muted/30 bg-muted/5 font-medium text-sm">
-                                            <div className="flex items-center gap-2">
-                                                <MapPin className="size-3.5 text-muted-foreground" />
-                                                <SelectValue placeholder="Select Campus" />
-                                            </div>
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            <SelectItem value="none" className="text-sm font-medium">None / Global</SelectItem>
-                                            {campuses.map(c => (
-                                                <SelectItem key={c.id} value={c.id} className="text-sm font-medium">{c.name}</SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-
-                                <div className="space-y-1.5">
-                                    <Label className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground ml-1">College / Faculty</Label>
-                                    <Select value={selectedCollege} onValueChange={setSelectedCollege} disabled={loading.colleges || !selectedInst}>
-                                        <SelectTrigger className="h-10 rounded-xl border-muted/30 bg-muted/5 font-medium text-sm">
-                                            <div className="flex items-center gap-2">
-                                                <School className="size-3.5 text-muted-foreground" />
-                                                <SelectValue placeholder="Select College" />
-                                            </div>
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            <SelectItem value="none" className="text-sm font-medium">Not Applicable</SelectItem>
-                                            {colleges.map(c => (
-                                                <SelectItem key={c.id} value={c.id} className="text-sm font-medium">{c.name}</SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                            </div>
-
-                            <div className="space-y-1.5">
-                                <Label className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground ml-1">Department / School</Label>
-                                <Select value={selectedDept} onValueChange={setSelectedDept} disabled={!selectedInst || loading.depts}>
-                                    <SelectTrigger className="h-10 rounded-xl border-muted/30 bg-muted/5 font-medium text-sm text-primary">
-                                        <div className="flex items-center gap-2">
-                                            <Library className="size-3.5" />
-                                            <SelectValue placeholder="Select Department" />
-                                        </div>
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {departments.map(d => (
-                                            <SelectItem key={d.id} value={d.id} className="text-sm font-medium">{d.name}</SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                            </div>
-                        </div>
-                    )}
-
-                    {activeStep === 2 && (
-                        <div className="space-y-6 animate-in fade-in duration-300">
-                            <div className="space-y-1.5">
-                                <Label className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground ml-1">Program / Specialization</Label>
-                                <Select value={selectedOpt} onValueChange={setSelectedOpt} disabled={loading.options || !selectedDept}>
-                                    <SelectTrigger className="h-10 rounded-xl border-muted/30 bg-muted/5 font-medium text-sm">
-                                        <div className="flex items-center gap-2">
-                                            <Layers className="size-3.5 text-muted-foreground" />
-                                            <SelectValue placeholder="Search Program..." />
-                                        </div>
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {options.map(o => (
-                                            <SelectItem key={o.id} value={o.id} className="text-sm font-medium">{o.name}</SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                            </div>
-
-                            <div className="grid grid-cols-2 gap-4">
-                                <div className="space-y-1.5">
-                                    <Label className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground ml-1">Academic Level</Label>
-                                    <Select value={selectedGroup} onValueChange={setSelectedGroup} disabled={loading.groups || !selectedOpt}>
-                                        <SelectTrigger className="h-10 rounded-xl border-muted/30 bg-muted/5 font-medium text-sm text-primary">
-                                            <div className="flex items-center gap-2">
-                                                <LayoutGrid className="size-3.5" />
-                                                <SelectValue placeholder="Select Level" />
-                                            </div>
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            {classGroups.map(g => (
-                                                <SelectItem key={g.id} value={g.id} className="text-sm font-medium">{g.name}</SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-
-                                <div className="space-y-1.5">
-                                    <Label className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground ml-1">Section (Optional)</Label>
-                                    <Select value={selectedSection} onValueChange={setSelectedSection} disabled={loading.sections || !selectedGroup}>
-                                        <SelectTrigger className="h-10 rounded-xl border-muted/30 bg-muted/5 font-medium text-sm">
-                                            <div className="flex items-center gap-2">
-                                                <Users className="size-3.5 text-muted-foreground" />
-                                                <SelectValue placeholder="Select Section" />
-                                            </div>
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            <SelectItem value="none" className="text-sm font-medium">N/A</SelectItem>
-                                            {sections.map(s => (
-                                                <SelectItem key={s.id} value={s.id} className="text-sm font-medium">{s.name}</SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                            </div>
-
-                            <div className="space-y-1.5">
-                                <Label className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground ml-1">Current Academic Session</Label>
-                                <Select value={year} onValueChange={setYear}>
-                                    <SelectTrigger className="h-10 rounded-xl border-muted/30 bg-muted/5 font-medium text-sm">
-                                        <div className="flex items-center gap-2">
-                                            <Calendar className="size-3.5 text-muted-foreground" />
-                                            <SelectValue placeholder="Select Active Academic Year..." />
-                                        </div>
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {periods.map(p => (
-                                            <SelectItem key={p.id} value={p.name} className="text-sm font-medium">{p.name}</SelectItem>
-                                        ))}
-                                        {periods.length === 0 && <SelectItem value="none" disabled>No active periods found</SelectItem>}
-                                    </SelectContent>
-                                </Select>
-                            </div>
-                        </div>
-                    )}
-
-                    {activeStep === 3 && (
-                        <div className="space-y-8 flex flex-col items-center animate-in fade-in duration-300">
-                            <div className="relative group">
-                                <div className="size-28 rounded-2xl border border-muted/30 overflow-hidden bg-muted/5 flex items-center justify-center relative">
-                                    {profilePic ? (
-                                        <Image src={profilePic} alt="Profile" fill unoptimized className="object-cover" />
-                                    ) : (
-                                        <div className="text-muted-foreground flex flex-col items-center gap-1 opacity-40">
-                                            <GraduationCap className="size-8" />
-                                            <span className="text-[8px] font-semibold uppercase tracking-widest">ID PHOTO</span>
-                                        </div>
-                                    )}
-                                </div>
-                                <label className="absolute -bottom-2 -right-2 size-8 bg-primary text-primary-foreground rounded-lg flex items-center justify-center cursor-pointer hover:bg-primary/90 transition-all border-2 border-white shadow-none">
-                                    <Camera className="size-3.5" />
-                                    <input type="file" className="hidden" accept="image/*" onChange={(e) => {
-                                        const file = e.target.files?.[0];
-                                        if (file) {
-                                            setProfilePic(URL.createObjectURL(file));
-                                            authApi.uploadAvatar(file)
-                                                .then(() => {
-                                                    toast.success("Profile picture processed");
-                                                    checkAuth();
-                                                })
-                                                .catch(() => toast.error("Avatar upload failed"));
-                                        }
-                                    }} />
-                                </label>
-                            </div>
-
-                            <div className="w-full space-y-4">
-                                <div className="flex justify-between items-center px-1 border-b border-muted/10 pb-2">
-                                    <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Information Summary</p>
-                                    <Badge variant="outline" className="text-[8px] h-4 uppercase font-bold text-emerald-600 border-emerald-200 bg-emerald-50">Draft Verified</Badge>
-                                </div>
-                                <div className="grid grid-cols-2 gap-y-4 gap-x-6 bg-muted/5 p-4 rounded-xl border border-muted/10">
-                                    {[
-                                        { label: "Institution", value: institutions.find(i => i.id === selectedInst)?.code, icon: Building2 },
-                                        { label: "Program", value: options.find(o => o.id === selectedOpt)?.code, icon: BookOpen },
-                                        { label: "Department", value: departments.find(d => d.id === selectedDept)?.code, icon: Library },
-                                        { label: "Level", value: level, icon: LayoutGrid }
-                                    ].map((s, i) => (
-                                        <div key={i} className="space-y-1">
-                                            <div className="flex items-center gap-1 text-muted-foreground">
-                                                <s.icon className="size-2.5" />
-                                                <p className="text-[8px] font-semibold uppercase tracking-tighter">{s.label}</p>
-                                            </div>
-                                            <p className="text-[11px] font-semibold text-foreground uppercase truncate">{s.value || "Not Selected"}</p>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-                        </div>
-                    )}
-                </div>
-
-                <div className="p-4 bg-muted/5 border-t border-muted/10 flex items-center justify-between px-6">
-                    <Button 
-                        variant="ghost" 
-                        disabled={activeStep === 1 || submitting} 
-                        onClick={() => setActiveStep(prev => prev - 1)}
-                        className="h-9 rounded-lg px-4 font-semibold text-[10px] uppercase tracking-widest gap-2"
-                    >
-                        <ArrowLeft className="size-3.5" /> Back
-                    </Button>
-
-                    {activeStep < 3 ? (
-                        <Button 
-                            disabled={
-                                (activeStep === 1 && !selectedDept) || 
-                                (activeStep === 2 && (!selectedGroup || !level || !year))
-                            }
-                            onClick={() => setActiveStep(prev => prev + 1)}
-                            className="h-9 rounded-lg px-6 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold text-[10px] uppercase tracking-widest gap-2 shadow-none"
-                        >
-                            Continue <ArrowRight className="size-3.5" />
-                        </Button>
-                    ) : (
-                        <Button 
-                            onClick={handleFinish} 
-                            disabled={submitting}
-                            className="h-9 rounded-lg px-8 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold text-[10px] uppercase tracking-widest gap-2 shadow-none"
-                        >
-                            {submitting ? <Loader2 className="size-3.5 animate-spin" /> : <CheckCircle2 className="size-3.5" />}
-                            {submitting ? "Finalizing..." : "Complete Setup"}
-                        </Button>
-                    )}
-                </div>
-            </div>
-        </div>
+    <div className="min-h-screen w-full bg-background text-foreground flex items-center justify-center p-3 sm:p-4 md:p-6 relative">
+      {/* Discreet floating top controls */}
+      <div className="fixed top-3 right-3 sm:top-5 sm:right-5 flex items-center gap-1.5 z-20">
+        <ModeToggle variant="ghost" size="sm" className="rounded-lg h-8 w-8 text-muted-foreground hover:text-foreground" />
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={handleSignOut}
+          className="h-8 px-2 rounded-lg text-xs text-muted-foreground hover:text-foreground gap-1"
+          title="Sign out"
+        >
+          <LogOut className="size-3.5" />
+          <span className="hidden sm:inline">Sign Out</span>
+        </Button>
       </div>
+
+      {/* Main Compact Card */}
+      <motion.div
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.35, ease: "easeOut" }}
+        className="w-full max-w-lg relative z-10"
+      >
+        <div className="bg-card border border-border/80 rounded-2xl p-5 sm:p-6 space-y-4 shadow-xs">
+          {/* Card Header & Title */}
+          <div className="space-y-1">
+            <div className="flex items-center justify-between text-[11px] font-semibold">
+              <span className="text-primary uppercase tracking-wider">
+                Step {activeStep} of 3
+              </span>
+              <span className="text-muted-foreground">
+                {stepsLeft === 0 ? "Final step" : `${stepsLeft} ${stepsLeft === 1 ? "step" : "steps"} left`}
+              </span>
+            </div>
+
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground">
+              Student Onboarding
+            </h1>
+            <p className="text-xs text-muted-foreground">
+              {activeStep === 1 
+                ? "Select your university and department." 
+                : activeStep === 2 
+                ? "Specify your degree program and academic level."
+                : "Add your photo and confirm your enrollment."}
+            </p>
+
+            {/* Stepper Progress Bar */}
+            <div className="pt-2">
+              <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
+                <motion.div 
+                  className="h-full bg-primary rounded-full"
+                  initial={false}
+                  animate={{ width: progressPercent }}
+                  transition={{ duration: 0.3, ease: "easeInOut" }}
+                />
+              </div>
+
+              {/* Stepper Indicator Pills */}
+              <div className="grid grid-cols-3 gap-1.5 mt-2.5">
+                {STEPS.map((s) => {
+                  const isActive = activeStep === s.id;
+                  const isDone = activeStep > s.id;
+                  return (
+                    <div 
+                      key={s.id}
+                      className={`flex items-center gap-1.5 p-1.5 rounded-lg border text-xs transition-colors ${
+                        isActive 
+                          ? "border-primary/40 bg-primary/5 text-foreground font-medium" 
+                          : isDone 
+                          ? "border-emerald-500/30 bg-emerald-500/5 text-emerald-600 dark:text-emerald-400" 
+                          : "border-border/40 text-muted-foreground"
+                      }`}
+                    >
+                      <div className={`size-4 rounded-full flex items-center justify-center text-[10px] shrink-0 font-bold ${
+                        isDone 
+                          ? "bg-emerald-600 text-white" 
+                          : isActive 
+                          ? "bg-primary text-primary-foreground" 
+                          : "bg-muted text-muted-foreground"
+                      }`}>
+                        {isDone ? <Check className="size-2.5" /> : s.id}
+                      </div>
+                      <span className="truncate text-[10px] sm:text-[11px]">{s.title}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          {/* Stepper Views with smooth transitions */}
+          <AnimatePresence mode="wait">
+            {/* STEP 1: Institution & Department */}
+            {activeStep === 1 && (
+              <motion.div
+                key="step-1"
+                initial={{ opacity: 0, x: -10 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 10 }}
+                transition={{ duration: 0.2 }}
+                className="space-y-3.5"
+              >
+                {/* University */}
+                <div className="space-y-1">
+                  <Label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                    <Building2 className="size-3.5 text-primary" />
+                    University / Institution
+                  </Label>
+                  <Select value={selectedInst} onValueChange={setSelectedInst} disabled={loading.init}>
+                    <SelectTrigger className="h-9.5 rounded-lg border-border/80 bg-background text-xs sm:text-sm focus-visible:ring-primary/20">
+                      <SelectValue placeholder={loading.init ? "Loading universities..." : "Select university..."} />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-56">
+                      {institutions.map(inst => (
+                        <SelectItem key={inst.id} value={inst.id} className="text-xs sm:text-sm">
+                          {inst.name} {inst.code && `(${inst.code})`}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Department */}
+                <div className="space-y-1">
+                  <Label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                    <Library className="size-3.5 text-primary" />
+                    Department
+                  </Label>
+                  <Select 
+                    value={selectedDept} 
+                    onValueChange={setSelectedDept}
+                    disabled={!selectedInst || loading.depts}
+                  >
+                    <SelectTrigger className="h-9.5 rounded-lg border-border/80 bg-background text-xs sm:text-sm focus-visible:ring-primary/20">
+                      <SelectValue placeholder={
+                        !selectedInst 
+                          ? "Select university first" 
+                          : loading.depts 
+                          ? "Loading departments..." 
+                          : "Select department..."
+                      } />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-56">
+                      {departments.map(d => (
+                        <SelectItem key={d.id} value={d.id} className="text-xs sm:text-sm">
+                          {d.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Campus (if multiple exist) */}
+                {campuses.length > 0 && (
+                  <div className="space-y-1">
+                    <Label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                      <MapPin className="size-3.5 text-muted-foreground" />
+                      Campus (Optional)
+                    </Label>
+                    <Select value={selectedCampus} onValueChange={setSelectedCampus}>
+                      <SelectTrigger className="h-9.5 rounded-lg border-border/80 bg-background text-xs sm:text-sm">
+                        <SelectValue placeholder="Main Campus" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none" className="text-xs sm:text-sm">Main / Global Campus</SelectItem>
+                        {campuses.map(c => (
+                          <SelectItem key={c.id} value={c.id} className="text-xs sm:text-sm">{c.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+
+                {/* Continue Button */}
+                <div className="pt-1">
+                  <Button
+                    onClick={() => setActiveStep(2)}
+                    disabled={!selectedInst || !selectedDept}
+                    className="w-full h-9.5 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 font-semibold text-xs gap-1.5 shadow-xs"
+                  >
+                    <span>Continue to Degree Program</span>
+                    <ArrowRight className="size-3.5" />
+                  </Button>
+                </div>
+              </motion.div>
+            )}
+
+            {/* STEP 2: Degree Program, Level & Session */}
+            {activeStep === 2 && (
+              <motion.div
+                key="step-2"
+                initial={{ opacity: 0, x: 10 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -10 }}
+                transition={{ duration: 0.2 }}
+                className="space-y-3.5"
+              >
+                {/* Program / Specialization */}
+                <div className="space-y-1">
+                  <Label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                    <Layers className="size-3.5 text-primary" />
+                    Degree Program / Specialization
+                  </Label>
+                  <Select 
+                    value={selectedOpt} 
+                    onValueChange={setSelectedOpt}
+                    disabled={loading.options}
+                  >
+                    <SelectTrigger className="h-9.5 rounded-lg border-border/80 bg-background text-xs sm:text-sm focus-visible:ring-primary/20">
+                      <SelectValue placeholder={loading.options ? "Loading programs..." : "Select program..."} />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-56">
+                      {options.map(o => (
+                        <SelectItem key={o.id} value={o.id} className="text-xs sm:text-sm">
+                          {o.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Level & Academic Year in 2 Columns */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {/* Academic Level */}
+                  <div className="space-y-1">
+                    <Label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                      <GraduationCap className="size-3.5 text-primary" />
+                      Academic Level
+                    </Label>
+                    {classGroups.length > 0 ? (
+                      <Select 
+                        value={selectedGroup} 
+                        onValueChange={setSelectedGroup}
+                        disabled={!selectedOpt}
+                      >
+                        <SelectTrigger className="h-9.5 rounded-lg border-border/80 bg-background text-xs sm:text-sm">
+                          <SelectValue placeholder="Select cohort/level..." />
+                        </SelectTrigger>
+                        <SelectContent className="max-h-56">
+                          {classGroups.map(g => (
+                            <SelectItem key={g.id} value={g.id} className="text-xs sm:text-sm">
+                              {g.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <Select 
+                        value={level} 
+                        onValueChange={setLevel}
+                        disabled={!selectedOpt}
+                      >
+                        <SelectTrigger className="h-9.5 rounded-lg border-border/80 bg-background text-xs sm:text-sm">
+                          <SelectValue placeholder="Select level..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {(dbLevels.length > 0 ? dbLevels.map(l => `Level ${l}`) : ["Level 1", "Level 2", "Level 3", "Level 4", "Level 5", "Level 6"]).map(l => (
+                            <SelectItem key={l} value={l} className="text-xs sm:text-sm">
+                              {l}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  </div>
+
+                  {/* Academic Year */}
+                  <div className="space-y-1">
+                    <Label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                      <Calendar className="size-3.5 text-primary" />
+                      Academic Session
+                    </Label>
+                    <Select value={year} onValueChange={setYear}>
+                      <SelectTrigger className="h-9.5 rounded-lg border-border/80 bg-background text-xs sm:text-sm">
+                        <SelectValue placeholder="Session year..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {periods.length > 0 ? (
+                          periods.map(p => (
+                            <SelectItem key={p.id} value={p.name} className="text-xs sm:text-sm">
+                              {p.name}
+                            </SelectItem>
+                          ))
+                        ) : (
+                          fallbackYears.map(y => (
+                            <SelectItem key={y} value={y} className="text-xs sm:text-sm">
+                              {y}
+                            </SelectItem>
+                          ))
+                        )}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                {/* Section (Optional if sections exist) */}
+                {sections.length > 0 && (
+                  <div className="space-y-1">
+                    <Label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                      <Users className="size-3.5 text-muted-foreground" />
+                      Section / Stream (Optional)
+                    </Label>
+                    <Select value={selectedSection} onValueChange={setSelectedSection}>
+                      <SelectTrigger className="h-9.5 rounded-lg border-border/80 bg-background text-xs sm:text-sm">
+                        <SelectValue placeholder="Default Section" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none" className="text-xs sm:text-sm">Default Section</SelectItem>
+                        {sections.map(s => (
+                          <SelectItem key={s.id} value={s.id} className="text-xs sm:text-sm">{s.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+
+                {/* Navigation Buttons */}
+                <div className="pt-1 flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={() => setActiveStep(1)}
+                    className="h-9.5 px-3 rounded-lg text-xs font-semibold gap-1 text-muted-foreground hover:text-foreground"
+                  >
+                    <ArrowLeft className="size-3.5" />
+                    <span>Back</span>
+                  </Button>
+
+                  <Button
+                    onClick={() => setActiveStep(3)}
+                    disabled={!selectedOpt || !level || !year}
+                    className="flex-1 h-9.5 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 font-semibold text-xs gap-1.5 shadow-xs"
+                  >
+                    <span>Continue to Photo & Review</span>
+                    <ArrowRight className="size-3.5" />
+                  </Button>
+                </div>
+              </motion.div>
+            )}
+
+            {/* STEP 3: Photo & Review */}
+            {activeStep === 3 && (
+              <motion.div
+                key="step-3"
+                initial={{ opacity: 0, x: 10 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -10 }}
+                transition={{ duration: 0.2 }}
+                className="space-y-4"
+              >
+                {/* Photo & Student Identity */}
+                <div className="flex items-center gap-3.5 p-3 rounded-xl bg-muted/30 border border-border/50">
+                  <div className="relative group shrink-0">
+                    <Avatar className="size-16 sm:size-18 rounded-full border border-border shadow-xs overflow-hidden bg-muted">
+                      <AvatarImage 
+                        src={currentAvatarUrl} 
+                        alt={displayName}
+                        className="object-cover" 
+                      />
+                      <AvatarFallback className="bg-primary/10 text-primary text-lg font-bold uppercase">
+                        {initials}
+                      </AvatarFallback>
+                    </Avatar>
+
+                    <label
+                      htmlFor="student-avatar"
+                      className="absolute -bottom-1 -right-1 size-7 bg-primary text-primary-foreground hover:bg-primary/90 rounded-full flex items-center justify-center cursor-pointer transition-transform border-2 border-background shadow-xs hover:scale-105 active:scale-95"
+                      title="Upload ID photo"
+                    >
+                      {uploadingAvatar ? (
+                        <Loader2 className="size-3 animate-spin" />
+                      ) : (
+                        <Camera className="size-3" />
+                      )}
+                      <input 
+                        id="student-avatar"
+                        type="file" 
+                        className="hidden" 
+                        accept="image/png, image/jpeg, image/webp" 
+                        onChange={handleAvatarChange}
+                        disabled={uploadingAvatar}
+                      />
+                    </label>
+                  </div>
+
+                  <div className="min-w-0 flex-1 space-y-0.5">
+                    <h2 className="text-sm font-semibold text-foreground truncate">
+                      {displayName}
+                    </h2>
+                    <p className="text-xs text-muted-foreground font-mono truncate">
+                      {user?.email}
+                    </p>
+                    <span className="inline-block text-[10px] text-primary font-medium">
+                      Student Enrollment
+                    </span>
+                  </div>
+                </div>
+
+                {/* Enrollment Summary */}
+                <div className="rounded-xl border border-border/60 bg-muted/20 p-3 space-y-2">
+                  <div className="flex items-center justify-between text-xs font-semibold border-b border-border/40 pb-1.5">
+                    <span className="text-muted-foreground uppercase text-[10px] tracking-wider">Academic Record</span>
+                    <span className="text-primary">{level} &bull; {year}</span>
+                  </div>
+
+                  <div className="space-y-1 text-xs">
+                    <div className="flex justify-between items-center">
+                      <span className="text-muted-foreground">University:</span>
+                      <span className="font-medium text-foreground text-right truncate max-w-[220px]">{currentInstitution?.name}</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-muted-foreground">Department:</span>
+                      <span className="font-medium text-foreground text-right truncate max-w-[220px]">{currentDepartment?.name}</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-muted-foreground">Program:</span>
+                      <span className="font-medium text-foreground text-right truncate max-w-[220px]">{currentOption?.name}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Actions */}
+                <div className="pt-1 flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={() => setActiveStep(2)}
+                    disabled={submitting}
+                    className="h-9.5 px-3 rounded-lg text-xs font-semibold gap-1 text-muted-foreground hover:text-foreground"
+                  >
+                    <ArrowLeft className="size-3.5" />
+                    <span>Back</span>
+                  </Button>
+
+                  <Button
+                    onClick={handleFinish}
+                    disabled={submitting || uploadingAvatar}
+                    className="flex-1 h-9.5 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 font-semibold text-xs gap-1.5 shadow-xs"
+                  >
+                    {submitting ? (
+                      <>
+                        <Loader2 className="size-3.5 animate-spin" />
+                        <span>Verifying...</span>
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle2 className="size-3.5" />
+                        <span>Complete Enrollment</span>
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+      </motion.div>
     </div>
   );
 }

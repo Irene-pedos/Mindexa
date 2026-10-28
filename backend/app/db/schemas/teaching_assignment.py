@@ -45,6 +45,9 @@ class TeachingAssignmentDetailResponse(TeachingAssignmentResponse):
     class_section_name: str | None = None
     class_group_name: str | None = None
     class_group_level: int | None = None
+    academic_period_name: str | None = None
+    workspace_id: uuid.UUID | None = None
+    workspace_title: str | None = None
 
 TeachingAssignmentCreate.model_rebuild()
 TeachingAssignmentResponse.model_rebuild()

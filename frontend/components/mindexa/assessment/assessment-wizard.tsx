@@ -3101,6 +3101,12 @@ export function AssessmentWizard({ editId }: { editId?: string }) {
           }));
         }
 
+        // Coming from a course page ("?workspace=...") starts the paper inside that course.
+        const preselected = draftId ? null : searchParams.get("workspace");
+        if (preselected && workspaceRes.some((w) => w.id === preselected)) {
+          loadWorkspaceDetailRef.current(preselected);
+        }
+
         // Load draft if ID exists
         if (draftId) {
           setIsLoadingDraft(true);

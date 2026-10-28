@@ -191,13 +191,19 @@ async def create_user(
 async def list_courses(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
+    search: str | None = Query(default=None, max_length=100),
+    status: str | None = Query(default=None, pattern="^(active|suspended)$"),
+    language: str | None = Query(default=None, pattern="^(EN|RW|FR|SW)$"),
+    institution_id: uuid.UUID | None = None,
     current_user=Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> AdminCourseListResponse:
-    """Returns a paginated list of all courses on the platform."""
+    """Paginated course catalog; search, status and language apply to the whole catalog."""
     service = AdminService(db)
-    items, total = await service.list_courses(page, page_size)
-    return AdminCourseListResponse(items=items, total=total)
+    items, total = await service.list_courses(
+        page, page_size, search=search, status=status, language=language, institution_id=institution_id
+    )
+    return AdminCourseListResponse(items=items, total=total, summary=await service.get_course_summary())
 
 @router.patch(
     "/users/{user_id}/approve",
@@ -266,6 +272,20 @@ async def assign_courses(
     """Assigns a list of courses to the specified lecturer."""
     service = AdminService(db)
     return await service.assign_courses_to_lecturer(user_id, body.course_ids)
+
+
+@router.get(
+    "/courses/{course_id}",
+    response_model=CourseResponse,
+    summary="Get one course with its departments (Admin)",
+)
+async def get_course(
+    course_id: uuid.UUID,
+    current_user=Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> CourseResponse:
+    """The full course record the edit form needs (department and option ids included)."""
+    return await AdminService(db).get_course_detail(course_id)
 
 
 @router.delete(

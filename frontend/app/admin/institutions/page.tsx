@@ -1,769 +1,519 @@
-"use client";
+"use client"
 
-import { useEffect, useState, useCallback, useMemo } from "react";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { useCallback, useEffect, useMemo, useState } from "react"
+import Link from "next/link"
+import { useRouter } from "next/navigation"
+import { toast } from "sonner"
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
-  Plus,
-  Settings,
-  Power,
-  PowerOff,
-  Globe,
-  Image as ImageIcon,
-  MoreVertical,
-  Loader2,
-  Search,
   ArrowUpDown,
+  Building2,
   ChevronLeft,
   ChevronRight,
-  Building2,
-  Upload,
-  CheckCircle2,
-  XCircle,
-  ExternalLink,
-} from "lucide-react";
-import Image from "next/image";
-import { adminApi } from "@/lib/api/admin";
-import { Skeleton } from "@/components/ui/skeleton";
-import { toast } from "sonner";
+  Globe,
+  GraduationCap,
+  Library,
+  Loader2,
+  MoreVertical,
+  Network,
+  Pencil,
+  Plus,
+  Power,
+  PowerOff,
+  Search,
+  Users,
+  type LucideIcon,
+} from "lucide-react"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Skeleton } from "@/components/ui/skeleton"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { cn } from "@/lib/utils";
+} from "@/components/ui/dropdown-menu"
+import { adminApi } from "@/lib/api/admin"
+import { adminAcademicApi, type InstitutionOverview } from "@/lib/api/academic"
+import { errorMessage } from "@/lib/error-message"
+import { cn } from "@/lib/utils"
+import { PRESETS, presetProfile, profileToSettings, readProfile } from "@/lib/structure-profile"
+import { timezoneLabel } from "@/lib/timezones"
+import {
+  InstitutionDialog,
+  type InstitutionDialogState,
+  type InstitutionFormValues,
+  type InstitutionRecord,
+} from "@/components/mindexa/admin/institutions/institution-dialog"
+
+const PAGE_SIZE = 10
+type StatusFilter = "all" | "active" | "suspended"
+
+const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
 
 export default function InstitutionsPage() {
-  const [institutions, setInstitutions] = useState<any[]>([]);
-  const [summary, setSummary] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-  const [isCreating, setIsCreating] = useState(false);
-  const [createDialogOpen, setCreateDialogOpen] = useState(false);
-  const [isProcessing, setIsProcessing] = useState<string | null>(null);
-  const [isSettingsDialogOpen, setIsSettingsDialogOpen] = useState(false);
-  const [isBrandingDialogOpen, setIsBrandingDialogOpen] = useState(false);
-  const [selectedInst, setSelectedInst] = useState<any>(null);
+  const router = useRouter()
+  const [institutions, setInstitutions] = useState<InstitutionRecord[] | null>(null)
+  const [overview, setOverview] = useState<Map<string, InstitutionOverview>>(new Map())
+  const [loadError, setLoadError] = useState<string | null>(null)
 
-  // UI State
-  const [searchTerm, setSearchTerm] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "suspended">("all");
-  const [sortField, setSortField] = useState("name");
-  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
-  const [currentPage, setCurrentPage] = useState(1);
-  const pageSize = 10;
+  const [search, setSearch] = useState("")
+  const [status, setStatus] = useState<StatusFilter>("all")
+  const [sortAsc, setSortAsc] = useState(true)
+  const [page, setPage] = useState(1)
 
-  const [formData, setFormData] = useState({
-    name: "",
-    code: "",
-    timezone: "UTC",
-    logo_url: "",
-  });
-  const [logoFile, setLogoFile] = useState<File | null>(null);
+  const [dialog, setDialog] = useState<InstitutionDialogState | null>(null)
+  const [confirmToggle, setConfirmToggle] = useState<InstitutionRecord | null>(null)
+  const [busyId, setBusyId] = useState<string | null>(null)
 
-  const loadInstitutions = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [dataRes, sumRes] = await Promise.allSettled([
-        adminApi.getInstitutions(),
-        adminApi.getInstitutionSummary(),
-      ]);
-
-      if (dataRes.status === "fulfilled") {
-        setInstitutions(dataRes.value);
-      } else {
-        toast.error("Could not load institutions list");
-      }
-
-      if (sumRes.status === "fulfilled") {
-        setSummary(sumRes.value);
-      } else {
-        toast.error("Could not load institution metrics");
-      }
-    } catch {
-      toast.error("Failed to load institution data");
-    } finally {
-      setLoading(false);
+  const load = useCallback(async () => {
+    setLoadError(null)
+    const [list, counts] = await Promise.allSettled([
+      adminApi.getInstitutions(),
+      adminAcademicApi.getStructureOverview(),
+    ])
+    if (list.status === "fulfilled") setInstitutions(list.value as InstitutionRecord[])
+    else {
+      setInstitutions((prev) => prev ?? [])
+      setLoadError(errorMessage(list.reason, "Could not load institutions."))
     }
-  }, []);
+    // counts are a nicety: the page still works without them
+    if (counts.status === "fulfilled") setOverview(new Map(counts.value.map((c) => [c.institution_id, c])))
+  }, [])
 
   useEffect(() => {
-    loadInstitutions();
-  }, [loadInstitutions]);
+    void load()
+  }, [load])
 
-  // Filtering & Sorting
-  const filteredAndSorted = useMemo(() => {
-    const result = institutions.filter((inst) => {
-      const matchesSearch =
-        inst.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        inst.code.toLowerCase().includes(searchTerm.toLowerCase());
-      const matchesStatus =
-        statusFilter === "all"
-          ? true
-          : statusFilter === "active"
-          ? inst.is_active
-          : !inst.is_active;
+  // ── derived ─────────────────────────────────────────────────────────────────
+  const rows = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    return (institutions ?? [])
+      .filter((i) => !q || i.name.toLowerCase().includes(q) || i.code.toLowerCase().includes(q))
+      .filter((i) => (status === "all" ? true : status === "active" ? i.is_active : !i.is_active))
+      .sort((a, b) => a.name.localeCompare(b.name) * (sortAsc ? 1 : -1))
+  }, [institutions, search, status, sortAsc])
 
-      return matchesSearch && matchesStatus;
-    });
+  const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE))
+  const pageRows = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
 
-    result.sort((a, b) => {
-      const valA = (a[sortField] || "").toString().toLowerCase();
-      const valB = (b[sortField] || "").toString().toLowerCase();
-      if (valA < valB) return sortOrder === "asc" ? -1 : 1;
-      if (valA > valB) return sortOrder === "asc" ? 1 : -1;
-      return 0;
-    });
+  const totals = useMemo(() => {
+    const active = (institutions ?? []).filter((i) => i.is_active)
+    const sum = (key: keyof Omit<InstitutionOverview, "institution_id">) =>
+      active.reduce((acc, i) => acc + (overview.get(i.id)?.[key] ?? 0), 0)
+    return {
+      active: active.length,
+      suspended: (institutions ?? []).length - active.length,
+      departments: sum("departments"),
+      classes: sum("classes"),
+      students: sum("students"),
+    }
+  }, [institutions, overview])
 
-    return result;
-  }, [institutions, searchTerm, statusFilter, sortField, sortOrder]);
-
-  const paginatedData = useMemo(() => {
-    const start = (currentPage - 1) * pageSize;
-    return filteredAndSorted.slice(start, start + pageSize);
-  }, [filteredAndSorted, currentPage, pageSize]);
-
-  const totalPages = Math.ceil(filteredAndSorted.length / pageSize);
-
-  const toggleSort = (field: string) => {
-    if (sortField === field) {
-      setSortOrder(sortOrder === "asc" ? "desc" : "asc");
+  // ── actions ─────────────────────────────────────────────────────────────────
+  const submit = async (state: InstitutionDialogState, v: InstitutionFormValues) => {
+    if (state.mode === "create") {
+      const created = (await adminApi.createInstitution({
+        name: v.name.trim(),
+        code: v.code,
+        timezone: v.timezone,
+        ...(v.logo ? { logo_url: v.logo } : {}),
+        ...(v.type !== "later" ? { settings: profileToSettings(presetProfile(v.type)) } : {}),
+      })) as { id: string }
+      toast.success(`${v.name.trim()} registered`, {
+        action: {
+          label: "Organize it",
+          onClick: () => router.push(`/admin/academic/structure?institution=${created.id}`),
+        },
+      })
     } else {
-      setSortField(field);
-      setSortOrder("asc");
+      await adminApi.updateInstitution(state.institution.id, {
+        name: v.name.trim(),
+        timezone: v.timezone,
+        ...(v.logo !== undefined ? { logo_url: v.logo } : {}),
+      })
+      toast.success("Institution updated")
     }
-  };
+    setDialog(null)
+    await load()
+  }
 
-  const handleCreate = async () => {
-    if (!formData.name.trim() || !formData.code.trim()) {
-      toast.error("Institution name and code are required");
-      return;
-    }
-
-    setIsCreating(true);
+  const applyActive = async (inst: InstitutionRecord, active: boolean) => {
+    setBusyId(inst.id)
     try {
-      const payload = { ...formData };
-
-      if (logoFile) {
-        payload.logo_url = await new Promise((resolve) => {
-          const reader = new FileReader();
-          reader.onloadend = () => resolve(reader.result as string);
-          reader.readAsDataURL(logoFile);
-        });
-      }
-
-      await adminApi.createInstitution(payload);
-      toast.success("Institution registered successfully");
-      setCreateDialogOpen(false);
-      setFormData({ name: "", code: "", timezone: "UTC", logo_url: "" });
-      setLogoFile(null);
-      loadInstitutions();
-    } catch {
-      toast.error("Failed to register institution");
+      await adminApi.updateInstitution(inst.id, { is_active: active })
+      toast.success(`${inst.name} ${active ? "reactivated" : "suspended"}`)
+      await load()
+    } catch (err) {
+      toast.error(errorMessage(err, `Could not ${active ? "reactivate" : "suspend"} ${inst.name}.`))
     } finally {
-      setIsCreating(false);
+      setBusyId(null)
     }
-  };
+  }
 
-  const handleUpdate = async () => {
-    if (!selectedInst) return;
-    setIsCreating(true);
-    try {
-      const payload: any = {
-        name: formData.name,
-        timezone: formData.timezone,
-      };
-      if (logoFile) {
-        payload.logo_url = await new Promise((resolve) => {
-          const reader = new FileReader();
-          reader.onloadend = () => resolve(reader.result as string);
-          reader.readAsDataURL(logoFile);
-        });
-      } else if (formData.logo_url !== selectedInst.logo_url) {
-        payload.logo_url = formData.logo_url;
-      }
-      await adminApi.updateInstitution(selectedInst.id, payload);
-      toast.success("Institution details updated");
-      setIsSettingsDialogOpen(false);
-      setIsBrandingDialogOpen(false);
-      loadInstitutions();
-    } catch {
-      toast.error("Failed to update institution");
-    } finally {
-      setIsCreating(false);
-    }
-  };
+  const takenCodes = useMemo(() => (institutions ?? []).map((i) => i.code), [institutions])
 
-  const handleToggleStatus = async (inst: any) => {
-    setIsProcessing(inst.id);
-    try {
-      await adminApi.updateInstitution(inst.id, { is_active: !inst.is_active });
-      toast.success(`Institution ${inst.is_active ? "suspended" : "activated"} successfully`);
-      loadInstitutions();
-    } catch {
-      toast.error("Failed to update institution status");
-    } finally {
-      setIsProcessing(null);
-    }
-  };
-
-  const handleConfigure = (inst: any) => {
-    setSelectedInst(inst);
-    setFormData({
-      name: inst.name,
-      code: inst.code,
-      timezone: inst.timezone,
-      logo_url: inst.logo_url || "",
-    });
-    setIsSettingsDialogOpen(true);
-  };
-
-  const handleBranding = (inst: any) => {
-    setSelectedInst(inst);
-    setFormData({
-      name: inst.name,
-      code: inst.code,
-      timezone: inst.timezone,
-      logo_url: inst.logo_url || "",
-    });
-    setLogoFile(null);
-    setIsBrandingDialogOpen(true);
-  };
-
+  // ── render ──────────────────────────────────────────────────────────────────
   return (
-    <div className="w-full min-w-0 space-y-6 transition-all duration-300 ease-in-out">
-      {/* Top Header */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between pb-5 border-b border-border/40">
+    <div className="w-full min-w-0 space-y-5">
+      <div className="flex flex-col gap-3 border-b pb-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <div className="flex items-center gap-2.5">
-            <div className="flex size-9 items-center justify-center rounded-xl bg-primary/10 text-primary">
-              <Building2 className="size-4.5" />
-            </div>
-            <div>
-              <h1 className="text-xl font-semibold tracking-tight text-foreground">
-                Institutions & Academic Partners
-              </h1>
-              <p className="text-xs text-muted-foreground">
-                Centralized registry of accredited educational institutions and operational tenants.
-              </p>
-            </div>
-          </div>
+          <h1 className="text-xl font-semibold tracking-tight">Institutions</h1>
+          <p className="mt-0.5 max-w-xl text-sm text-muted-foreground">
+            The universities, colleges, schools and centres on the platform. Each one has its own structure, courses and
+            people.
+          </p>
         </div>
-
-        <Button
-          size="sm"
-          onClick={() => {
-            setFormData({ name: "", code: "", timezone: "UTC", logo_url: "" });
-            setLogoFile(null);
-            setCreateDialogOpen(true);
-          }}
-          className="h-8.5 rounded-xl gap-2 px-4 text-xs font-semibold shadow-xs cursor-pointer self-start sm:self-auto"
-        >
-          <Plus className="size-3.5" />
-          Register Institution
+        <Button className="self-start" onClick={() => setDialog({ mode: "create" })}>
+          <Plus className="mr-1.5 size-4" />
+          Register institution
         </Button>
       </div>
 
-      {/* KPI Overview Strip */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        {[
-          {
-            label: "Active Partners",
-            value: summary?.active_partners || institutions.filter((i) => i.is_active).length,
-            detail: "Fully certified",
-            icon: CheckCircle2,
-          },
-          {
-            label: "Total Capacity",
-            value:
-              (summary?.total_capacity || 0) >= 1000
-                ? `${((summary?.total_capacity || 0) / 1000).toFixed(1)}k`
-                : summary?.total_capacity || 0,
-            detail: "Student enrollments",
-            icon: Globe,
-          },
-          {
-            label: "Integrations",
-            value: summary?.integrations_count || institutions.length,
-            detail: "Connected systems",
-            icon: Settings,
-          },
-          {
-            label: "Suspended",
-            value: summary?.suspended_partners || institutions.filter((i) => !i.is_active).length,
-            detail: "Access restricted",
-            icon: PowerOff,
-          },
-        ].map((stat, i) => (
-          <div
-            key={i}
-            className="p-4 rounded-2xl bg-card border border-border shadow-2xs flex items-center justify-between"
-          >
-            <div className="space-y-1">
-              <p className="text-[11px] font-medium text-muted-foreground">{stat.label}</p>
-              <div className="text-2xl font-bold tracking-tight text-foreground">
-                {loading ? <Skeleton className="h-7 w-12" /> : stat.value}
-              </div>
-              <p className="text-[10px] text-muted-foreground">{stat.detail}</p>
-            </div>
-            <div className="size-9 rounded-xl bg-muted/50 border border-border/50 flex items-center justify-center text-muted-foreground shrink-0">
-              <stat.icon className="size-4" />
-            </div>
-          </div>
-        ))}
-      </div>
+      {loadError && (
+        <div
+          role="alert"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive"
+        >
+          <span>{loadError}</span>
+          <Button variant="outline" onClick={() => void load()}>
+            Try again
+          </Button>
+        </div>
+      )}
 
-      {/* Unified Table Container */}
-      <div className="rounded-2xl border border-border bg-card shadow-2xs overflow-hidden">
-        {/* Toolbar */}
-        <div className="p-3 sm:p-4 border-b border-border/60 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 bg-muted/10">
-          <div className="relative flex-1 max-w-md">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
+      {/* Real figures across the active institutions */}
+      <dl className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <Kpi
+          icon={Building2}
+          label="Institutions"
+          value={institutions ? totals.active : null}
+          note={totals.suspended ? `${totals.suspended} suspended` : "all active"}
+        />
+        <Kpi
+          icon={Library}
+          label="Departments"
+          value={institutions ? totals.departments : null}
+          note="across active institutions"
+        />
+        <Kpi icon={GraduationCap} label="Classes" value={institutions ? totals.classes : null} note="student groups" />
+        <Kpi icon={Users} label="Students" value={institutions ? totals.students : null} note="enrolled" />
+      </dl>
+
+      <div className="overflow-hidden rounded-2xl border bg-card">
+        <div className="flex flex-col gap-3 border-b bg-muted/20 p-3 md:flex-row md:items-center md:justify-between">
+          <div className="relative w-full md:max-w-sm">
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
-              placeholder="Search partner by name or code..."
-              className="pl-9 h-8.5 text-xs rounded-xl bg-background border-border/80 focus-visible:ring-1"
-              value={searchTerm}
+              placeholder="Search by name or code"
+              aria-label="Search institutions"
+              className="h-8 pl-9"
+              value={search}
               onChange={(e) => {
-                setSearchTerm(e.target.value);
-                setCurrentPage(1);
+                setSearch(e.target.value)
+                setPage(1)
               }}
             />
           </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            {/* Status Segmented Buttons */}
-            <div className="flex items-center bg-muted/60 p-0.5 rounded-xl border border-border/60 text-xs">
-              {(["all", "active", "suspended"] as const).map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => {
-                    setStatusFilter(s);
-                    setCurrentPage(1);
-                  }}
-                  className={cn(
-                    "px-3 py-1 rounded-lg font-medium text-[11px] capitalize transition-all cursor-pointer",
-                    statusFilter === s
-                      ? "bg-background text-foreground shadow-2xs font-semibold"
-                      : "text-muted-foreground hover:text-foreground"
-                  )}
-                >
-                  {s}
-                </button>
-              ))}
-            </div>
-
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => toggleSort("name")}
-              className="h-8 rounded-xl text-xs gap-1.5 px-3 cursor-pointer border-border/70"
-            >
-              <ArrowUpDown className="size-3" />
-              Sort ({sortOrder})
-            </Button>
+          <div
+            role="group"
+            aria-label="Filter by status"
+            className="flex w-fit items-center rounded-lg border bg-muted/60 p-0.5"
+          >
+            {(["all", "active", "suspended"] as const).map((s) => (
+              <button
+                key={s}
+                type="button"
+                aria-pressed={status === s}
+                onClick={() => {
+                  setStatus(s)
+                  setPage(1)
+                }}
+                className={cn(
+                  "rounded-md px-3 py-1 text-xs font-medium capitalize transition-colors",
+                  status === s
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {s}
+              </button>
+            ))}
           </div>
         </div>
 
-        {/* Data Table */}
         <div className="overflow-x-auto">
           <Table>
             <TableHeader className="bg-muted/20">
-              <TableRow className="border-b border-border/60 hover:bg-transparent">
-                <TableHead className="text-[11px] font-semibold tracking-tight h-10 pl-5">
-                  Partner Institution
+              <TableRow className="hover:bg-transparent">
+                <TableHead className="h-10 pl-4">
+                  <button
+                    type="button"
+                    onClick={() => setSortAsc((v) => !v)}
+                    className="inline-flex items-center gap-1 text-xs font-semibold"
+                    aria-label="Sort by name"
+                  >
+                    Institution <ArrowUpDown className="size-3 text-muted-foreground" />
+                  </button>
                 </TableHead>
-                <TableHead className="text-[11px] font-semibold tracking-tight h-10">
-                  Institutional Code
-                </TableHead>
-                <TableHead className="text-[11px] font-semibold tracking-tight h-10">
-                  Timezone & Locale
-                </TableHead>
-                <TableHead className="text-[11px] font-semibold tracking-tight h-10">
-                  Status
-                </TableHead>
-                <TableHead className="text-right text-[11px] font-semibold tracking-tight h-10 pr-5">
-                  Operations
+                <TableHead className="h-10 text-xs font-semibold">Structure</TableHead>
+                <TableHead className="h-10 text-xs font-semibold">What is in it</TableHead>
+                <TableHead className="h-10 text-xs font-semibold">Timezone</TableHead>
+                <TableHead className="h-10 text-xs font-semibold">Status</TableHead>
+                <TableHead className="h-10 pr-4 text-right text-xs font-semibold">
+                  <span className="sr-only">Actions</span>
                 </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {loading ? (
-                [1, 2, 3, 4, 5].map((i) => (
-                  <TableRow key={i} className="border-b border-border/40 h-14">
-                    <TableCell colSpan={5} className="px-5">
-                      <Skeleton className="h-6 w-full rounded-lg" />
+              {institutions === null ? (
+                [1, 2, 3].map((i) => (
+                  <TableRow key={i}>
+                    <TableCell colSpan={6} className="px-4">
+                      <Skeleton className="h-9 w-full" />
                     </TableCell>
                   </TableRow>
                 ))
-              ) : paginatedData.length === 0 ? (
+              ) : pageRows.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="h-40 text-center text-muted-foreground text-xs">
-                    No institutions match the current search filters.
+                  <TableCell colSpan={6} className="h-40 text-center">
+                    {institutions.length === 0 ? (
+                      <div className="mx-auto max-w-sm space-y-2">
+                        <Building2 className="mx-auto size-7 text-muted-foreground" />
+                        <p className="text-sm font-medium">No institutions yet</p>
+                        <p className="text-xs text-muted-foreground">
+                          Register your first institution to start organizing departments, classes and courses.
+                        </p>
+                        <Button onClick={() => setDialog({ mode: "create" })}>
+                          <Plus className="mr-1.5 size-4" />
+                          Register institution
+                        </Button>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">No institution matches your search.</p>
+                    )}
                   </TableCell>
                 </TableRow>
               ) : (
-                paginatedData.map((inst) => (
-                  <TableRow key={inst.id} className="border-b border-border/40 hover:bg-muted/15 transition-colors h-14">
-                    <TableCell className="pl-5">
-                      <div className="flex items-center gap-3">
-                        <div className="size-8 rounded-xl bg-muted/60 border border-border/70 flex items-center justify-center overflow-hidden shrink-0 relative">
-                          {inst.logo_url ? (
-                            <Image src={inst.logo_url} alt="" fill unoptimized className="object-cover" />
-                          ) : (
-                            <Building2 className="size-4 text-muted-foreground/70" />
-                          )}
+                pageRows.map((inst) => {
+                  const counts = overview.get(inst.id)
+                  const profile = readProfile(inst.settings)
+                  const preset = profile ? PRESETS.find((p) => p.key === profile.preset)?.title : null
+                  return (
+                    <TableRow key={inst.id} className={cn("h-16", !inst.is_active && "opacity-70")}>
+                      <TableCell className="pl-4">
+                        <div className="flex items-center gap-3">
+                          <div className="relative flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-xl border bg-muted/50">
+                            {inst.logo_url ? (
+                              // eslint-disable-next-line @next/next/no-img-element -- stored as a data URL
+                              <img src={inst.logo_url} alt="" className="size-full object-cover" />
+                            ) : (
+                              <Building2 className="size-4 text-muted-foreground" />
+                            )}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-semibold leading-tight">{inst.name}</p>
+                            <Badge variant="outline" className="mt-0.5 font-mono text-[10px]">
+                              {inst.code}
+                            </Badge>
+                          </div>
                         </div>
-                        <div>
-                          <p className="font-semibold text-xs text-foreground leading-tight">{inst.name}</p>
-                          <p className="text-[10px] text-muted-foreground">ID: {inst.id.slice(0, 8)}...</p>
-                        </div>
-                      </div>
-                    </TableCell>
-
-                    <TableCell>
-                      <Badge variant="outline" className="font-mono text-[10px] px-2 py-0.5 rounded-md border-border">
-                        {inst.code}
-                      </Badge>
-                    </TableCell>
-
-                    <TableCell>
-                      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                        <Globe className="size-3.5 shrink-0" />
-                        <span>{inst.timezone || "UTC"}</span>
-                      </div>
-                    </TableCell>
-
-                    <TableCell>
-                      <div className="flex items-center gap-1.5">
-                        <span
-                          className={cn(
-                            "size-2 rounded-full",
-                            inst.is_active ? "bg-emerald-500 ring-2 ring-emerald-500/20" : "bg-amber-500 ring-2 ring-amber-500/20"
-                          )}
-                        />
-                        <span className="text-xs font-medium text-foreground">
+                      </TableCell>
+                      <TableCell>
+                        {preset ? (
+                          <span className="text-sm">{preset}</span>
+                        ) : (
+                          <Link
+                            href={`/admin/academic/structure?institution=${inst.id}`}
+                            className="text-sm font-medium text-amber-700 hover:underline dark:text-amber-400"
+                          >
+                            Not set up yet
+                          </Link>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {counts
+                          ? counts.departments + counts.classes + counts.students === 0
+                            ? "Empty"
+                            : [
+                                plural(counts.departments, "department"),
+                                plural(counts.classes, "class", "classes"),
+                                plural(counts.students, "student"),
+                              ].join(" · ")
+                          : "—"}
+                      </TableCell>
+                      <TableCell>
+                        <span className="inline-flex items-center gap-1.5 text-sm text-muted-foreground">
+                          <Globe className="size-3.5 shrink-0" />
+                          {timezoneLabel(inst.timezone)}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <span className="inline-flex items-center gap-1.5 text-sm">
+                          <span
+                            className={cn("size-2 rounded-full", inst.is_active ? "bg-emerald-500" : "bg-amber-500")}
+                            aria-hidden
+                          />
                           {inst.is_active ? "Active" : "Suspended"}
                         </span>
-                      </div>
-                    </TableCell>
-
-                    <TableCell className="text-right pr-5">
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 rounded-lg hover:bg-muted cursor-pointer"
-                            disabled={isProcessing === inst.id}
-                          >
-                            {isProcessing === inst.id ? (
-                              <Loader2 className="size-3.5 animate-spin" />
-                            ) : (
-                              <MoreVertical className="size-3.5 text-muted-foreground" />
-                            )}
+                      </TableCell>
+                      <TableCell className="pr-4 text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          <Button variant="outline" asChild className="hidden sm:inline-flex">
+                            <Link href={`/admin/academic/structure?institution=${inst.id}`}>
+                              <Network className="mr-1.5 size-3.5" />
+                              Structure
+                            </Link>
                           </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="w-48 rounded-xl p-1 shadow-lg">
-                          <DropdownMenuLabel className="text-[10px] font-medium text-muted-foreground px-2 py-1">
-                            Partner Settings
-                          </DropdownMenuLabel>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem
-                            className="text-xs cursor-pointer py-1.5 rounded-lg"
-                            onClick={() => handleConfigure(inst)}
-                          >
-                            <Settings className="mr-2 size-3.5 text-muted-foreground" />
-                            Configuration
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            className="text-xs cursor-pointer py-1.5 rounded-lg"
-                            onClick={() => handleBranding(inst)}
-                          >
-                            <ImageIcon className="mr-2 size-3.5 text-muted-foreground" />
-                            Logo & Branding
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem
-                            className={cn(
-                              "text-xs font-medium cursor-pointer py-1.5 rounded-lg",
-                              inst.is_active
-                                ? "text-amber-600 focus:text-amber-600 focus:bg-amber-500/10"
-                                : "text-emerald-600 focus:text-emerald-600 focus:bg-emerald-500/10"
-                            )}
-                            onClick={() => handleToggleStatus(inst)}
-                          >
-                            {inst.is_active ? (
-                              <>
-                                <PowerOff className="mr-2 size-3.5" /> Suspend Access
-                              </>
-                            ) : (
-                              <>
-                                <Power className="mr-2 size-3.5" /> Activate Partner
-                              </>
-                            )}
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </TableCell>
-                  </TableRow>
-                ))
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                aria-label={`Actions for ${inst.name}`}
+                                disabled={busyId === inst.id}
+                              >
+                                {busyId === inst.id ? <Loader2 className="animate-spin" /> : <MoreVertical />}
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-48">
+                              <DropdownMenuItem asChild>
+                                <Link href={`/admin/academic/structure?institution=${inst.id}`}>
+                                  <Network className="mr-2 size-3.5" /> Open structure
+                                </Link>
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => setDialog({ mode: "edit", institution: inst })}>
+                                <Pencil className="mr-2 size-3.5" /> Edit details
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              {inst.is_active ? (
+                                <DropdownMenuItem
+                                  className="text-amber-700 focus:text-amber-700 dark:text-amber-400"
+                                  onClick={() => setConfirmToggle(inst)}
+                                >
+                                  <PowerOff className="mr-2 size-3.5" /> Suspend
+                                </DropdownMenuItem>
+                              ) : (
+                                <DropdownMenuItem
+                                  className="text-emerald-700 focus:text-emerald-700 dark:text-emerald-400"
+                                  onClick={() => void applyActive(inst, true)}
+                                >
+                                  <Power className="mr-2 size-3.5" /> Reactivate
+                                </DropdownMenuItem>
+                              )}
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  )
+                })
               )}
             </TableBody>
           </Table>
         </div>
 
-        {/* Integrated Pagination Footer */}
-        <div className="p-3 sm:px-5 bg-muted/10 border-t border-border/60 flex items-center justify-between text-xs text-muted-foreground">
+        <div className="flex items-center justify-between border-t bg-muted/10 px-4 py-2.5 text-xs text-muted-foreground">
           <span>
-            Showing{" "}
-            <strong>
-              {filteredAndSorted.length === 0 ? 0 : (currentPage - 1) * pageSize + 1}
-            </strong>{" "}
-            to <strong>{Math.min(currentPage * pageSize, filteredAndSorted.length)}</strong> of{" "}
-            <strong>{filteredAndSorted.length}</strong> partners
+            {rows.length === 0
+              ? "No institutions"
+              : `Showing ${(page - 1) * PAGE_SIZE + 1}–${Math.min(page * PAGE_SIZE, rows.length)} of ${rows.length}`}
           </span>
-
           <div className="flex items-center gap-1.5">
             <Button
               variant="outline"
               size="icon"
-              className="size-7.5 rounded-lg cursor-pointer"
-              disabled={currentPage <= 1}
-              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              aria-label="Previous page"
+              disabled={page <= 1}
+              onClick={() => setPage((p) => p - 1)}
             >
-              <ChevronLeft className="size-4" />
+              <ChevronLeft />
             </Button>
-            <span className="text-xs font-mono font-medium px-2">
-              {currentPage} / {totalPages || 1}
+            <span className="px-1 tabular-nums">
+              {page} / {totalPages}
             </span>
             <Button
               variant="outline"
               size="icon"
-              className="size-7.5 rounded-lg cursor-pointer"
-              disabled={currentPage >= totalPages}
-              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+              aria-label="Next page"
+              disabled={page >= totalPages}
+              onClick={() => setPage((p) => p + 1)}
             >
-              <ChevronRight className="size-4" />
+              <ChevronRight />
             </Button>
           </div>
         </div>
       </div>
 
-      {/* Registration Dialog */}
-      <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
-        <DialogContent className="sm:max-w-md rounded-2xl p-6">
-          <DialogHeader>
-            <DialogTitle className="text-base font-semibold tracking-tight">Register Institution</DialogTitle>
-            <DialogDescription className="text-xs">
-              Add a verified educational organization into the multi-tenant system.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="inst-name" className="text-xs font-semibold">
-                  Name
-                </Label>
-                <Input
-                  id="inst-name"
-                  placeholder="e.g. University of Rwanda"
-                  className="h-9 text-xs"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="inst-code" className="text-xs font-semibold">
-                  Identifier Code
-                </Label>
-                <Input
-                  id="inst-code"
-                  placeholder="e.g. UR"
-                  className="h-9 text-xs font-mono uppercase"
-                  value={formData.code}
-                  onChange={(e) => setFormData({ ...formData, code: e.target.value })}
-                />
-              </div>
-            </div>
+      <InstitutionDialog
+        state={dialog}
+        takenCodes={dialog?.mode === "edit" ? [] : takenCodes}
+        onClose={() => setDialog(null)}
+        onSubmit={submit}
+      />
 
-            <div className="space-y-1.5">
-              <Label htmlFor="inst-tz" className="text-xs font-semibold">
-                Operating Timezone
-              </Label>
-              <Input
-                id="inst-tz"
-                value={formData.timezone}
-                placeholder="Africa/Kigali or UTC"
-                className="h-9 text-xs"
-                onChange={(e) => setFormData({ ...formData, timezone: e.target.value })}
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <Label className="text-xs font-semibold">Institution Logo</Label>
-              <div className="flex items-center gap-3">
-                <div className="size-14 rounded-xl border border-dashed border-border flex flex-col items-center justify-center bg-muted/20 hover:bg-muted/40 transition-colors relative overflow-hidden cursor-pointer shrink-0">
-                  {logoFile ? (
-                    <Image
-                      src={URL.createObjectURL(logoFile)}
-                      alt="Preview"
-                      fill
-                      unoptimized
-                      className="object-cover"
-                    />
-                  ) : (
-                    <Upload className="size-4 text-muted-foreground" />
-                  )}
-                  <input
-                    type="file"
-                    className="absolute inset-0 opacity-0 cursor-pointer"
-                    accept="image/*"
-                    onChange={(e) => setLogoFile(e.target.files?.[0] || null)}
-                  />
-                </div>
-                <div className="flex-1 space-y-1">
-                  <Input
-                    placeholder="Or enter logo image URL..."
-                    className="h-8.5 text-xs"
-                    value={formData.logo_url}
-                    onChange={(e) => setFormData({ ...formData, logo_url: e.target.value })}
-                  />
-                  <p className="text-[10px] text-muted-foreground">PNG, SVG or JPG (Square recommended)</p>
-                </div>
-              </div>
-            </div>
-          </div>
-          <DialogFooter className="gap-2 pt-2">
-            <Button variant="ghost" size="sm" onClick={() => setCreateDialogOpen(false)} className="h-8.5 text-xs">
-              Cancel
-            </Button>
-            <Button size="sm" onClick={handleCreate} disabled={isCreating} className="h-8.5 px-4 text-xs font-semibold">
-              {isCreating && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
-              Complete Registration
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Configuration Dialog */}
-      <Dialog open={isSettingsDialogOpen} onOpenChange={setIsSettingsDialogOpen}>
-        <DialogContent className="sm:max-w-md rounded-2xl p-6">
-          <DialogHeader>
-            <DialogTitle className="text-base font-semibold tracking-tight">Configure Institution</DialogTitle>
-            <DialogDescription className="text-xs">Update institutional identity and time standards.</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
-            <div className="space-y-1.5">
-              <Label htmlFor="cfg-name" className="text-xs font-semibold">
-                Institution Name
-              </Label>
-              <Input
-                id="cfg-name"
-                value={formData.name}
-                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                className="h-9 text-xs"
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="cfg-code" className="text-xs font-semibold">
-                  Code
-                </Label>
-                <Input id="cfg-code" value={formData.code} disabled className="h-9 text-xs font-mono opacity-60" />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="cfg-tz" className="text-xs font-semibold">
-                  Timezone
-                </Label>
-                <Input
-                  id="cfg-tz"
-                  value={formData.timezone}
-                  onChange={(e) => setFormData({ ...formData, timezone: e.target.value })}
-                  className="h-9 text-xs"
-                />
-              </div>
-            </div>
-          </div>
-          <DialogFooter className="gap-2 pt-2">
-            <Button variant="ghost" size="sm" onClick={() => setIsSettingsDialogOpen(false)} className="h-8.5 text-xs">
-              Cancel
-            </Button>
-            <Button size="sm" onClick={handleUpdate} disabled={isCreating} className="h-8.5 px-4 text-xs font-semibold">
-              {isCreating && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
-              Save Changes
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Branding Dialog */}
-      <Dialog open={isBrandingDialogOpen} onOpenChange={setIsBrandingDialogOpen}>
-        <DialogContent className="sm:max-w-md rounded-2xl p-6">
-          <DialogHeader>
-            <DialogTitle className="text-base font-semibold tracking-tight">Institutional Branding</DialogTitle>
-            <DialogDescription className="text-xs">Update visual brand identity and crest.</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-4 flex flex-col items-center">
-            <div className="size-24 rounded-2xl border border-dashed border-border flex flex-col items-center justify-center bg-muted/20 hover:bg-muted/40 transition-colors relative overflow-hidden cursor-pointer group">
-              {logoFile ? (
-                <Image src={URL.createObjectURL(logoFile)} alt="Preview" fill unoptimized className="object-cover" />
-              ) : formData.logo_url ? (
-                <Image src={formData.logo_url} alt="Current" fill unoptimized className="object-cover" />
-              ) : (
-                <Upload className="size-6 text-muted-foreground" />
-              )}
-              <input
-                type="file"
-                className="absolute inset-0 opacity-0 cursor-pointer"
-                accept="image/*"
-                onChange={(e) => setLogoFile(e.target.files?.[0] || null)}
-              />
-            </div>
-            <div className="w-full space-y-1.5">
-              <Label htmlFor="brand-url" className="text-xs font-semibold">
-                Image Web URL
-              </Label>
-              <Input
-                id="brand-url"
-                placeholder="https://..."
-                value={formData.logo_url}
-                onChange={(e) => setFormData({ ...formData, logo_url: e.target.value })}
-                className="h-9 text-xs"
-              />
-            </div>
-          </div>
-          <DialogFooter className="gap-2">
-            <Button variant="ghost" size="sm" onClick={() => setIsBrandingDialogOpen(false)} className="h-8.5 text-xs">
-              Cancel
-            </Button>
-            <Button size="sm" onClick={handleUpdate} disabled={isCreating} className="h-8.5 px-4 text-xs font-semibold">
-              {isCreating && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
-              Update Brand
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <AlertDialog open={confirmToggle !== null} onOpenChange={(open) => !open && setConfirmToggle(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Suspend {confirmToggle?.name}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              It will stop appearing when choosing an institution (new courses, teaching assignments, structure). Its
+              data is kept, and you can reactivate it at any time.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep active</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                const inst = confirmToggle
+                setConfirmToggle(null)
+                if (inst) void applyActive(inst, false)
+              }}
+            >
+              Suspend
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
-  );
+  )
+}
+
+function Kpi({
+  icon: Icon,
+  label,
+  value,
+  note,
+}: {
+  icon: LucideIcon
+  label: string
+  value: number | null
+  note: string
+}) {
+  return (
+    <div className="flex items-center justify-between rounded-2xl border bg-card p-4">
+      <div className="space-y-0.5">
+        <dt className="text-xs font-medium text-muted-foreground">{label}</dt>
+        <dd className="text-2xl font-semibold tabular-nums tracking-tight">
+          {value === null ? <Skeleton className="h-8 w-12" /> : value}
+        </dd>
+        <p className="text-[11px] text-muted-foreground">{note}</p>
+      </div>
+      <span className="flex size-9 items-center justify-center rounded-xl bg-muted/60 text-muted-foreground">
+        <Icon className="size-4" />
+      </span>
+    </div>
+  )
 }

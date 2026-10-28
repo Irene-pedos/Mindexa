@@ -112,7 +112,7 @@ export default function LecturerDashboard() {
 
   const metrics = [
     {
-      title: "Active Workspaces",
+      title: "Active Courses",
       value: activeClassesVal,
       delta: (data?.summary.active_classes_count as any)?.delta ?? 0,
       positive: (data?.summary.active_classes_count as any)?.positive ?? true,
@@ -457,13 +457,13 @@ export default function LecturerDashboard() {
         </div>
       </div>
 
-      {/* Active Teaching Workspaces Section */}
+      {/* Active courses section */}
       <div className="space-y-3.5">
         <div className="flex items-center justify-between px-1">
           <div className="flex items-center gap-2">
             <School className="size-4 text-primary" />
             <h2 className="text-sm font-bold uppercase tracking-wider text-muted-foreground">
-              Active Teaching Workspaces
+              Active Courses
             </h2>
             {activeWorkspacesList.length > 0 && (
               <Badge
@@ -481,7 +481,7 @@ export default function LecturerDashboard() {
             asChild
           >
             <Link href="/lecturer/courses">
-              <span>View All Workspaces</span>
+              <span>View all courses</span>
               <ChevronRight className="size-3.5" />
             </Link>
           </Button>
@@ -495,10 +495,10 @@ export default function LecturerDashboard() {
               </div>
               <div className="space-y-1">
                 <h3 className="text-sm font-semibold text-foreground">
-                  No Active Teaching Workspaces
+                  No courses set up yet
                 </h3>
                 <p className="text-xs text-muted-foreground font-normal">
-                  You do not have any operational course workspaces configured for this term.
+                  Set up a course from one of your assignments to manage its class list, handouts and assessments.
                 </p>
               </div>
               <Button
@@ -506,8 +506,8 @@ export default function LecturerDashboard() {
                 className="h-8 px-4 text-xs font-semibold rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground gap-1.5 shadow-2xs mt-2"
                 asChild
               >
-                <Link href="/lecturer/courses/new">
-                  <Plus className="size-3.5" /> Initialize Workspace
+                <Link href="/lecturer/assignments">
+                  <Plus className="size-3.5" /> View my assignments
                 </Link>
               </Button>
             </CardContent>
@@ -583,7 +583,7 @@ export default function LecturerDashboard() {
                     className="w-full h-8 text-xs font-semibold rounded-xl bg-muted/50 hover:bg-primary hover:text-primary-foreground text-foreground transition-colors border border-border/50 gap-1"
                   >
                     <Link href={`/lecturer/courses/${ws.id}`}>
-                      <span>Manage Workspace</span>
+                      <span>Open course</span>
                       <ArrowUpRight className="size-3.5" />
                     </Link>
                   </Button>

@@ -64,7 +64,7 @@ const mainNav = [
     icon: Briefcase,
     badge: true,
   },
-  { title: "My Workspaces", url: "/lecturer/courses", icon: BookOpen, tourId: "lecturer-courses" },
+  { title: "My Courses", url: "/lecturer/courses", icon: BookOpen, tourId: "lecturer-courses" },
   { title: "Assessments", url: "/lecturer/assessments", icon: FileText, tourId: "lecturer-create-assessment" },
   {
     title: "Question Bank",

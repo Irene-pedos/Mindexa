@@ -1,26 +1,21 @@
 // app/lecturer/assessments/[id]/page.tsx
 "use client";
 
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
-import Link from "next/link";
 import Image from "next/image";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
-  CardFooter,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
 import { Progress } from "@/components/ui/progress";
-import { Switch } from "@/components/ui/switch";
 import {
   Select,
   SelectContent,
@@ -38,21 +33,9 @@ import {
 } from "@/components/ui/sheet";
 import {
   ArrowLeft,
-  Calendar,
-  Clock,
-  Shield,
-  Users,
-  Layout,
-  Cpu,
   Play,
-  StopCircle,
-  Lock,
-  Unlock,
-  FileText,
   ChevronRight,
-  BarChart4,
   Flag,
-  BookOpen,
   AlertCircle,
   Sparkles,
   Check,
@@ -61,11 +44,8 @@ import {
   Pencil,
   AlertTriangle,
   Award,
-  Download,
   Loader2 as LoaderCircleIcon,
   CheckCircle2,
-  ShieldCheck,
-  Trash2,
   Eye,
 } from "lucide-react";
 import { format } from "date-fns";
@@ -163,12 +143,10 @@ export default function AssessmentDetailsPage() {
   const [aiReviewDrawerOpen, setAiReviewDrawerOpen] = useState(false);
   const [aiCandidates, setAiCandidates] = useState<any[]>([]);
   const [aiTargetSectionId, setAiTargetSectionId] = useState<string>("");
-  const [aiPollingBatchId, setAiPollingBatchId] = useState<string | null>(null);
 
   // Stats on generation review session
   const [aiAcceptedCount, setAiAcceptedCount] = useState(0);
   const [aiRejectedCount, setAiRejectedCount] = useState(0);
-  const [aiInitialBatchCount, setAiInitialBatchCount] = useState(0);
 
   // Editing Candidate State
   const [editingCandidateId, setEditingCandidateId] = useState<string | null>(null);
@@ -326,7 +304,6 @@ export default function AssessmentDetailsPage() {
             return;
           }
           setAiCandidates(generatedQuestions);
-          setAiInitialBatchCount(generatedQuestions.length);
           setAiAcceptedCount(0);
           setAiRejectedCount(0);
           setAiGenerating(false);
@@ -389,7 +366,6 @@ export default function AssessmentDetailsPage() {
         workspace_id: (assessment as any).teaching_workspace_id || undefined,
       });
 
-      setAiPollingBatchId(res.id);
       pollBatchStatus(res.id);
     } catch (err) {
       setAiGenerating(false);

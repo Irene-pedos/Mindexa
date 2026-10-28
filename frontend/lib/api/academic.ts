@@ -1,5 +1,6 @@
 import { apiClient } from "./client";
-import { 
+import type { AcademicStructure } from "../academic-structure";
+import {
   InstitutionResponse, 
   CampusResponse, 
   CollegeResponse, 
@@ -53,6 +54,10 @@ export interface TeachingAssignment {
   class_section_name?: string;
   class_group_name?: string;
   class_group_level?: number;
+  academic_period_name?: string | null;
+  /** Set once the lecturer has set up the course space for this assignment. */
+  workspace_id?: string | null;
+  workspace_title?: string | null;
 }
 
 export const academicApi = {
@@ -222,4 +227,24 @@ export const adminAcademicApi = {
       body: JSON.stringify(data),
     });
   },
+
+  /** The whole structure of one institution in one request, inactive records included. */
+  getStructure: async (institutionId: string): Promise<AcademicStructure> => {
+    return apiClient(`/admin/academic/structure?institution_id=${institutionId}`);
+  },
+  /** Per-institution counts (campuses, departments, classes, students, courses). */
+  getStructureOverview: async (): Promise<InstitutionOverview[]> => {
+    return apiClient("/admin/academic/overview");
+  },
 };
+
+export interface InstitutionOverview {
+  institution_id: string;
+  campuses: number;
+  colleges: number;
+  departments: number;
+  programs: number;
+  classes: number;
+  students: number;
+  courses: number;
+}

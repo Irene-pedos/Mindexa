@@ -49,14 +49,28 @@ class AdminCourseListItem(BaseModel):
     title: str
     lecturer_name: str
     student_count: int
-    status: str
+    status: str  # "Active" | "Suspended"
     language: LanguageEnum = LanguageEnum.EN
     performance_avg: float = 0.0
     academic_year: str | None = None
+    credit_hours: int | None = None
+    institution_id: uuid.UUID | None = None
+    institution_name: str | None = None
+    department_ids: List[uuid.UUID] = []
+    department_names: List[str] = []
+
+class AdminCourseSummary(BaseModel):
+    """Whole-catalog figures, independent of the current search / filter / page."""
+    total: int = 0
+    active: int = 0
+    suspended: int = 0
+    ai_restricted: int = 0
+    unassigned: int = 0
 
 class AdminCourseListResponse(BaseModel):
     items: List[AdminCourseListItem]
     total: int
+    summary: AdminCourseSummary = AdminCourseSummary()
 
 class AdminUserStatusUpdate(BaseModel):
     """Request to update a user's status."""
@@ -105,6 +119,8 @@ class AdminCourseUpdate(BaseModel):
     institution_id: Optional[uuid.UUID] = None
     academic_period_id: Optional[uuid.UUID] = None
     academic_year: Optional[str] = None
+    # When given, replaces the set of departments the module belongs to.
+    department_ids: Optional[List[uuid.UUID]] = None
 
 class AdminAnalyticsMetric(BaseModel):
     label: str

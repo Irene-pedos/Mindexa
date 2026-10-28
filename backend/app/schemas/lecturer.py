@@ -86,14 +86,16 @@ class WorkspaceDetail(WorkspaceListItem):
     description: Optional[str] = None
     department_name: Optional[str] = None
     option_name: Optional[str] = None
+    teaching_assignment_id: Optional[uuid.UUID] = None
     sections: List[WorkspaceSectionResponse] = []
     roster: List[LecturerCourseRosterItem] = []
 
 class WorkspaceCreate(BaseModel):
     """Request to initialize a teaching workspace from an assignment."""
     teaching_assignment_id: uuid.UUID
-    title: Optional[str] = None # Defaults to "{Course} ({Section})"
+    title: Optional[str] = Field(default=None, max_length=200)  # Defaults to "{Course} ({Section})"
     description: Optional[str] = None
+    banner_image_url: Optional[str] = Field(default=None, max_length=500)
 
 class WorkspaceUpdate(BaseModel):
     title: Optional[str] = Field(default=None, min_length=1)

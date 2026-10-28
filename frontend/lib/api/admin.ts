@@ -85,14 +85,39 @@ export interface AdminCourseListItem {
   title: string;
   lecturer_name: string;
   student_count: number;
+  /** "Active" or "Suspended". */
   status: string;
   language?: "EN" | "RW" | "FR" | "SW";
   academic_year?: string;
+  credit_hours?: number | null;
+  institution_id?: string | null;
+  institution_name?: string | null;
+  department_ids?: string[];
+  department_names?: string[];
+}
+
+/** Whole-catalog figures, independent of the current search, filter and page. */
+export interface AdminCourseSummary {
+  total: number;
+  active: number;
+  suspended: number;
+  ai_restricted: number;
+  unassigned: number;
 }
 
 export interface AdminCourseListResponse {
   items: AdminCourseListItem[];
   total: number;
+  summary: AdminCourseSummary;
+}
+
+export interface AdminCourseQuery {
+  page?: number;
+  pageSize?: number;
+  search?: string;
+  status?: "active" | "suspended";
+  language?: "EN" | "RW" | "FR" | "SW";
+  institutionId?: string;
 }
 
 export interface AdminAnalyticsMetric {
@@ -202,8 +227,16 @@ export const adminApi = {
   getLecturers: async (): Promise<UserResponse[]> => {
     return apiClient("/admin/lecturers");
   },
-  getCourses: async (page = 1, pageSize = 20): Promise<AdminCourseListResponse> => {
-    return apiClient(`/admin/courses?page=${page}&page_size=${pageSize}`);
+  getCourses: async (query: AdminCourseQuery = {}): Promise<AdminCourseListResponse> => {
+    const params = new URLSearchParams({
+      page: String(query.page ?? 1),
+      page_size: String(query.pageSize ?? 20),
+    });
+    if (query.search?.trim()) params.set("search", query.search.trim());
+    if (query.status) params.set("status", query.status);
+    if (query.language) params.set("language", query.language);
+    if (query.institutionId) params.set("institution_id", query.institutionId);
+    return apiClient(`/admin/courses?${params.toString()}`);
   },
   getCourse: async (id: string): Promise<any> => {
     return apiClient(`/admin/courses/${id}`);

@@ -6,7 +6,9 @@ export interface AssessmentConfig {
   description?: string;
   instructions?: string;
   assessment_type: string;
+  teaching_workspace_id?: string;
   total_marks: number;
+  passing_marks?: number;
   duration_minutes?: number;
   window_start?: string;
   window_end?: string;

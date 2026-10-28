@@ -18,6 +18,19 @@ from app.db.schemas.base import BaseAuditedResponse, MindexaSchema
 # INSTITUTION
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _valid_timezone(value: str | None) -> str | None:
+    """Only real IANA names ("Africa/Kigali", "UTC"); free text like "UTC+2" breaks date handling."""
+    if value is None:
+        return value
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+    try:
+        ZoneInfo(value)
+    except (ZoneInfoNotFoundError, ValueError, OSError) as exc:
+        raise ValueError(f"'{value}' is not a valid timezone. Use a name like Africa/Kigali or UTC.") from exc
+    return value
+
+
 class InstitutionCreate(MindexaSchema):
     name: str = Field(min_length=2, max_length=255)
     code: str = Field(min_length=2, max_length=20)
@@ -25,6 +38,16 @@ class InstitutionCreate(MindexaSchema):
     logo_url: str | None = Field(default=None)
     settings: dict | None = None
     integrations: dict | None = None
+
+    @field_validator("code")
+    @classmethod
+    def _upper_code(cls, value: str) -> str:
+        return value.strip().upper()
+
+    @field_validator("timezone")
+    @classmethod
+    def _timezone(cls, value: str) -> str:
+        return _valid_timezone(value) or "UTC"
 
 
 class InstitutionUpdate(MindexaSchema):
@@ -34,6 +57,11 @@ class InstitutionUpdate(MindexaSchema):
     is_active: bool | None = None
     settings: dict | None = None
     integrations: dict | None = None
+
+    @field_validator("timezone")
+    @classmethod
+    def _timezone(cls, value: str | None) -> str | None:
+        return _valid_timezone(value)
 
 
 class InstitutionResponse(BaseAuditedResponse):

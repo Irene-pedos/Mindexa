@@ -1,7 +1,7 @@
 // app/lecturer/assessments/page.tsx
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import { Suspense, useState, useEffect, useCallback } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -34,7 +34,6 @@ import {
   Lock,
   FileText,
   Zap,
-  Sparkles,
   CheckCircle,
   UserCheck,
   X,
@@ -65,7 +64,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
+import { lecturerApi, type WorkspaceListItem } from "@/lib/api/lecturer";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -152,15 +152,6 @@ function statusStyle(status: string): string {
     CANCELLED: "bg-destructive/10 text-destructive border-destructive/20",
   };
   return m[status] ?? "bg-muted text-muted-foreground";
-}
-
-function gradingModeStyle(mode: string): string {
-  const m: Record<string, string> = {
-    AUTO: "bg-secondary text-secondary-foreground border-border",
-    MANUAL: "bg-warning/10 text-warning border-warning/20",
-    AI_ASSISTED: "bg-primary/10 text-primary border-primary/20",
-  };
-  return m[mode?.toUpperCase()] ?? "bg-muted text-muted-foreground";
 }
 
 function releaseStyle(mode: string | null): string {
@@ -334,7 +325,16 @@ function BulkDeleteDialog({
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function ManageAssessmentsPage() {
+  return (
+    <Suspense fallback={null}>
+      <ManageAssessments />
+    </Suspense>
+  );
+}
+
+function ManageAssessments() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { user } = useAuth();
   const [assessments, setAssessments] = useState<Assessment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -347,6 +347,10 @@ export default function ManageAssessmentsPage() {
   const [statusTab, setStatusTab] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
   const [gradingFilter, setGradingFilter] = useState("all");
+  const [courseFilter, setCourseFilter] = useState(
+    searchParams.get("workspace") ?? "all",
+  );
+  const [courses, setCourses] = useState<WorkspaceListItem[]>([]);
 
   // Tab counts
   const [tabCounts, setTabCounts] = useState<Record<string, number>>({});
@@ -371,6 +375,7 @@ export default function ManageAssessmentsPage() {
       if (statusTab !== "all") params.status = statusTab;
       if (typeFilter !== "all") params.assessment_type = typeFilter;
       if (gradingFilter !== "all") params.grading_mode = gradingFilter;
+      if (courseFilter !== "all") params.workspace_id = courseFilter;
       if (debouncedSearch.trim()) params.search = debouncedSearch.trim();
 
       const response = await assessmentApi.getAssessments(params);
@@ -388,6 +393,7 @@ export default function ManageAssessmentsPage() {
     sortBy,
     typeFilter,
     gradingFilter,
+    courseFilter,
     debouncedSearch,
   ]);
 
@@ -399,7 +405,12 @@ export default function ManageAssessmentsPage() {
       );
       const results = await Promise.allSettled(
         statuses.map((s) =>
-          assessmentApi.getAssessments({ status: s, page: 1, page_size: 1 }),
+          assessmentApi.getAssessments({
+            status: s,
+            page: 1,
+            page_size: 1,
+            ...(courseFilter !== "all" ? { workspace_id: courseFilter } : {}),
+          }),
         ),
       );
       const counts: Record<string, number> = {};
@@ -412,7 +423,7 @@ export default function ManageAssessmentsPage() {
     } catch {
       // ignore
     }
-  }, []);
+  }, [courseFilter]);
 
   useEffect(() => {
     fetchAssessments();
@@ -421,6 +432,13 @@ export default function ManageAssessmentsPage() {
   useEffect(() => {
     fetchTabCounts();
   }, [fetchTabCounts]);
+
+  useEffect(() => {
+    lecturerApi
+      .getWorkspaces(1, 100)
+      .then(setCourses)
+      .catch(() => undefined);
+  }, []);
 
   // ── Actions ────────────────────────────────────────────────────────────────
 
@@ -492,19 +510,23 @@ export default function ManageAssessmentsPage() {
   };
 
   const handleDuplicate = async (id: string, title: string) => {
-    toast.info(`Cloning "${title}"…`);
+    toast.info(`Copying the settings of "${title}"…`);
     try {
-      // Clone by fetching detail and creating a new draft with the same config
+      // Copies the setup (course, marks, timing, grading); questions are added again in the editor.
       const detail = await assessmentApi.getAssessmentById(id);
       const clone = await assessmentApi.createAssessment({
         title: `${detail.title} (Copy)`,
+        description: detail.description ?? undefined,
+        instructions: detail.instructions ?? undefined,
         assessment_type: detail.assessment_type,
+        teaching_workspace_id: detail.teaching_workspace_id ?? undefined,
         total_marks: detail.total_marks,
+        passing_marks: detail.passing_marks ?? undefined,
         duration_minutes: detail.duration_minutes,
         grading_mode: detail.grading_mode,
         result_release_mode: detail.result_release_mode ?? "MANUAL",
       });
-      toast.success("Draft cloned — opening editor…");
+      toast.success("Settings copied. Add the questions in the editor.");
       router.push(`/lecturer/assessments/new?draft=${clone.id}`);
     } catch (err: any) {
       toast.error(err.message || "Failed to duplicate");
@@ -561,7 +583,13 @@ export default function ManageAssessmentsPage() {
           asChild
           className="h-8 rounded-lg px-4 gap-1.5 shadow-none font-bold text-[10px] uppercase tracking-wider text-white"
         >
-          <Link href="/lecturer/assessments/new">
+          <Link
+            href={
+              courseFilter !== "all"
+                ? `/lecturer/assessments/new?workspace=${courseFilter}`
+                : "/lecturer/assessments/new"
+            }
+          >
             <Plus className="size-3.5" /> New Assessment
           </Link>
         </Button>
@@ -631,6 +659,33 @@ export default function ManageAssessmentsPage() {
               </SelectContent>
             </Select>
 
+            {/* Course filter */}
+            {courses.length > 0 && (
+              <Select
+                value={courseFilter}
+                onValueChange={(v) => {
+                  if (!v) return;
+                  setCourseFilter(v);
+                  setPage(1);
+                }}
+              >
+                <SelectTrigger className="w-48 h-8 text-xs rounded-xl bg-background border-border/60 shadow-none font-medium">
+                  <BookOpen className="mr-1.5 size-3.5 text-muted-foreground" />
+                  <SelectValue placeholder="Course" />
+                </SelectTrigger>
+                <SelectContent className="rounded-xl text-xs">
+                  <SelectItem value="all" className="text-xs">
+                    All courses
+                  </SelectItem>
+                  {courses.map((c) => (
+                    <SelectItem key={c.id} value={c.id} className="text-xs">
+                      {c.code} · {c.title}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+
             {/* Type filter */}
             <Select
               value={typeFilter}
@@ -682,6 +737,7 @@ export default function ManageAssessmentsPage() {
             {/* Clear filters */}
             {(typeFilter !== "all" ||
               gradingFilter !== "all" ||
+              courseFilter !== "all" ||
               searchTerm.trim().length > 0 ||
               sortBy !== "newest") && (
               <Button
@@ -691,6 +747,7 @@ export default function ManageAssessmentsPage() {
                 onClick={() => {
                   setTypeFilter("all");
                   setGradingFilter("all");
+                  setCourseFilter("all");
                   setSearchTerm("");
                   setSortBy("newest");
                   setPage(1);
@@ -909,7 +966,7 @@ export default function ManageAssessmentsPage() {
                                     : "Get started by creating your first academic assessment."}
                                 </p>
                               </div>
-                              {searchTerm || typeFilter !== "all" || gradingFilter !== "all" ? (
+                              {searchTerm || typeFilter !== "all" || gradingFilter !== "all" || courseFilter !== "all" ? (
                                 <Button
                                   variant="outline"
                                   size="sm"
@@ -917,6 +974,7 @@ export default function ManageAssessmentsPage() {
                                     setSearchTerm("");
                                     setTypeFilter("all");
                                     setGradingFilter("all");
+                                    setCourseFilter("all");
                                     setPage(1);
                                   }}
                                   className="h-8 rounded-xl text-xs mt-1"
@@ -1151,7 +1209,7 @@ export default function ManageAssessmentsPage() {
                                     variant="ghost"
                                     size="icon"
                                     className="h-6 w-6 rounded hover:bg-muted/80"
-                                    title="Duplicate"
+                                    title="Copy settings into a new draft"
                                     onClick={() =>
                                       handleDuplicate(item.id, item.title)
                                     }

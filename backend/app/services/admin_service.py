@@ -5,10 +5,12 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, List, Tuple, Optional
 
 from sqlalchemy import delete, select, func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.constants import UserStatus
-from app.core.exceptions import NotFoundError
+from app.core.exceptions import AlreadyExistsError, NotFoundError
+from app.core.logging import get_logger
 from app.db.enums import LanguageEnum, LecturerAssignmentRole, UserRole
 from app.db.models.academic import (
     Course, 
@@ -37,6 +39,7 @@ from app.schemas.admin import (
     AdminChartDataPoint,
     AdminIntegrityOverview,
     AdminCourseListItem,
+    AdminCourseSummary,
     AdminCourseUpdate,
     AdminInstitutionSummary,
     AdminDashboardResponse,
@@ -50,6 +53,8 @@ from app.schemas.admin import (
 from app.db.schemas.academic import (CourseResponse, InstitutionCreate,
                                      InstitutionUpdate)
 from app.services.auth_service import AuthService
+
+logger = get_logger(__name__)
 
 
 class AdminService:
@@ -426,13 +431,75 @@ class AdminService:
         await self.db.refresh(user)
         return await self._build_user_response_with_courses(user)
 
-    async def list_courses(self, page: int = 1, page_size: int = 20) -> Tuple[List[AdminCourseListItem], int]:
-        courses, total = await self.course_repo.list_all(page=page, page_size=page_size)
+    async def _course_student_count(self, course_id: uuid.UUID) -> int:
+        """Distinct active students who take the course.
 
+        A course reaches students through the classes its lecturers are assigned to AND through
+        its teaching workspaces (which, with no class chosen, cover the whole department), so
+        both are counted. Counting assignments alone reported 0 for most courses.
+        """
+        from app.db.models.academic import StudentEnrollment, TeachingAssignment, TeachingWorkspace
+        from app.db.enums import EnrollmentStatus
+        from app.db.repositories.workspace_repo import WorkspaceRepository
+
+        section_ids: set[uuid.UUID] = set()
+        workspace_ids = (await self.db.execute(
+            select(TeachingWorkspace.id).where(
+                TeachingWorkspace.course_id == course_id, TeachingWorkspace.is_deleted == False  # noqa: E712
+            )
+        )).scalars().all()
+        workspace_repo = WorkspaceRepository(self.db)
+        for workspace_id in workspace_ids:
+            section_ids.update(s.id for s in await workspace_repo.resolve_workspace_sections(workspace_id))
+        section_ids.update((await self.db.execute(
+            select(TeachingAssignment.class_section_id).where(
+                TeachingAssignment.course_id == course_id,
+                TeachingAssignment.class_section_id.is_not(None),
+                TeachingAssignment.is_active == True,  # noqa: E712
+                TeachingAssignment.is_deleted == False,  # noqa: E712
+            )
+        )).scalars().all())
+        if not section_ids:
+            return 0
+        return int((await self.db.execute(
+            select(func.count(func.distinct(StudentEnrollment.student_id))).where(
+                StudentEnrollment.class_section_id.in_(section_ids),
+                StudentEnrollment.enrollment_status == EnrollmentStatus.ACTIVE.value,
+                StudentEnrollment.is_deleted == False,  # noqa: E712
+            )
+        )).scalar_one() or 0)
+
+    async def list_courses(
+        self,
+        page: int = 1,
+        page_size: int = 20,
+        *,
+        search: str | None = None,
+        status: str | None = None,
+        language: str | None = None,
+        institution_id: uuid.UUID | None = None,
+    ) -> Tuple[List[AdminCourseListItem], int]:
+        courses, total = await self.course_repo.list_filtered(
+            page, page_size, search=search, status=status, language=language, institution_id=institution_id
+        )
+
+        institution_names: dict[uuid.UUID, str] = {}
         items = []
         for c in courses:
-            student_count = await self.course_repo.get_student_count(c.id)
-            
+            student_count = await self._course_student_count(c.id)
+
+            if c.institution_id and c.institution_id not in institution_names:
+                inst = await self.db.get(Institution, c.institution_id)
+                institution_names[c.institution_id] = inst.name if inst else ""
+            departments = (await self.db.execute(
+                select(Department.id, Department.name)
+                .join(CourseDepartment, CourseDepartment.department_id == Department.id)
+                .where(CourseDepartment.course_id == c.id, Department.is_deleted == False)  # noqa: E712
+                .order_by(Department.name)
+            )).all()
+            department_ids = [row[0] for row in departments]
+            department_names = [row[1] for row in departments]
+
             # Fetch primary lecturer name
             from app.db.models.academic import TeachingAssignment
             lecturer_stmt = (
@@ -459,18 +526,45 @@ class AdminService:
                 title=c.name,
                 lecturer_name=lecturer_name,
                 student_count=student_count,
-                status="Active" if not c.is_deleted else "Deleted",
+                # Suspending a module sets is_active=False; the list used to read is_deleted
+                # only, so a suspended module kept showing as "Active".
+                status="Active" if c.is_active else "Suspended",
                 language=getattr(c, "language", LanguageEnum.EN),
-                academic_year=c.academic_year
+                academic_year=c.academic_year,
+                credit_hours=getattr(c, "credit_hours", None),
+                institution_id=c.institution_id,
+                institution_name=institution_names.get(c.institution_id) or None,
+                department_ids=department_ids,
+                department_names=department_names,
             ))
 
         return items, total
+
+    async def get_course_detail(self, course_id: uuid.UUID) -> CourseResponse:
+        """One course with the departments and options it belongs to, for the edit form."""
+        course = await self.course_repo.get_by_id(course_id)
+        if not course:
+            raise NotFoundError("Course", str(course_id))
+        detail = CourseResponse.model_validate(course)
+        detail.department_ids = list((await self.db.execute(
+            select(CourseDepartment.department_id).where(CourseDepartment.course_id == course_id)
+        )).scalars().all())
+        detail.option_ids = list((await self.db.execute(
+            select(CourseOption.option_id).where(CourseOption.course_id == course_id)
+        )).scalars().all())
+        return detail
+
+    async def get_course_summary(self) -> AdminCourseSummary:
+        return AdminCourseSummary(**await self.course_repo.catalog_summary())
 
     async def create_course(self, data: AdminCourseCreate) -> Course:
         """Create a new course with optional primary lecturer assignment."""
         # Create the course
         course = Course(
             institution_id=data.institution_id,
+            # Moderation, the exam office and appeals route by course.department_id, so a course
+            # created with departments must carry its primary one (not only the junction rows).
+            department_id=data.department_ids[0] if data.department_ids else None,
             academic_period_id=data.academic_period_id,
             academic_year=data.academic_year,
             code=data.code,
@@ -480,7 +574,11 @@ class AdminService:
             language=getattr(data, "language", LanguageEnum.EN) or LanguageEnum.EN,
             is_active=True
         )
-        await self.course_repo.create(course)
+        try:
+            await self.course_repo.create(course)
+        except IntegrityError as exc:
+            await self.db.rollback()
+            raise AlreadyExistsError(detail=self._duplicate_course_message(data.code)) from exc
 
         # 1. Assign Departments
         if data.department_ids:
@@ -583,10 +681,26 @@ class AdminService:
             course.academic_year = data.academic_year
         if data.language is not None:
             course.language = data.language
+        if data.department_ids is not None:
+            await self.db.execute(delete(CourseDepartment).where(CourseDepartment.course_id == course.id))
+            for dept_id in dict.fromkeys(data.department_ids):
+                self.db.add(CourseDepartment(course_id=course.id, department_id=dept_id))
+            course.department_id = data.department_ids[0] if data.department_ids else None
 
-        await self.db.commit()
+        try:
+            await self.db.commit()
+        except IntegrityError as exc:
+            await self.db.rollback()
+            raise AlreadyExistsError(detail=self._duplicate_course_message(course.code)) from exc
         await self.db.refresh(course)
         return course
+
+    @staticmethod
+    def _duplicate_course_message(code: str) -> str:
+        return (
+            f"A module with code '{code}' already exists for this institution and academic period. "
+            "Use a different code or period."
+        )
 
     async def sync_course_workspace_language(self, course_id: uuid.UUID) -> dict[str, Any]:
         """Cascade course language down to all its active teaching workspaces and draft assessments."""
@@ -661,14 +775,21 @@ class AdminService:
             is_active=True
         )
         self.db.add(institution)
-        await self.db.commit()
+        try:
+            await self.db.commit()
+        except IntegrityError as exc:
+            await self.db.rollback()
+            raise AlreadyExistsError(
+                detail=f"An institution with code '{data.code}' already exists. Choose a different code."
+            ) from exc
         await self.db.refresh(institution)
         try:
             from app.services.approval_policy_service import ApprovalPolicyService
             policy_svc = ApprovalPolicyService(self.db)
             await policy_svc.seed_defaults_for_institution(institution.id)
         except Exception as exc:
-            pass
+            # Policies are re-seeded on first use, so registration still succeeds; but say so.
+            logger.warning("institution_policy_seed_failed", institution_id=str(institution.id), error=str(exc))
         return institution
 
     async def update_institution(self, institution_id: uuid.UUID, data: InstitutionUpdate) -> Institution:
@@ -687,7 +808,9 @@ class AdminService:
         if data.is_active is not None:
             institution.is_active = data.is_active
         if data.settings is not None:
-            institution.settings = data.settings
+            # Merge, don't replace: settings holds independent blocks (e.g. the structure
+            # profile), and saving one must not wipe the others.
+            institution.settings = {**(institution.settings or {}), **data.settings}
         if data.integrations is not None:
             institution.integrations = data.integrations
 

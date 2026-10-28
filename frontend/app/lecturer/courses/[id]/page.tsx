@@ -1,8 +1,7 @@
 // app/lecturer/courses/[id]/page.tsx
 "use client";
 
-import React, { useEffect, useState, useCallback } from "react";
-import { useParams, useRouter } from "next/navigation";
+import React, { useEffect, useState, useCallback } from "react";import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   Card,
@@ -40,7 +39,6 @@ import {
 import {
   Plus,
   Loader2,
-  Calendar,
   Upload,
   FileText,
   Database,
@@ -50,7 +48,6 @@ import {
   Search,
   Building2,
   Layers,
-  CheckCircle2,
   TrendingUp,
   Activity,
   BookOpen,
@@ -68,7 +65,6 @@ import {
 } from "@/lib/api/lecturer";
 import { toast } from "sonner";
 import { format } from "date-fns";
-import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
@@ -85,6 +81,9 @@ import {
   AttachmentTitle,
 } from "@/components/ui/attachment";
 import { Label } from "@/components/ui/label";
+
+const errorText = (err: unknown, fallback: string): string =>
+  err instanceof Error && err.message ? err.message : fallback;
 
 export default function LecturerWorkspaceDetail() {
   const params = useParams();
@@ -131,7 +130,7 @@ export default function LecturerWorkspaceDetail() {
       setBannerUrlInput(workspaceData.banner_image_url || "");
       setBannerPreview(workspaceData.banner_image_url || "");
     } catch (err: unknown) {
-      toast.error("Failed to load workspace details");
+      toast.error("Failed to load the course");
     } finally {
       setLoading(false);
     }
@@ -145,10 +144,10 @@ export default function LecturerWorkspaceDetail() {
     setArchiving(true);
     try {
       await lecturerApi.archiveWorkspace(id);
-      toast.success("Workspace archived successfully");
+      toast.success("Course archived");
       router.push("/lecturer/courses");
-    } catch (err: any) {
-      toast.error(err.message || "Failed to archive workspace");
+    } catch (err: unknown) {
+      toast.error(errorText(err, "Failed to archive workspace"));
       setArchiveDialogOpen(false);
     } finally {
       setArchiving(false);
@@ -171,8 +170,8 @@ export default function LecturerWorkspaceDetail() {
       toast.success("Banner updated successfully");
       setBannerDialogOpen(false);
       setBannerFile(null);
-    } catch (err: any) {
-      toast.error(err.message || "Failed to update banner");
+    } catch (err: unknown) {
+      toast.error(errorText(err, "Failed to update banner"));
     } finally {
       setUpdatingBanner(false);
     }
@@ -208,8 +207,8 @@ export default function LecturerWorkspaceDetail() {
       toast.success("Material uploaded successfully");
       const materialsData = await lecturerApi.getWorkspaceMaterials(id);
       setMaterials(materialsData);
-    } catch (err: any) {
-      toast.error("Upload failed");
+    } catch (err: unknown) {
+      toast.error(errorText(err, "Upload failed"));
     } finally {
       setUploading(false);
       e.target.value = "";
@@ -222,8 +221,8 @@ export default function LecturerWorkspaceDetail() {
       await lecturerApi.deleteMaterial(deleteMaterialId);
       toast.success("Material deleted successfully");
       setMaterials((prev) => prev.filter((m) => m.id !== deleteMaterialId));
-    } catch (err: any) {
-      toast.error(err.message || "Failed to delete material");
+    } catch (err: unknown) {
+      toast.error(errorText(err, "Failed to delete material"));
     } finally {
       setDeleteMaterialId(null);
     }
@@ -293,10 +292,10 @@ export default function LecturerWorkspaceDetail() {
         <div className="size-12 rounded-2xl bg-muted/40 border border-border/60 flex items-center justify-center text-muted-foreground">
           <Database className="size-6" />
         </div>
-        <p className="text-sm font-semibold text-foreground">Workspace not found</p>
-        <p className="text-xs text-muted-foreground max-w-sm">This workspace may have been archived or removed from the registry.</p>
+        <p className="text-sm font-semibold text-foreground">Course not found</p>
+        <p className="text-xs text-muted-foreground max-w-sm">This course may have been archived, or it isn&apos;t one of your assignments.</p>
         <Button variant="outline" size="sm" asChild className="mt-2 text-xs rounded-xl border-border/60">
-          <Link href="/lecturer/courses">Back to Workspaces</Link>
+          <Link href="/lecturer/courses">Back to my courses</Link>
         </Button>
       </div>
     );
@@ -329,9 +328,18 @@ export default function LecturerWorkspaceDetail() {
                 {workspace.code}
               </Badge>
               <span className="text-xs text-muted-foreground font-normal">
-                Academic Year: {workspace.academic_year}
+                {workspace.academic_year}
               </span>
             </div>
+            <p className="mt-1 truncate text-xs text-muted-foreground">
+              {[
+                workspace.institution_name,
+                workspace.department_name,
+                workspace.option_name,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            </p>
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
@@ -348,7 +356,7 @@ export default function LecturerWorkspaceDetail() {
             size="sm"
             className="h-8 px-3.5 rounded-xl text-xs font-semibold shadow-2xs text-primary-foreground bg-primary hover:bg-primary/90"
           >
-            <Link href="/lecturer/assessments/new">
+            <Link href={`/lecturer/assessments/new?workspace=${id}`}>
               <Plus className="mr-1.5 size-3.5" /> New Assessment
             </Link>
           </Button>
@@ -394,7 +402,7 @@ export default function LecturerWorkspaceDetail() {
               <CardContent className="p-3.5 flex items-center justify-between">
                 <div className="space-y-0.5">
                   <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-                    Class Performance
+                    Class Average
                   </p>
                   <p className="text-xl font-bold tracking-tight text-primary tabular-nums">
                     {workspace.performance_avg.toFixed(1)}%
@@ -426,10 +434,12 @@ export default function LecturerWorkspaceDetail() {
               <CardContent className="p-3.5 flex items-center justify-between min-w-0">
                 <div className="space-y-0.5 min-w-0">
                   <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-                    Target Cohort
+                    Class
                   </p>
                   <p className="text-sm font-bold truncate text-foreground mt-0.5">
-                    {workspace.class_name}
+                    {workspace.class_name === "GLOBAL"
+                      ? "All classes"
+                      : workspace.class_name}
                   </p>
                 </div>
                 <div className="size-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary shrink-0">
@@ -439,29 +449,6 @@ export default function LecturerWorkspaceDetail() {
             </Card>
           </div>
 
-          {/* Progress bar */}
-          <Card className="rounded-xl border border-border/60 bg-card shadow-2xs">
-            <CardContent className="p-3.5 space-y-2">
-              <div className="flex justify-between items-center text-xs">
-                <div className="space-y-0.5">
-                  <h3 className="font-semibold text-foreground text-xs">
-                    Syllabus Completion
-                  </h3>
-                  <p className="text-[10px] text-muted-foreground font-normal">
-                    Evaluations logged via assignments registry
-                  </p>
-                </div>
-                <span className="text-base font-bold text-primary tabular-nums">
-                  {workspace.performance_avg.toFixed(1)}%
-                </span>
-              </div>
-              <Progress
-                value={workspace.performance_avg}
-                className="h-1.5 bg-muted"
-              />
-            </CardContent>
-          </Card>
-
           {/* Student Roster Table */}
           <Card className="rounded-2xl border border-border/60 bg-card shadow-2xs overflow-hidden">
             <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 border-b border-border/40 bg-muted/20">
@@ -470,7 +457,7 @@ export default function LecturerWorkspaceDetail() {
                   <Layers className="size-3.5 text-primary shrink-0" /> Student Cohort
                 </CardTitle>
                 <CardDescription className="text-[10px] font-normal text-muted-foreground">
-                  Directory of students synchronized with this workspace.
+                  Students enrolled in this course&apos;s classes. Select one to see their results.
                 </CardDescription>
               </div>
               <div className="relative w-full sm:w-64">
@@ -550,7 +537,7 @@ export default function LecturerWorkspaceDetail() {
                             size="sm"
                             className="h-7 px-2.5 text-[10px] font-semibold uppercase tracking-wider rounded-lg border-border/60 bg-card group-hover:bg-primary group-hover:text-primary-foreground group-hover:border-primary transition-all opacity-0 group-hover:opacity-100 shadow-2xs"
                           >
-                            Trace Audit
+                            View record
                           </Button>
                         </TableCell>
                       </TableRow>
@@ -575,7 +562,7 @@ export default function LecturerWorkspaceDetail() {
                 asChild
                 className="w-full justify-between h-8.5 text-xs font-semibold rounded-xl shadow-2xs text-primary-foreground bg-primary hover:bg-primary/90"
               >
-                <Link href="/lecturer/assessments/new">
+                <Link href={`/lecturer/assessments/new?workspace=${id}`}>
                   New Assessment <ArrowRight className="size-3.5" />
                 </Link>
               </Button>
@@ -684,7 +671,7 @@ export default function LecturerWorkspaceDetail() {
                     {materials.map((m) => (
                       <Attachment
                         key={m.id}
-                        className="w-full justify-between hover:bg-muted/40 border border-border/60 transition-all cursor-pointer rounded-xl p-2 bg-background"
+                        className="w-full min-w-0 max-w-full overflow-hidden justify-between hover:bg-muted/40 border border-border/60 transition-all cursor-pointer rounded-xl p-2 bg-background"
                         onClick={async () => {
                           try {
                             await lecturerApi.downloadMaterial(
@@ -692,7 +679,7 @@ export default function LecturerWorkspaceDetail() {
                               m.original_filename,
                             );
                             toast.success("Download started");
-                          } catch (err: any) {
+                          } catch {
                             toast.error("Failed to download material");
                           }
                         }}
@@ -883,7 +870,7 @@ export default function LecturerWorkspaceDetail() {
         </DialogContent>
       </Dialog>
 
-      {/* Trace Audit Modal */}
+      {/* Student record dialog */}
       <Dialog open={recordDialogOpen} onOpenChange={setRecordDialogOpen}>
         <DialogContent className="max-w-2xl max-h-[85vh] p-0 overflow-hidden rounded-2xl border border-border/60 shadow-xl bg-card text-card-foreground">
           <DialogHeader className="p-4 border-b border-border/40 bg-muted/20">
@@ -996,12 +983,6 @@ export default function LecturerWorkspaceDetail() {
             >
               Close
             </Button>
-            <Button
-              size="sm"
-              className="h-8 text-xs font-semibold rounded-xl text-primary-foreground bg-primary hover:bg-primary/90 shadow-2xs"
-            >
-              Export Report
-            </Button>
           </div>
         </DialogContent>
       </Dialog>
@@ -1011,14 +992,13 @@ export default function LecturerWorkspaceDetail() {
         <DialogContent className="max-w-md p-0 overflow-hidden rounded-2xl bg-card border border-border/60 text-card-foreground shadow-xl">
           <DialogHeader className="p-4 border-b border-border/40 bg-muted/20">
             <DialogTitle className="text-xs font-semibold text-destructive uppercase tracking-wider">
-              Archive Workspace
+              Archive course
             </DialogTitle>
           </DialogHeader>
           <div className="p-5">
             <p className="text-xs text-muted-foreground leading-relaxed font-normal">
-              Are you sure you want to archive this teaching workspace?
-              Archiving will hide the workspace from active dashboards, but all
-              student grades and attempts data will be preserved.
+              Archive this course? It disappears from your active courses, but
+              all student grades and attempts are kept.
             </p>
           </div>
           <div className="p-4 border-t border-border/40 bg-muted/20 flex justify-end gap-2">

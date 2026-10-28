@@ -12,11 +12,68 @@ class CourseRepository:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
 
+    async def list_filtered(
+        self,
+        page: int = 1,
+        page_size: int = 20,
+        *,
+        search: str | None = None,
+        status: str | None = None,
+        language: str | None = None,
+        institution_id: uuid.UUID | None = None,
+    ) -> Tuple[List[Course], int]:
+        """One page of the catalog, with search / status / language applied across ALL courses
+        (not just the rows of the current page)."""
+        filters = [Course.is_deleted == False]  # noqa: E712
+        if search:
+            term = f"%{search.strip()}%"
+            filters.append(or_(Course.name.ilike(term), Course.code.ilike(term)))
+        if status == "active":
+            filters.append(Course.is_active == True)  # noqa: E712
+        elif status == "suspended":
+            filters.append(Course.is_active == False)  # noqa: E712
+        if language:
+            filters.append(Course.language == language)
+        if institution_id:
+            filters.append(Course.institution_id == institution_id)
+
+        total = (await self.db.execute(select(func.count(Course.id)).where(*filters))).scalar_one()
+        result = await self.db.execute(
+            select(Course)
+            .where(*filters)
+            .order_by(Course.code.asc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+        return list(result.scalars().all()), total
+
+    async def catalog_summary(self) -> dict[str, int]:
+        """Whole-catalog figures for the admin KPI strip."""
+        from app.db.models.academic import TeachingAssignment
+
+        live = Course.is_deleted == False  # noqa: E712
+
+        async def count(*extra) -> int:  # type: ignore[no-untyped-def]
+            return int((await self.db.execute(select(func.count(Course.id)).where(live, *extra))).scalar_one() or 0)
+
+        assigned = exists().where(
+            TeachingAssignment.course_id == Course.id,
+            TeachingAssignment.is_active == True,  # noqa: E712
+            TeachingAssignment.is_deleted == False,  # noqa: E712
+        )
+        return {
+            "total": await count(),
+            "active": await count(Course.is_active == True),  # noqa: E712
+            "suspended": await count(Course.is_active == False),  # noqa: E712
+            "ai_restricted": await count(Course.language == "RW"),
+            "unassigned": await count(~assigned),
+        }
+
     async def list_all(
         self, page: int = 1, page_size: int = 20
     ) -> Tuple[List[Course], int]:
         filters = [Course.is_deleted == False]
-        
+
         count_result = await self.db.execute(
             select(func.count(Course.id)).where(*filters)
         )

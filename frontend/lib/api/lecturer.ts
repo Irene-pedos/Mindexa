@@ -239,6 +239,7 @@ export interface WorkspaceDetail extends WorkspaceListItem {
   department_name?: string;
   option_name?: string;
   language?: "EN" | "RW" | "FR" | "SW" | string;
+  teaching_assignment_id?: string | null;
   sections?: WorkspaceSectionResponse[];
   roster: LecturerCourseRosterItem[];
 }

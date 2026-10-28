@@ -1,8 +1,9 @@
 import uuid
 
-from app.db.models.academic import (Campus, ClassGroup, ClassSection, College,
-                                    Course, Department, Institution, Option,
-                                    TeachingAssignment)
+from app.db.models.academic import (AcademicPeriod, Campus, ClassGroup,
+                                    ClassSection, College, Course, Department,
+                                    Institution, Option, TeachingAssignment,
+                                    TeachingWorkspace)
 from app.db.schemas.academic import (AcademicPeriodResponse,
                                      ClassGroupResponse, CourseCreate,
                                      CourseResponse, DepartmentResponse,
@@ -80,7 +81,10 @@ async def list_my_assignments(
             Course.code.label("course_code"),
             ClassSection.name.label("class_section_name"),
             ClassGroup.name.label("class_group_name"),
-            ClassGroup.level.label("class_group_level")
+            ClassGroup.level.label("class_group_level"),
+            AcademicPeriod.name.label("academic_period_name"),
+            TeachingWorkspace.id.label("workspace_id"),
+            TeachingWorkspace.title.label("workspace_title"),
         )
         .outerjoin(Institution, TeachingAssignment.institution_id == Institution.id)
         .outerjoin(Campus, TeachingAssignment.campus_id == Campus.id)
@@ -90,7 +94,18 @@ async def list_my_assignments(
         .outerjoin(Course, TeachingAssignment.course_id == Course.id)
         .outerjoin(ClassSection, TeachingAssignment.class_section_id == ClassSection.id)
         .outerjoin(ClassGroup, ClassSection.class_group_id == ClassGroup.id)
-        .where(TeachingAssignment.lecturer_id == current_user.id, TeachingAssignment.is_active == True)
+        .outerjoin(AcademicPeriod, TeachingAssignment.academic_period_id == AcademicPeriod.id)
+        .outerjoin(
+            TeachingWorkspace,
+            (TeachingWorkspace.teaching_assignment_id == TeachingAssignment.id)
+            & (TeachingWorkspace.is_deleted == False),
+        )
+        .where(
+            TeachingAssignment.lecturer_id == current_user.id,
+            TeachingAssignment.is_active == True,
+            TeachingAssignment.is_deleted == False,
+        )
+        .order_by(TeachingAssignment.created_at.desc())
     )
 
     result = await db.execute(stmt)
@@ -112,7 +127,10 @@ async def list_my_assignments(
             "course_code": row.course_code,
             "class_section_name": row.class_section_name,
             "class_group_name": row.class_group_name,
-            "class_group_level": row.class_group_level
+            "class_group_level": row.class_group_level,
+            "academic_period_name": row.academic_period_name,
+            "workspace_id": row.workspace_id,
+            "workspace_title": row.workspace_title,
         })
 
         items.append(TeachingAssignmentDetailResponse(**data))
