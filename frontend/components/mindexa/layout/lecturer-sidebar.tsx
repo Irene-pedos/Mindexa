@@ -431,7 +431,7 @@ export function LecturerSidebar({
         )}
       </SidebarContent>
 
-      <SidebarFooter className="gap-2">
+      <SidebarFooter className="gap-2 bg-transparent border-0 p-2">
         {!dutyOnly && (
           <SidebarAiWidget
             storageKey="mindexa_lecturer_sidebar_ai_widget"

@@ -133,6 +133,10 @@ export interface LecturerMaterialResponse {
   processing_status: string;
   chunk_count?: number | null;
   processing_error?: string | null;
+  /** 0-100 while the file is being indexed for the AI tools. */
+  processing_progress?: number;
+  /** READING, CHUNKING, EMBEDDING, SAVING, QUEUED or RETRYING; null when idle or finished. */
+  processing_stage?: string | null;
 }
 
 export interface InstitutionResponse {
@@ -343,6 +347,12 @@ export const lecturerApi = {
   },
   getWorkspaceMaterials: async (workspaceId: string): Promise<LecturerMaterialResponse[]> => {
     return apiClient(`/resources/workspaces/${workspaceId}/materials`);
+  },
+  /** Index an already-uploaded file again after it failed. Nothing is uploaded a second time. */
+  retryMaterialProcessing: async (materialId: string): Promise<LecturerMaterialResponse> => {
+    return apiClient(`/resources/lecturer-materials/${materialId}/retry-processing`, {
+      method: "POST",
+    });
   },
   deleteMaterial: async (materialId: string): Promise<void> => {
     return apiClient(`/resources/${materialId}`, {

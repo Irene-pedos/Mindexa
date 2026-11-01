@@ -112,9 +112,19 @@ class StudentContextLevel(BaseModel):
 
 class StudentContextPeriod(BaseModel):
     name: str
+    year_name: Optional[str] = None  # the academic year when `name` is a semester
     period_type: str
     start_date: date
     end_date: date
+
+
+class StudentCalendarDate(BaseModel):
+    """A key date of the institution's calendar the student has not passed yet."""
+    title: str
+    kind: str
+    start_date: date
+    end_date: date
+    audience: Optional[str] = None  # e.g. "Year 3"; empty means everyone
 
 
 class StudentAcademicContext(BaseModel):
@@ -122,6 +132,7 @@ class StudentAcademicContext(BaseModel):
     institution_name: Optional[str] = None
     levels: List[StudentContextLevel] = []
     current_period: Optional[StudentContextPeriod] = None
+    upcoming_dates: List[StudentCalendarDate] = []
 
 class StudentDashboardResponse(BaseModel):
     """Complete aggregated data for the student dashboard."""

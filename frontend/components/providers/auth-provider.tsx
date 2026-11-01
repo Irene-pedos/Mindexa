@@ -93,6 +93,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       localStorage.removeItem("refreshToken");
       try {
         clearAiLocalData(localStorage);
+        const widgetKeys = [
+          "mindexa_admin_sidebar_ai_widget",
+          "mindexa_lecturer_sidebar_ai_widget",
+          "mindexa_student_sidebar_ai_widget",
+        ];
+        for (const k of widgetKeys) {
+          sessionStorage.removeItem(k);
+          localStorage.removeItem(k);
+        }
       } catch {
         // storage unavailable
       }
@@ -222,6 +231,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // authApi.login already saved tokens to localStorage.
       // Set user in state so layouts see it immediately on redirect.
       setUser(data.user);
+      if (typeof window !== "undefined") {
+        try {
+          const widgetKeys = [
+            "mindexa_admin_sidebar_ai_widget",
+            "mindexa_lecturer_sidebar_ai_widget",
+            "mindexa_student_sidebar_ai_widget",
+          ];
+          for (const k of widgetKeys) {
+            sessionStorage.removeItem(k);
+            localStorage.removeItem(k);
+          }
+        } catch {}
+      }
       return data;
     } finally {
       setLoading(false);

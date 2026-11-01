@@ -177,7 +177,7 @@ export function AdminSidebar({
         </SidebarGroup>
       </SidebarContent>
 
-      <SidebarFooter className="gap-2">
+      <SidebarFooter className="gap-2 bg-transparent border-0 p-2">
         <SidebarAiWidget
           storageKey="mindexa_admin_sidebar_ai_widget"
           title="AI Integrity & Audits"

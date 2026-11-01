@@ -861,6 +861,11 @@ class CalendarEventType(str, Enum):
     APPEAL_WINDOW = "APPEAL_WINDOW"
     REASSESSMENT_WINDOW = "REASSESSMENT_WINDOW"
     EXAM_PERIOD = "EXAM_PERIOD"
+    REGISTRATION = "REGISTRATION"
+    HOLIDAY = "HOLIDAY"
+    RESULTS_PUBLICATION = "RESULTS_PUBLICATION"
+    PLACEMENT = "PLACEMENT"  # industrial attachment / internship
+    DEFENSE = "DEFENSE"  # project or capstone defence
     OTHER = "OTHER"
 
 

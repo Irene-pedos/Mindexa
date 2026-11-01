@@ -236,7 +236,7 @@ export function StudentSidebar({
         </SidebarGroup>
       </SidebarContent>
 
-      <SidebarFooter className="gap-2">
+      <SidebarFooter className="gap-2 bg-transparent border-0 p-2">
         <SidebarAiWidget
           storageKey="mindexa_student_sidebar_ai_widget"
           title="Study with AI"

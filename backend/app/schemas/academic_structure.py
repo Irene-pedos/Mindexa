@@ -164,6 +164,7 @@ class AcademicPeriodUpdate(MindexaSchema):
     start_date: date | None = None
     end_date: date | None = None
     is_active: bool | None = None
+    parent_id: uuid.UUID | None = None  # send null to make a semester stand alone
 
 
 class AcademicPeriodItem(BaseModel):
@@ -171,6 +172,7 @@ class AcademicPeriodItem(BaseModel):
 
     id: uuid.UUID
     institution_id: uuid.UUID
+    parent_id: uuid.UUID | None = None
     name: str
     period_type: str
     start_date: date
@@ -178,3 +180,4 @@ class AcademicPeriodItem(BaseModel):
     is_active: bool
     course_count: int = 0
     assignment_count: int = 0
+    event_count: int = 0

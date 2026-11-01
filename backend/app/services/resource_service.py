@@ -12,7 +12,7 @@ from fastapi import UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.exceptions import AuthorizationError, ValidationError
+from app.core.exceptions import AuthorizationError, NotFoundError, ValidationError
 from app.core.uploads import (assert_content_matches_extension, assert_not_empty, clean_display_name,
                               read_limited, validated_extension)
 from app.db.models.resource import LecturerMaterial, StudentResource
@@ -125,6 +125,66 @@ class ResourceService:
         from app.workers.tasks.document_processing import process_uploaded_document
         process_uploaded_document.delay(str(academic_res.id))
 
+        return material
+
+    async def retry_material_processing(
+        self, lecturer_id: uuid.UUID, material_id: uuid.UUID
+    ) -> LecturerMaterial:
+        """Queue indexing of a material again after it failed or got stuck.
+
+        The file is already stored, so nothing is uploaded again. A file that is still being
+        worked on is left alone unless it has made no progress for ten minutes.
+        """
+        from datetime import UTC, datetime, timedelta
+
+        from app.db.enums import ResourceProcessingStatus
+
+        material = await self.get_material(material_id)
+        if not material or material.lecturer_id != lecturer_id or material.is_deleted:
+            raise NotFoundError("Material not found or unauthorized")
+
+        status = material.processing_status
+        idle = datetime.now(UTC) - material.updated_at.astimezone(UTC)
+        stuck = status in (
+            ResourceProcessingStatus.PENDING,
+            ResourceProcessingStatus.PROCESSING,
+        ) and idle > timedelta(minutes=10)
+        if status != ResourceProcessingStatus.FAILED and not stuck:
+            raise ValidationError(
+                "This file is already indexed or still being processed.",
+                code="MATERIAL_NOT_RETRYABLE",
+            )
+
+        academic_res = (
+            await self.db.get(AcademicResource, material.academic_resource_id)
+            if material.academic_resource_id
+            else None
+        )
+        if academic_res is None:
+            academic_res = AcademicResource(
+                title=material.display_name or material.original_filename,
+                file_name=material.original_filename,
+                file_path=material.file_path,
+                file_size=material.file_size_bytes,
+                mime_type=material.mime_type,
+            )
+            self.db.add(academic_res)
+            await self.db.flush()
+            material.academic_resource_id = academic_res.id
+
+        academic_res.processing_status = ResourceProcessingStatus.PENDING
+        academic_res.processing_error = None
+        material.processing_status = ResourceProcessingStatus.PENDING
+        material.processing_error = None
+        material.processing_progress = 0
+        material.processing_stage = "QUEUED"
+        material.updated_at = datetime.now(UTC)  # explicit: see DocumentProcessingService._report_progress
+        await self.db.commit()
+        await self.db.refresh(material)
+
+        from app.workers.tasks.document_processing import process_uploaded_document
+
+        process_uploaded_document.delay(str(academic_res.id))
         return material
 
     async def list_workspace_materials(self, workspace_id: uuid.UUID) -> List[LecturerMaterial]:

@@ -24,7 +24,6 @@ import {
   Loader2,
   Building2,
   BookOpen,
-  Calendar,
   Layers,
   MapPin,
   Library,
@@ -44,7 +43,6 @@ import {
   OptionResponse as AcademicOption, 
   ClassGroupResponse as AcademicClassGroup, 
   ClassSectionResponse as AcademicClassSection,
-  AcademicPeriodResponse as AcademicPeriod
 } from "@/lib/api/academic-types";
 
 const STEPS = [
@@ -68,7 +66,6 @@ export default function StudentOnboarding() {
   const [options, setOptions] = useState<AcademicOption[]>([]);
   const [classGroups, setClassGroups] = useState<AcademicClassGroup[]>([]);
   const [sections, setSections] = useState<AcademicClassSection[]>([]);
-  const [periods, setPeriods] = useState<AcademicPeriod[]>([]);
   const [dbLevels, setDbLevels] = useState<number[]>([]);
   
   // Selections
@@ -78,10 +75,9 @@ export default function StudentOnboarding() {
   const [selectedDept, setSelectedDept] = useState<string>("");
   const [selectedOpt, setSelectedOpt] = useState<string>("");
   const [selectedGroup, setSelectedGroup] = useState<string>("");
-  const [selectedSection, setSelectedSection] = useState<string>("none");
-  
+  const [selectedSection, setSelectedSection] = useState<string>("");
+
   const [level, setLevel] = useState<string>("");
-  const [year, setYear] = useState<string>("");
   const [profilePic, setProfilePic] = useState<string | null>(null);
 
   // Loading states
@@ -90,6 +86,7 @@ export default function StudentOnboarding() {
     depts: false,
     options: false,
     groups: false,
+    sections: false,
   });
 
   const displayName = [user?.profile?.first_name, user?.profile?.last_name]
@@ -124,20 +121,25 @@ export default function StudentOnboarding() {
   useEffect(() => {
     if (!selectedInst) return;
 
+    let cancelled = false;
     setLoading(prev => ({ ...prev, depts: true }));
+    setCampuses([]);
+    setColleges([]);
+    setDepartments([]);
+    setDbLevels([]);
 
     Promise.allSettled([
       academicApi.getCampuses(selectedInst),
       academicApi.getColleges({ institution_id: selectedInst }),
-      academicApi.getPeriods(selectedInst),
       academicApi.getLevels(selectedInst),
       academicApi.getDepartments({ institution_id: selectedInst })
-    ]).then(([campusesRes, collegesRes, periodsRes, levelsRes, deptsRes]) => {
+    ]).then(([campusesRes, collegesRes, levelsRes, deptsRes]) => {
+      if (cancelled) return;
       if (campusesRes.status === "fulfilled") setCampuses(campusesRes.value);
       if (collegesRes.status === "fulfilled") setColleges(collegesRes.value);
-      if (periodsRes.status === "fulfilled") setPeriods(periodsRes.value);
       if (levelsRes.status === "fulfilled") setDbLevels(levelsRes.value);
       if (deptsRes.status === "fulfilled") setDepartments(deptsRes.value);
+      else toast.error("Failed to load departments. Please pick the university again.");
       setLoading(prev => ({ ...prev, depts: false }));
     });
 
@@ -146,9 +148,12 @@ export default function StudentOnboarding() {
     setSelectedDept("");
     setSelectedOpt("");
     setSelectedGroup("");
-    setSelectedSection("none");
+    setSelectedSection("");
     setLevel("");
-    setYear("");
+
+    return () => {
+      cancelled = true;
+    };
   }, [selectedInst]);
 
   // When department changes: load options
@@ -158,16 +163,21 @@ export default function StudentOnboarding() {
       setSelectedOpt("");
       return;
     }
+    let cancelled = false;
     setLoading(prev => ({ ...prev, options: true }));
     academicApi.getOptions(selectedDept)
-      .then(setOptions)
-      .catch(() => setOptions([]))
-      .finally(() => setLoading(prev => ({ ...prev, options: false })));
+      .then(data => { if (!cancelled) setOptions(data); })
+      .catch(() => { if (!cancelled) setOptions([]); })
+      .finally(() => { if (!cancelled) setLoading(prev => ({ ...prev, options: false })); });
 
     setSelectedOpt("");
     setSelectedGroup("");
-    setSelectedSection("none");
+    setSelectedSection("");
     setLevel("");
+
+    return () => {
+      cancelled = true;
+    };
   }, [selectedDept]);
 
   // When option changes: load class groups
@@ -177,22 +187,27 @@ export default function StudentOnboarding() {
       setSelectedGroup("");
       return;
     }
+    let cancelled = false;
     setLoading(prev => ({ ...prev, groups: true }));
     academicApi.getClassGroups(selectedOpt)
-      .then(setClassGroups)
-      .catch(() => setClassGroups([]))
-      .finally(() => setLoading(prev => ({ ...prev, groups: false })));
+      .then(data => { if (!cancelled) setClassGroups(data); })
+      .catch(() => { if (!cancelled) setClassGroups([]); })
+      .finally(() => { if (!cancelled) setLoading(prev => ({ ...prev, groups: false })); });
 
     setSelectedGroup("");
-    setSelectedSection("none");
+    setSelectedSection("");
     setLevel("");
+
+    return () => {
+      cancelled = true;
+    };
   }, [selectedOpt]);
 
   // When class group changes: set level and load sections
   useEffect(() => {
+    setSelectedSection("");
     if (!selectedGroup) {
       setSections([]);
-      setSelectedSection("none");
       return;
     }
 
@@ -201,11 +216,22 @@ export default function StudentOnboarding() {
       setLevel(group.level ? `Level ${group.level}` : group.name);
     }
 
+    let cancelled = false;
+    setSections([]);
+    setLoading(prev => ({ ...prev, sections: true }));
     academicApi.getSections(selectedGroup)
-      .then(setSections)
-      .catch(() => setSections([]));
+      .then(data => { if (!cancelled) setSections(data); })
+      .catch(() => {
+        if (!cancelled) {
+          setSections([]);
+          toast.error("Failed to load classes. Please pick your year again.");
+        }
+      })
+      .finally(() => { if (!cancelled) setLoading(prev => ({ ...prev, sections: false })); });
 
-    setSelectedSection("none");
+    return () => {
+      cancelled = true;
+    };
   }, [selectedGroup, classGroups]);
 
   // Upload student ID photo
@@ -231,15 +257,15 @@ export default function StudentOnboarding() {
       await authApi.uploadAvatar(file);
       await checkAuth();
       toast.success("ID photo uploaded successfully");
-    } catch (err: any) {
-      toast.error(err.message || "Failed to upload photo");
+    } catch (err: unknown) {
+      toast.error(err instanceof Error && err.message ? err.message : "Failed to upload photo");
     } finally {
       setUploadingAvatar(false);
     }
   };
 
   const handleFinish = async () => {
-    if (!selectedInst || !selectedDept || !selectedOpt || !level || !year) {
+    if (!selectedInst || !selectedDept || !selectedOpt || !level || !classChosen) {
       toast.error("Please complete all required fields.");
       return;
     }
@@ -252,16 +278,17 @@ export default function StudentOnboarding() {
         college_id: selectedCollege !== "none" ? selectedCollege : undefined,
         department_id: selectedDept,
         option_id: selectedOpt,
-        level: level,
-        year: year,
-        class_section_id: selectedSection !== "none" ? selectedSection : undefined,
+        class_group_id: selectedGroup || undefined,
+        class_section_id: selectedSection || undefined,
+        // The server derives the level from the year of study when there is one.
+        level: hasGroups ? undefined : level,
       });
 
       toast.success("Student profile verified!");
       await checkAuth();
       router.push("/student/dashboard");
-    } catch (err: any) {
-      toast.error(err.message || "Failed to complete onboarding");
+    } catch (err: unknown) {
+      toast.error(err instanceof Error && err.message ? err.message : "Failed to complete onboarding");
     } finally {
       setSubmitting(false);
     }
@@ -280,10 +307,12 @@ export default function StudentOnboarding() {
   const currentDepartment = departments.find(d => d.id === selectedDept);
   const currentOption = options.find(o => o.id === selectedOpt);
 
-  const fallbackYears = [
-    `${new Date().getFullYear()} - ${new Date().getFullYear() + 1}`,
-    `${new Date().getFullYear() - 1} - ${new Date().getFullYear()}`,
-  ];
+  const currentSection = sections.find(s => s.id === selectedSection);
+  const hasGroups = classGroups.length > 0;
+  // A year of study is needed when the programme has any, and a class when that year has any.
+  const classChosen = hasGroups
+    ? !!selectedGroup && !loading.sections && (sections.length === 0 || !!selectedSection)
+    : !!level;
 
   const stepsLeft = 3 - activeStep;
   const progressPercent = activeStep === 1 ? "33.3%" : activeStep === 2 ? "66.6%" : "100%";
@@ -510,13 +539,12 @@ export default function StudentOnboarding() {
                   </Select>
                 </div>
 
-                {/* Level & Academic Year in 2 Columns */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {/* Academic Level */}
+                {/* Year of study. The academic year itself comes from the class / school calendar. */}
+                <div className="space-y-3.5">
                   <div className="space-y-1">
                     <Label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
                       <GraduationCap className="size-3.5 text-primary" />
-                      Academic Level
+                      Year of Study
                     </Label>
                     {classGroups.length > 0 ? (
                       <Select 
@@ -525,7 +553,7 @@ export default function StudentOnboarding() {
                         disabled={!selectedOpt}
                       >
                         <SelectTrigger className="h-9.5 rounded-lg border-border/80 bg-background text-xs sm:text-sm">
-                          <SelectValue placeholder="Select cohort/level..." />
+                          <SelectValue placeholder="Select your year..." />
                         </SelectTrigger>
                         <SelectContent className="max-h-56">
                           {classGroups.map(g => (
@@ -556,47 +584,20 @@ export default function StudentOnboarding() {
                   </div>
 
                   {/* Academic Year */}
-                  <div className="space-y-1">
-                    <Label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
-                      <Calendar className="size-3.5 text-primary" />
-                      Academic Session
-                    </Label>
-                    <Select value={year} onValueChange={setYear}>
-                      <SelectTrigger className="h-9.5 rounded-lg border-border/80 bg-background text-xs sm:text-sm">
-                        <SelectValue placeholder="Session year..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {periods.length > 0 ? (
-                          periods.map(p => (
-                            <SelectItem key={p.id} value={p.name} className="text-xs sm:text-sm">
-                              {p.name}
-                            </SelectItem>
-                          ))
-                        ) : (
-                          fallbackYears.map(y => (
-                            <SelectItem key={y} value={y} className="text-xs sm:text-sm">
-                              {y}
-                            </SelectItem>
-                          ))
-                        )}
-                      </SelectContent>
-                    </Select>
-                  </div>
                 </div>
 
-                {/* Section (Optional if sections exist) */}
+                {/* Class: required, it is what gives access to your courses */}
                 {sections.length > 0 && (
                   <div className="space-y-1">
                     <Label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
-                      <Users className="size-3.5 text-muted-foreground" />
-                      Section / Stream (Optional)
+                      <Users className="size-3.5 text-primary" />
+                      Class / Stream
                     </Label>
                     <Select value={selectedSection} onValueChange={setSelectedSection}>
                       <SelectTrigger className="h-9.5 rounded-lg border-border/80 bg-background text-xs sm:text-sm">
-                        <SelectValue placeholder="Default Section" />
+                        <SelectValue placeholder="Select your class..." />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="none" className="text-xs sm:text-sm">Default Section</SelectItem>
                         {sections.map(s => (
                           <SelectItem key={s.id} value={s.id} className="text-xs sm:text-sm">{s.name}</SelectItem>
                         ))}
@@ -618,7 +619,7 @@ export default function StudentOnboarding() {
 
                   <Button
                     onClick={() => setActiveStep(3)}
-                    disabled={!selectedOpt || !level || !year}
+                    disabled={!selectedOpt || !classChosen}
                     className="flex-1 h-9.5 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 font-semibold text-xs gap-1.5 shadow-xs"
                   >
                     <span>Continue to Photo & Review</span>
@@ -690,7 +691,7 @@ export default function StudentOnboarding() {
                 <div className="rounded-xl border border-border/60 bg-muted/20 p-3 space-y-2">
                   <div className="flex items-center justify-between text-xs font-semibold border-b border-border/40 pb-1.5">
                     <span className="text-muted-foreground uppercase text-[10px] tracking-wider">Academic Record</span>
-                    <span className="text-primary">{level} &bull; {year}</span>
+                    <span className="text-primary">{[level, currentSection?.name].filter(Boolean).join(" • ")}</span>
                   </div>
 
                   <div className="space-y-1 text-xs">

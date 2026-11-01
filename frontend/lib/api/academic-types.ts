@@ -71,4 +71,6 @@ export interface AcademicPeriodResponse {
   start_date: string;
   end_date: string;
   is_active: boolean;
+  /** The academic year a semester / term / quarter belongs to; null for a year. */
+  parent_id?: string | null;
 }

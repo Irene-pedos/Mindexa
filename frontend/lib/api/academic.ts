@@ -26,6 +26,8 @@ export type AcademicPeriod = AcademicPeriodResponse
 export interface AcademicPeriodItem extends AcademicPeriodResponse {
   course_count: number
   assignment_count: number
+  /** Dated items (registration, holidays, exams, results…) recorded on this period. */
+  event_count: number
 }
 
 export interface AcademicPeriodPayload {
@@ -35,6 +37,74 @@ export interface AcademicPeriodPayload {
   start_date: string
   end_date: string
   is_active: boolean
+  parent_id?: string | null
+}
+
+export type CalendarEventKind =
+  | "REGISTRATION"
+  | "HOLIDAY"
+  | "EXAM_PERIOD"
+  | "MARKS_DEADLINE"
+  | "DELIBERATION"
+  | "RESULTS_PUBLICATION"
+  | "APPEAL_WINDOW"
+  | "REASSESSMENT_WINDOW"
+  | "PLACEMENT"
+  | "DEFENSE"
+  | "OTHER"
+
+/** A dated item of a period, in whole days. A single day has the same start and end. */
+export interface CalendarEvent {
+  id: string
+  period_id: string
+  kind: CalendarEventKind
+  title: string
+  start_date: string
+  end_date: string
+  audience: string | null
+}
+
+export interface CalendarEventInput {
+  kind: CalendarEventKind
+  title: string
+  start_date: string
+  end_date?: string | null
+  audience?: string | null
+}
+
+export interface CalendarDraftSemester {
+  name: string
+  period_type: string
+  start_date: string
+  end_date: string
+}
+
+export interface CalendarDraftEvent {
+  semester: string | null
+  kind: CalendarEventKind
+  title: string
+  start_date: string
+  end_date: string | null
+  audience: string | null
+  /** Why a person should look at this row again (set by the server's checks). */
+  warning?: string | null
+}
+
+/** What the AI read from a calendar file. Nothing is saved until the admin applies it. */
+export interface CalendarDraft {
+  year_name: string
+  year_start: string
+  year_end: string
+  semesters: CalendarDraftSemester[]
+  events: CalendarDraftEvent[]
+  warnings: string[]
+  source?: string | null
+}
+
+export interface CalendarPreview {
+  pages: number
+  has_text_layer: boolean
+  image_base64: string
 }
 
 export type TeachingAssignmentRole =
@@ -147,10 +217,17 @@ export interface TeachingAssignmentPayload {
   role: TeachingAssignmentRole;
 }
 
-/** Academic year label for a period, e.g. "2026" or "2026/2027" when it spans two calendar years. */
-export function academicYearOf(period: { start_date: string; end_date: string }): string {
-  const start = new Date(period.start_date).getUTCFullYear();
-  const end = new Date(period.end_date).getUTCFullYear();
+/**
+ * Academic year label for a period, e.g. "2026" or "2026/2027" when it spans two calendar years.
+ * A semester takes its academic year's label when `all` (the periods it may belong to) is given.
+ */
+export function academicYearOf(
+  period: { start_date: string; end_date: string; parent_id?: string | null },
+  all: { id: string; start_date: string; end_date: string }[] = [],
+): string {
+  const owner = (period.parent_id && all.find((p) => p.id === period.parent_id)) || period;
+  const start = new Date(owner.start_date).getUTCFullYear();
+  const end = new Date(owner.end_date).getUTCFullYear();
   return start === end ? String(start) : `${start}/${end}`;
 }
 
@@ -235,6 +312,47 @@ export const adminAcademicApi = {
     return apiClient(`/admin/academic/academic-periods/${id}`, {
       method: "PATCH",
       body: JSON.stringify(data),
+    });
+  },
+  getPeriodEvents: async (periodId: string): Promise<CalendarEvent[]> => {
+    return apiClient(`/admin/academic/academic-periods/${periodId}/calendar-events`);
+  },
+  createPeriodEvent: async (periodId: string, data: CalendarEventInput): Promise<CalendarEvent> => {
+    return apiClient(`/admin/academic/academic-periods/${periodId}/calendar-events`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+  updatePeriodEvent: async (eventId: string, data: Partial<CalendarEventInput>): Promise<CalendarEvent> => {
+    return apiClient(`/admin/academic/calendar-events/${eventId}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  },
+  deletePeriodEvent: async (eventId: string): Promise<void> => {
+    await apiClient(`/admin/academic/calendar-events/${eventId}`, { method: "DELETE" });
+  },
+  /** First page of an uploaded calendar as an image (no AI), so a sideways scan can be rotated. */
+  previewCalendarFile: async (file: File, rotation: number): Promise<CalendarPreview> => {
+    const form = new FormData();
+    form.append("file", file);
+    form.append("rotation", String(rotation));
+    return apiClient("/admin/academic/calendar/preview", { method: "POST", body: form });
+  },
+  /** The AI reads the calendar into a draft for review. Saves nothing. */
+  extractCalendarFile: async (file: File, rotation: number): Promise<CalendarDraft> => {
+    const form = new FormData();
+    form.append("file", file);
+    form.append("rotation", String(rotation));
+    return apiClient("/admin/academic/calendar/extract", { method: "POST", body: form });
+  },
+  applyCalendarDraft: async (
+    institutionId: string,
+    draft: CalendarDraft,
+  ): Promise<{ year_id: string; semester_ids: string[]; event_count: number }> => {
+    return apiClient("/admin/academic/calendar/apply", {
+      method: "POST",
+      body: JSON.stringify({ institution_id: institutionId, draft }),
     });
   },
   createCourse: async (data: any) => {

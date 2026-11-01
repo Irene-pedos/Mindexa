@@ -226,6 +226,8 @@ def test_migration_chain_integrity():
         "20261026_enum_drift_fix2",
         "20261027_compliance_rules",
         "20261028_option_guidance_text",
+        "20261029_academic_calendar",
+        "20261029_material_progress",
     ]
 
 

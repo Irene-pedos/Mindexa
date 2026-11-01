@@ -73,3 +73,66 @@ test("durationLabel and daysFrom", () => {
   assert.equal(P.durationLabel("2026-09-01", "2026-09-10"), "10 days")
   assert.equal(P.daysFrom("2026-10-28", "2026-11-05"), 8)
 })
+
+const sem = (id: string, name: string, start: string, end: string, parent: string | null, active = true) => ({
+  id,
+  name,
+  period_type: parent ? "SEMESTER" : "YEAR",
+  start_date: start,
+  end_date: end,
+  is_active: active,
+  parent_id: parent,
+})
+
+const RP = [
+  sem("y", "2026-2027", "2026-08-17", "2027-07-27", null),
+  sem("s2", "Semester 2 2026-2027", "2027-01-04", "2027-06-04", "y"),
+  sem("s1", "Semester 1 2026-2027", "2026-09-01", "2026-12-18", "y"),
+  sem("old", "2025-2026", "2025-08-18", "2026-07-20", null),
+]
+
+test("groupByYear nests semesters in date order, newest year first", () => {
+  const groups = P.groupByYear(RP)
+  assert.deepEqual(groups.map((g: { year: { id: string } }) => g.year.id), ["y", "old"])
+  assert.deepEqual(groups[0].children.map((c: { id: string }) => c.id), ["s1", "s2"])
+})
+
+test("a semester whose year is missing stands alone", () => {
+  const groups = P.groupByYear([RP[1]])
+  assert.equal(groups.length, 1)
+  assert.equal(groups[0].year.id, "s2")
+})
+
+test("pickerGroups hides a year that has semesters and keeps a bare year", () => {
+  const groups = P.pickerGroups(RP)
+  assert.deepEqual(groups[0], { label: null, items: [{ id: "old", label: "2025-2026" }] })
+  assert.equal(groups[1].label, "2026-2027")
+  assert.deepEqual(groups[1].items.map((i: { id: string }) => i.id), ["s1", "s2"])
+})
+
+test("defaultPickerId prefers the running semester", () => {
+  assert.equal(P.defaultPickerId(RP, "2026-10-28"), "s1")
+  assert.equal(P.defaultPickerId(RP, "2027-02-01"), "s2")
+  // Between semesters (the December holiday): the most recent period that has started or the latest one.
+  assert.ok(["s1", "s2"].includes(P.defaultPickerId(RP, "2026-12-25")))
+})
+
+test("a semester must stay inside its year", () => {
+  const year = RP[0]
+  const inside = { name: "Term 3 2026-2027", type: "SEMESTER", start: "2027-02-01", end: "2027-05-01" }
+  assert.deepEqual(P.validatePeriod(inside, [], undefined, year), {})
+  const outside = { ...inside, end: "2027-09-01" }
+  assert.match(P.validatePeriod(outside, [], undefined, year).start ?? "", /inside 2026-2027/)
+})
+
+test("suggestName carries the year for a semester", () => {
+  assert.equal(P.suggestName("SEMESTER", "2026-09-01", [], "2026-2027"), "Semester 1 2026-2027")
+  assert.equal(P.suggestName("SEMESTER", "2026-09-01", ["Semester 1 2026-2027"], "2026-2027"), "Semester 2 2026-2027")
+})
+
+test("eventKind falls back to Other and formatDateRange collapses one day", () => {
+  assert.equal(P.eventKind("HOLIDAY").label, "Holiday / break")
+  assert.equal(P.eventKind("???").value, "OTHER")
+  assert.equal(P.formatDateRange("2026-08-17", "2026-08-17"), "17 Aug 2026")
+  assert.equal(P.formatDateRange("2026-08-17", "2026-08-21"), "17 Aug 2026 – 21 Aug 2026")
+})

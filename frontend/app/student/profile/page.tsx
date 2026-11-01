@@ -29,7 +29,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { authApi } from "@/lib/api/auth";
 import { studentApi, type StudentAcademicContext } from "@/lib/api/student";
 import { errorMessage } from "@/lib/error-message";
-import { formatPeriodDate } from "@/lib/academic-period";
+import { eventKind, formatDateRange, formatPeriodDate } from "@/lib/academic-period";
 
 interface ProfileFields {
   first_name: string;
@@ -288,6 +288,7 @@ function ProfileView({ user }: { user: AuthUser }) {
                       <dd className="min-w-0 text-right text-sm font-medium text-foreground">
                         {context.current_period.name}
                         <span className="block text-[11px] font-normal text-muted-foreground">
+                          {context.current_period.year_name ? `${context.current_period.year_name} · ` : ""}
                           {formatPeriodDate(context.current_period.start_date)} – {formatPeriodDate(context.current_period.end_date)}
                         </span>
                       </dd>
@@ -302,6 +303,33 @@ function ProfileView({ user }: { user: AuthUser }) {
               )}
             </CardContent>
           </Card>
+
+          {context?.upcoming_dates && context.upcoming_dates.length > 0 && (
+            <Card className="rounded-xl border-border/45 bg-card/30 shadow-sm">
+              <CardHeader className="px-5 pb-2 pt-4">
+                <CardTitle className="flex items-center gap-2 text-base font-semibold">
+                  <CalendarDays className="size-4.5 text-primary" /> Coming up in the academic calendar
+                </CardTitle>
+                <CardDescription className="text-xs">Key dates published by your institution.</CardDescription>
+              </CardHeader>
+              <CardContent className="px-5 pb-5">
+                <ul className="divide-y rounded-xl border bg-background/40">
+                  {context.upcoming_dates.map((d) => (
+                    <li key={`${d.title}-${d.start_date}`} className="flex items-start gap-3 px-3.5 py-2.5">
+                      <span className={`mt-1.5 size-2.5 shrink-0 rounded-full ${eventKind(d.kind).dot}`} aria-hidden />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium leading-snug text-foreground">{d.title}</p>
+                        <p className="mt-0.5 text-[11px] text-muted-foreground">
+                          {formatDateRange(d.start_date, d.end_date)}
+                          {d.audience ? ` · ${d.audience}` : ""}
+                        </p>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </CardContent>
+            </Card>
+          )}
         </div>
 
         <div className="space-y-5 lg:col-span-5">

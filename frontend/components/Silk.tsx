@@ -94,13 +94,18 @@ const SilkPlane = forwardRef<Mesh, SilkPlaneProps>(function SilkPlane({ uniforms
   useLayoutEffect(() => {
     const mesh = ref as React.MutableRefObject<Mesh | null>;
     if (mesh.current) {
-      mesh.current.scale.set(viewport.width, viewport.height, 1);
+      mesh.current.scale.set(viewport.width * 1.35, viewport.height * 1.35, 1);
     }
   }, [ref, viewport]);
 
   useFrame((_state: RootState, delta: number) => {
     const mesh = ref as React.MutableRefObject<Mesh | null>;
     if (mesh.current) {
+      const targetW = viewport.width * 1.35;
+      const targetH = viewport.height * 1.35;
+      if (Math.abs(mesh.current.scale.x - targetW) > 0.01 || Math.abs(mesh.current.scale.y - targetH) > 0.01) {
+        mesh.current.scale.set(targetW, targetH, 1);
+      }
       const material = mesh.current.material as ShaderMaterial & {
         uniforms: SilkUniforms;
       };
@@ -123,9 +128,19 @@ export interface SilkProps {
   color?: string;
   noiseIntensity?: number;
   rotation?: number;
+  className?: string;
+  style?: React.CSSProperties;
 }
 
-const Silk: React.FC<SilkProps> = ({ speed = 5, scale = 1, color = '#7B7481', noiseIntensity = 1.5, rotation = 0 }) => {
+const Silk: React.FC<SilkProps> = ({
+  speed = 5,
+  scale = 1,
+  color = '#7B7481',
+  noiseIntensity = 1.5,
+  rotation = 0,
+  className,
+  style,
+}) => {
   const meshRef = useRef<Mesh>(null);
 
   const uniforms = useMemo<SilkUniforms>(
@@ -150,7 +165,21 @@ const Silk: React.FC<SilkProps> = ({ speed = 5, scale = 1, color = '#7B7481', no
   }, [speed, scale, noiseIntensity, color, rotation, uniforms]);
 
   return (
-    <Canvas dpr={[1, 2]} frameloop="always">
+    <Canvas
+      dpr={[1, 2]}
+      frameloop="always"
+      className={className}
+      style={{
+        width: '100%',
+        height: '100%',
+        display: 'block',
+        position: 'absolute',
+        inset: 0,
+        pointerEvents: 'none',
+        ...style,
+      }}
+      gl={{ antialias: true, alpha: true, powerPreference: 'high-performance' }}
+    >
       <SilkPlane ref={meshRef} uniforms={uniforms} />
     </Canvas>
   );

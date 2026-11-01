@@ -15,6 +15,7 @@ from sqlalchemy import ColumnElement, Select, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.enums import EnrollmentStatus
+from app.db.models.calendar import AcademicCalendarEvent
 from app.db.models.academic import (
     AcademicPeriod,
     Campus,
@@ -81,14 +82,22 @@ class AcademicStructureRepository:
             .group_by(TeachingAssignment.academic_period_id)
             .subquery()
         )
+        events = (
+            select(AcademicCalendarEvent.academic_period_id, func.count(AcademicCalendarEvent.id).label("n"))
+            .where(AcademicCalendarEvent.is_deleted.is_(False))
+            .group_by(AcademicCalendarEvent.academic_period_id)
+            .subquery()
+        )
         stmt = (
             select(
                 AcademicPeriod,
                 func.coalesce(courses.c.n, 0),
                 func.coalesce(assignments.c.n, 0),
+                func.coalesce(events.c.n, 0),
             )
             .outerjoin(courses, courses.c.academic_period_id == AcademicPeriod.id)
             .outerjoin(assignments, assignments.c.academic_period_id == AcademicPeriod.id)
+            .outerjoin(events, events.c.academic_period_id == AcademicPeriod.id)
             .where(AcademicPeriod.is_deleted.is_(False))
             .order_by(AcademicPeriod.start_date.desc(), AcademicPeriod.name)
         )
@@ -99,6 +108,7 @@ class AcademicStructureRepository:
             {
                 "id": period.id,
                 "institution_id": period.institution_id,
+                "parent_id": period.parent_id,
                 "name": period.name,
                 "period_type": getattr(period.period_type, "value", period.period_type),
                 "start_date": period.start_date,
@@ -106,9 +116,21 @@ class AcademicStructureRepository:
                 "is_active": period.is_active,
                 "course_count": int(course_count),
                 "assignment_count": int(assignment_count),
+                "event_count": int(event_count),
             }
-            for period, course_count, assignment_count in rows
+            for period, course_count, assignment_count, event_count in rows
         ]
+
+    async def list_period_events(self, period_id: uuid.UUID) -> list[AcademicCalendarEvent]:
+        result = await self.db.execute(
+            select(AcademicCalendarEvent)
+            .where(
+                AcademicCalendarEvent.academic_period_id == period_id,
+                AcademicCalendarEvent.is_deleted.is_(False),
+            )
+            .order_by(AcademicCalendarEvent.starts_at, AcademicCalendarEvent.title)
+        )
+        return list(result.scalars().all())
 
     async def live_periods(self, institution_id: uuid.UUID) -> list[AcademicPeriod]:
         result = await self.db.execute(

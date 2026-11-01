@@ -129,11 +129,16 @@ export function buildAssignments(input: PlanInput): PlanResult {
   return { assignments, problems }
 }
 
-/** The period that contains today, else the most recent one, else nothing. */
+/**
+ * The period that contains today, else the most recent one, else nothing. An academic year that
+ * has semesters is skipped: courses are placed in the semester running today, not the whole year.
+ */
 export function defaultPeriodId(
-  periods: { id: string; start_date: string; end_date: string }[],
+  all: { id: string; start_date: string; end_date: string; parent_id?: string | null }[],
   today: Date = new Date(),
 ): string {
+  const parents = new Set(all.map((p) => p.parent_id).filter(Boolean))
+  const periods = all.filter((p) => !parents.has(p.id))
   if (periods.length === 0) return ""
   const now = today.getTime()
   const current = periods.find((p) => new Date(p.start_date).getTime() <= now && now <= new Date(p.end_date).getTime())

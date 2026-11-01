@@ -15,6 +15,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { PeriodSelectItems } from "@/components/mindexa/admin/periods/period-select-items"
 import { adminApi, type AdminCourseListItem, type UserResponse } from "@/lib/api/admin"
 import {
   academicYearOf,
@@ -196,12 +197,12 @@ function AssignmentForm({
             courses: [...picked.values()],
             classIds: [...classIds].filter((id) => classOptions.some((c) => c.id === id)),
             periodId: period.id,
-            academicYear: academicYearOf(period),
+            academicYear: academicYearOf(period, periods),
             role,
             structure,
           })
         : { assignments: [], problems: [] },
-    [lecturerId, period, picked, classIds, role, structure, classOptions],
+    [lecturerId, period, periods, picked, classIds, role, structure, classOptions],
   )
 
   const errors = {
@@ -424,11 +425,7 @@ function AssignmentForm({
                 <SelectValue placeholder="Choose period" />
               </SelectTrigger>
               <SelectContent>
-                {periods.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>
-                    {p.name}
-                  </SelectItem>
-                ))}
+                <PeriodSelectItems periods={periods} />
               </SelectContent>
             </Select>
             {submitted && errors.period && <p className="text-xs text-destructive">{errors.period}</p>}

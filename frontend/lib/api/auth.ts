@@ -136,9 +136,9 @@ export const authApi = {
     college_id?: string;
     department_id: string;
     option_id: string;
-    level: string;
-    year: string;
+    class_group_id?: string;
     class_section_id?: string;
+    level?: string;
   }) => {
     return apiClient("/auth/me/onboarding/student", {
       method: "POST",

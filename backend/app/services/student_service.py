@@ -11,6 +11,8 @@ from app.db.models.academic import (AcademicPeriod, Campus, ClassGroup,
                                     TeachingWorkspace)
 from app.db.models.assessment import Assessment
 from app.db.models.attempt import AssessmentAttempt
+from app.db.models.calendar import AcademicCalendarEvent
+from app.services.academic_calendar_service import local_day
 from app.db.models.auth import UserProfile
 from app.db.models.resource import LecturerMaterial
 from app.db.models.result import AssessmentResult
@@ -20,7 +22,8 @@ from app.db.repositories.course_repo import CourseRepository
 from app.db.repositories.result_repo import ResultRepository
 from app.db.repositories.workspace_repo import WorkspaceRepository
 from app.schemas.student import (PerformanceTrendItem, StudentAcademicContext,
-                                 StudentActiveAttempt, StudentContextLevel,
+                                 StudentActiveAttempt, StudentCalendarDate,
+                                 StudentContextLevel,
                                  StudentContextPeriod, StudentCourseListItem,
                                  StudentDashboardResponse,
                                  StudentDashboardSummary, StudentRecentResult,
@@ -258,6 +261,7 @@ class StudentService:
 
         items = []
         today = datetime.now(UTC).date()
+        labels = await self._period_labels([ws.academic_period for ws in workspaces])
         for ws in workspaces:
             progress = await self._calculate_workspace_progress(student_id, ws.id)
             period = ws.academic_period
@@ -268,7 +272,7 @@ class StudentService:
                 lecturer_name=self._lecturer_name(ws),
                 status=_period_status(period, today),
                 progress=progress,
-                academic_year=period.name if period else "",
+                academic_year=labels.get(period.id, period.name) if period else "",
                 workspace_id=ws.id,
                 banner_image_url=ws.banner_image_url,
                 period_start=period.start_date if period else None,
@@ -276,6 +280,30 @@ class StudentService:
                 class_name=ws.class_section.name if ws.class_section else None,
             ))
         return items
+
+    async def _period_labels(
+        self, periods: list[AcademicPeriod | None]
+    ) -> dict[uuid.UUID, str]:
+        """"2026-2027 · Semester 1": a semester is shown with its academic year.
+
+        Names made by the calendar import already carry the year, so they are not repeated.
+        """
+        wanted = {p.parent_id for p in periods if p is not None and p.parent_id}
+        if not wanted:
+            return {}
+        parents = {
+            row.id: row
+            for row in (await self.db.execute(
+                select(AcademicPeriod).where(AcademicPeriod.id.in_(wanted))
+            )).scalars().all()
+        }
+        labels: dict[uuid.UUID, str] = {}
+        for p in periods:
+            if p is None or not p.parent_id or p.parent_id not in parents:
+                continue
+            year = parents[p.parent_id].name
+            labels[p.id] = p.name if year.lower() in p.name.lower() else f"{year} · {p.name}"
+        return labels
 
     @staticmethod
     def _lecturer_name(ws: TeachingWorkspace) -> str:
@@ -367,8 +395,10 @@ class StudentService:
         ]
 
         current_period = None
+        upcoming: list[StudentCalendarDate] = []
         if institution:
             today = datetime.now(UTC).date()
+            # The semester running today if there is one, otherwise the academic year.
             period = (await self.db.execute(
                 select(AcademicPeriod)
                 .where(
@@ -378,21 +408,44 @@ class StudentService:
                     AcademicPeriod.start_date <= today,
                     AcademicPeriod.end_date >= today,
                 )
-                .order_by(AcademicPeriod.start_date.desc())
+                .order_by(AcademicPeriod.parent_id.is_(None), AcademicPeriod.start_date.desc())
                 .limit(1)
             )).scalar_one_or_none()
             if period:
+                parent = await self.db.get(AcademicPeriod, period.parent_id) if period.parent_id else None
                 current_period = StudentContextPeriod(
                     name=period.name,
+                    year_name=parent.name if parent else None,
                     period_type=str(getattr(period.period_type, "value", period.period_type)),
                     start_date=period.start_date,
                     end_date=period.end_date,
                 )
+            events = (await self.db.execute(
+                select(AcademicCalendarEvent)
+                .where(
+                    AcademicCalendarEvent.institution_id == institution.id,
+                    AcademicCalendarEvent.is_deleted == False,
+                    AcademicCalendarEvent.ends_at >= datetime.now(UTC),
+                )
+                .order_by(AcademicCalendarEvent.starts_at)
+                .limit(5)
+            )).scalars().all()
+            upcoming = [
+                StudentCalendarDate(
+                    title=e.title,
+                    kind=getattr(e.event_type, "value", str(e.event_type)),
+                    start_date=local_day(institution.timezone, e.starts_at),
+                    end_date=local_day(institution.timezone, e.ends_at),
+                    audience=e.audience,
+                )
+                for e in events
+            ]
 
         return StudentAcademicContext(
             institution_name=institution.name if institution else None,
             levels=levels,
             current_period=current_period,
+            upcoming_dates=upcoming,
         )
 
     async def get_workspace_detail(self, student_id: uuid.UUID, workspace_id: uuid.UUID) -> dict:
@@ -419,6 +472,7 @@ class StudentService:
         ))).scalar_one()
 
         period = ws.academic_period
+        period_label = (await self._period_labels([period])).get(period.id, period.name) if period else ""
         return {
             "id": str(ws.id),
             "code": ws.course.code,
@@ -430,7 +484,7 @@ class StudentService:
             "next_assessment": await self._next_assessment(student_id, workspace_id),
             "materials": materials_count,
             "assessments": assessments_count,
-            "academic_year": period.name if period else "",
+            "academic_year": period_label,
             "status": _period_status(period, datetime.now(UTC).date()),
             "class_name": ws.class_section.name if ws.class_section else None,
             "banner_image_url": ws.banner_image_url,

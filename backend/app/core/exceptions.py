@@ -523,6 +523,13 @@ class ServiceUnavailableError(MindexaError):
     default_code = "service_unavailable"
 
 
+class ProviderTimeoutError(ServiceUnavailableError):
+    """A provider did not answer in time or the connection dropped. Worth trying again shortly."""
+
+    default_message = "The AI provider did not answer in time. Please try again."
+    default_code = "provider_timeout"
+
+
 class AITemporarilyUnavailableError(ServiceUnavailableError):
     """
     Raised when AI generation fails after retries (e.g. rate limit, network, malformed output).

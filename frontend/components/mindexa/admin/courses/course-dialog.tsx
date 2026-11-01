@@ -15,6 +15,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { PeriodSelectItems } from "@/components/mindexa/admin/periods/period-select-items"
 import { academicApi, getAcademicPeriods, type AcademicDepartment, type AcademicPeriod } from "@/lib/api/academic"
 import { validateName } from "@/lib/academic-structure"
 import { cn } from "@/lib/utils"
@@ -168,7 +169,9 @@ function CourseForm({ state, institutions, onClose, onSubmit }: CourseDialogProp
     setSaving(true)
     setServerError(null)
     try {
-      await onSubmit(state, { ...values, code: values.code.trim().toUpperCase() }, period.name)
+      // The course's academic year is its period's year (a semester's year), not the semester name.
+      const yearOf = periods.find((p) => p.id === period.parent_id)
+      await onSubmit(state, { ...values, code: values.code.trim().toUpperCase() }, (yearOf ?? period).name)
     } catch (err) {
       setServerError(err instanceof Error && err.message ? err.message : "Could not save. Please try again.")
       setSaving(false)
@@ -249,11 +252,7 @@ function CourseForm({ state, institutions, onClose, onSubmit }: CourseDialogProp
                 <SelectValue placeholder={values.institutionId ? "Choose period" : "Choose an institution first"} />
               </SelectTrigger>
               <SelectContent>
-                {periods.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>
-                    {p.name}
-                  </SelectItem>
-                ))}
+                <PeriodSelectItems periods={periods} />
               </SelectContent>
             </Select>
           </Field>

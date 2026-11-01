@@ -69,6 +69,10 @@ class AcademicCalendarEvent(BaseModel, table=True):
         )
     )
     title: str = Field(sa_column=Column(Text, nullable=False))
+    # Who the date applies to when it is not everyone, e.g. "Year 3" or "BTech".
+    audience: Optional[str] = Field(
+        default=None, sa_column=Column(sa.String(120), nullable=True)
+    )
     starts_at: datetime = Field(
         sa_column=Column(DateTime(timezone=True), nullable=False)
     )

@@ -52,10 +52,12 @@ from app.core.exceptions import (
     AccountLockedError,
     AlreadyExistsError,
     AuthenticationError,
+    ConflictError,
     EmailAlreadyRegisteredError,
     InvalidTokenError,
     NotFoundError,
     PermissionDeniedError,
+    ValidationError,
 )
 from app.core.logger import get_logger
 from app.core.redis import cache_revoked_jti, is_jti_revoked_in_cache
@@ -77,6 +79,7 @@ from app.db.models.academic import (
     Option,
 )
 from app.db.models.auth import PasswordResetToken, RefreshToken, User, UserProfile
+from app.db.repositories.onboarding_repo import OnboardingRepository
 from app.db.repositories.auth import (
     PasswordResetTokenRepository,
     RefreshTokenRepository,
@@ -244,8 +247,8 @@ class AuthService:
         institution_id: uuid.UUID,
         department_id: uuid.UUID,
         option_id: uuid.UUID,
-        level: str,
-        year: str,
+        level: str | None = None,
+        class_group_id: uuid.UUID | None = None,
         campus_id: uuid.UUID | None = None,
         college_id: uuid.UUID | None = None,
         class_section_id: uuid.UUID | None = None,
@@ -253,13 +256,65 @@ class AuthService:
     ) -> User:
         """
         Complete Phase 2 onboarding for a student.
+
+        The student says where they study now (programme > year of study > class). The
+        academic year is never their choice: it comes from the class, or from the
+        institution's calendar when there is none. Promotion and repeats are handled
+        elsewhere, so onboarding can only be completed once.
         """
-        from app.db.models.academic import StudentEnrollment, Institution, Department, Option
+        from app.db.models.academic import StudentEnrollment
         from app.db.enums import EnrollmentStatus
 
         user = await self._users.get_by_id(user_id)
         if not user:
             raise NotFoundError("User not found")
+        if user.onboarding_completed:
+            raise ConflictError("Onboarding is already completed. Ask an administrator to change your class.")
+
+        repo = OnboardingRepository(self.db)
+        dept = await repo.get_department(department_id)
+        if dept is None or dept.institution_id != institution_id:
+            raise ValidationError("The selected department does not belong to the selected institution.")
+        opt = await repo.get_option(option_id)
+        if opt is None or opt.department_id != department_id:
+            raise ValidationError("The selected programme does not belong to the selected department.")
+        if campus_id is not None:
+            campus = await repo.get_campus(campus_id)
+            if campus is None or campus.institution_id != institution_id:
+                raise ValidationError("The selected campus does not belong to the selected institution.")
+        if college_id is not None:
+            college = await repo.get_college(college_id)
+            if college is None or college.institution_id != institution_id:
+                raise ValidationError("The selected college does not belong to the selected institution.")
+        # Campus and college follow the department when the student did not (or could not) say.
+        campus_id = campus_id or dept.campus_id
+        college_id = college_id or dept.college_id
+
+        group = None
+        section = None
+        if await repo.count_option_groups(option_id):
+            if class_group_id is None:
+                raise ValidationError("Select your year of study.")
+            group = await repo.get_class_group(class_group_id)
+            if group is None or group.option_id != option_id:
+                raise ValidationError("The selected year of study does not belong to the selected programme.")
+            if await repo.count_group_sections(group.id):
+                if class_section_id is None:
+                    raise ValidationError("Select your class or stream.")
+                section = await repo.get_section(class_section_id)
+                if section is None or section.class_group_id != group.id:
+                    raise ValidationError("The selected class does not belong to the selected year of study.")
+            elif class_section_id is not None:
+                raise ValidationError("The selected year of study has no classes.")
+            level = f"Level {group.level}" if group.level else group.name
+        elif class_group_id is not None or class_section_id is not None:
+            raise ValidationError("The selected programme has no years of study or classes.")
+        elif not level:
+            raise ValidationError("Select your academic level.")
+
+        year = section.academic_year if section else None
+        if year is None:
+            year = await repo.current_year_name(institution_id, datetime.now(UTC).date())
 
         # Update profile
         user.profile.institution_id = institution_id
@@ -272,38 +327,33 @@ class AuthService:
         user.profile.class_section_id = class_section_id
         if avatar_url:
             user.profile.avatar_url = avatar_url
-        
+
         # Pull text names for legacy fields from relational models
-        inst = await self.db.get(Institution, institution_id)
-        dept = await self.db.get(Department, department_id)
-        opt = await self.db.get(Option, option_id)
-        
-        if inst: user.profile.college = inst.name 
-        if dept: user.profile.department = dept.name
-        if opt: user.profile.option = opt.name
+        inst = await repo.get_institution(institution_id)
+        if inst is None:
+            raise ValidationError("The selected institution does not exist.")
+        user.profile.college = inst.name
+        user.profile.department = dept.name
+        user.profile.option = opt.name
 
         # ── CREATE ENROLLMENT ────────────────────────────────────────────────
-        # If a section was picked, ensure the student is enrolled in it
-        if class_section_id:
-            # Check if enrollment already exists
-            enroll_stmt = select(StudentEnrollment).where(
-                StudentEnrollment.student_id == user.id,
-                StudentEnrollment.class_section_id == class_section_id,
-                StudentEnrollment.is_deleted == False
-            )
-            enroll_res = await self.db.execute(enroll_stmt)
-            if not enroll_res.scalars().first():
-                enrollment = StudentEnrollment(
-                    student_id=user.id,
-                    class_section_id=class_section_id,
-                    enrollment_status=EnrollmentStatus.ACTIVE,
-                    enrolled_at=datetime.now(UTC)
+        if section is not None:
+            existing = await repo.get_active_enrollment(user.id, section.id)
+            if existing is None:
+                self.db.add(
+                    StudentEnrollment(
+                        student_id=user.id,
+                        class_section_id=section.id,
+                        enrollment_status=EnrollmentStatus.ACTIVE,
+                        enrolled_at=datetime.now(UTC),
+                    )
                 )
-                self.db.add(enrollment)
+            elif existing.enrollment_status != EnrollmentStatus.ACTIVE:
+                existing.enrollment_status = EnrollmentStatus.ACTIVE
+                self.db.add(existing)
 
+        # Simple mode (44px controls everywhere) is an accessibility opt-in, never a default.
         user.onboarding_completed = True
-        if hasattr(user.profile, "simple_mode_enabled"):
-            user.profile.simple_mode_enabled = True
         self.db.add(user.profile)
         self.db.add(user)
         await self.db.commit()

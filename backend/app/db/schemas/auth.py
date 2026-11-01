@@ -326,9 +326,17 @@ class StudentOnboardingRequest(MindexaSchema):
     college_id: uuid.UUID | None = None
     department_id: uuid.UUID
     option_id: uuid.UUID
-    level: str = Field(description="Academic level (e.g. Level 6)")
-    year: str = Field(description="Academic year (e.g. 2024 - 2025)")
-    class_section_id: uuid.UUID | None = None
+    class_group_id: uuid.UUID | None = Field(
+        default=None, description="Year of study / cohort, required when the programme has any"
+    )
+    class_section_id: uuid.UUID | None = Field(
+        default=None, description="Required when the chosen class group has sections"
+    )
+    level: str | None = Field(
+        default=None,
+        max_length=20,
+        description="Only used when the programme has no class groups; otherwise derived from the group",
+    )
     avatar_url: str | None = None
 
 

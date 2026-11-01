@@ -78,6 +78,7 @@ class DocumentProcessingService:
         try:
             resource.processing_status = ResourceProcessingStatus.PROCESSING
             await db.commit()
+            await self._report_progress(resource.id, 3, "READING")
 
             file_path = os.path.join(settings.UPLOAD_DIR, resource.file_path)
             if not os.path.exists(file_path):
@@ -101,6 +102,7 @@ class DocumentProcessingService:
                 )
 
             # 5. Chunk text
+            await self._report_progress(resource.id, 15, "CHUNKING")
             chunks_data = self._chunk_text(pages)
             if len(chunks_data) > settings.MAX_DOCUMENT_CHUNKS:
                 raise DocumentLimitError(
@@ -109,7 +111,9 @@ class DocumentProcessingService:
 
             # 6. Generate embeddings
             texts = [c["content"] for c in chunks_data]
+            await self._report_progress(resource.id, 20, "EMBEDDING")
             embeddings = await self._generate_embeddings(texts, resource_id=resource.id, db=db)
+            await self._report_progress(resource.id, 92, "SAVING")
 
             # 7. Store ResourceChunk records, retiring any from an earlier run first so a
             #    reprocessed document is never indexed twice (and a failed run keeps the old index).
@@ -151,6 +155,7 @@ class DocumentProcessingService:
             if _is_transient(e) and not final_attempt:
                 resource.processing_status = ResourceProcessingStatus.PENDING
                 await db.commit()
+                await self._report_progress(resource.id, None, "RETRYING")
                 raise
             # The raw error can contain file paths and provider response bodies; it stays in the
             # logs, and only a safe summary is stored (it is returned by the resource APIs).
@@ -301,6 +306,9 @@ class DocumentProcessingService:
                     f"AIGateway returned {len(res.embeddings)} embeddings for {len(sub_batch)} inputs"
                 )
             embeddings.extend(res.embeddings)
+            if resource_id is not None:
+                done = min(batch_start + batch_size, len(texts))
+                await self._report_progress(resource_id, 20 + int(70 * done / len(texts)), "EMBEDDING")
             if batch_start + batch_size < len(texts):
                 await asyncio.sleep(0.3)
 
@@ -320,6 +328,34 @@ class DocumentProcessingService:
             db.add(chunk)
         await db.flush()
 
+    async def _report_progress(
+        self, resource_id: uuid.UUID, percent: Optional[int], stage: str
+    ) -> None:
+        """Publish how far indexing has got, for the progress bar.
+
+        Written through its own short session and committed at once, so a screen polling the
+        material sees it while the main transaction is still open. Never allowed to fail the job.
+        """
+        from app.db.models.resource import LecturerMaterial, StudentResource
+        from app.db.session import get_db_context
+
+        # updated_at is written from Python: the column's own on-update expression stores UTC
+        # wall-clock time without a zone, which reads as hours in the past on a non-UTC database,
+        # and "no progress for ten minutes" must be measured reliably.
+        values: Dict[str, Any] = {"processing_stage": stage, "updated_at": datetime.now(UTC)}
+        if percent is not None:
+            values["processing_progress"] = max(0, min(100, percent))
+        try:
+            async with get_db_context() as session:
+                for model in (StudentResource, LecturerMaterial):
+                    await session.execute(
+                        update(model)
+                        .where(model.academic_resource_id == resource_id)
+                        .values(**values)
+                    )
+        except Exception as exc:  # progress is cosmetic
+            logger.warning("Could not publish indexing progress", error=str(exc))
+
     async def _sync_parent_resource_status(
         self,
         academic_resource_id: uuid.UUID,
@@ -335,6 +371,11 @@ class DocumentProcessingService:
         """
         from app.db.models.resource import LecturerMaterial, StudentResource
 
+        finished = status == ResourceProcessingStatus.PROCESSED
+        progress: Dict[str, Any] = {"processing_stage": None, "updated_at": datetime.now(UTC)}
+        if finished:
+            progress["processing_progress"] = 100
+
         # Try to update StudentResource
         student_update = (
             update(StudentResource)
@@ -343,6 +384,7 @@ class DocumentProcessingService:
                 processing_status=status,
                 chunk_count=chunk_count if chunk_count else None,
                 processing_error=error,
+                **progress,
             )
         )
         student_result = await db.execute(student_update)
@@ -356,6 +398,7 @@ class DocumentProcessingService:
                     processing_status=status,
                     chunk_count=chunk_count if chunk_count else None,
                     processing_error=error,
+                    **progress,
                 )
             )
             await db.execute(lecturer_update)

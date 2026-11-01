@@ -81,3 +81,7 @@ class LecturerMaterialResponse(BaseAuditedResponse):
     processing_status: str = "PENDING"
     chunk_count: int | None = None
     processing_error: str | None = None
+    #: 0-100 while the file is being indexed, and the step it is on (READING, CHUNKING,
+    #: EMBEDDING, SAVING, RETRYING, QUEUED); null once finished.
+    processing_progress: int = 0
+    processing_stage: str | None = None

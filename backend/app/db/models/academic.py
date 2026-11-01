@@ -524,6 +524,16 @@ class AcademicPeriod(BaseModel, table=True):
     start_date: date = Field(nullable=False)
     end_date: date = Field(nullable=False)
     is_active: bool = Field(default=True, nullable=False, index=True)
+    # A semester / term / quarter belongs to an academic year; a year has no parent.
+    parent_id: Optional[uuid.UUID] = Field(
+        default=None,
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("academic_period.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        ),
+    )
 
     # ── Relationships ─────────────────────────────────────────────────────────
     institution: Optional["Institution"] = Relationship(back_populates="academic_periods")

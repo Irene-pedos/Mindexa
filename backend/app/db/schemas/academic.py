@@ -87,6 +87,8 @@ class AcademicPeriodCreate(MindexaSchema):
     start_date: date
     end_date: date
     is_active: bool = True
+    #: The academic year this semester / term / quarter belongs to (empty for a year).
+    parent_id: uuid.UUID | None = None
 
     @field_validator("end_date")
     @classmethod
@@ -105,6 +107,7 @@ class AcademicPeriodResponse(BaseAuditedResponse):
     start_date: date
     end_date: date
     is_active: bool
+    parent_id: uuid.UUID | None = None
 
 AcademicPeriodResponse.model_rebuild()
 

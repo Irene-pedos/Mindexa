@@ -122,6 +122,7 @@ _AI_PATH_MARKERS = (
     "/confirm-ai",
     "/feedback-ai",
     "/ai-insights",  # analytics narrative; `?regenerate=true` calls the model
+    "/academic/calendar/extract",  # admin reads a calendar scan with a vision model
 )
 
 # Routes under the AI prefixes that never call a model. Counting them against the AI budget

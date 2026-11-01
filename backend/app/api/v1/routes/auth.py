@@ -915,7 +915,7 @@ async def complete_student_onboarding(
         department_id=body.department_id,
         option_id=body.option_id,
         level=body.level,
-        year=body.year,
+        class_group_id=body.class_group_id,
         class_section_id=body.class_section_id,
     )
     return _build_user_response(user)

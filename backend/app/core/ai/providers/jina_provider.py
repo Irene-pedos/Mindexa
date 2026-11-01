@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import httpx
 from app.core.config import settings
-from app.core.exceptions import RateLimitError, ServiceUnavailableError
+from app.core.exceptions import ProviderTimeoutError, RateLimitError, ServiceUnavailableError
 from app.core.logging import get_logger
 
 from .base_provider import (AICompletionRequest, AICompletionResponse,
@@ -72,7 +72,9 @@ class JinaProvider(BaseProvider):
         semaphore = _get_jina_semaphore()
         try:
             async with semaphore:
-                async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+                # Jina's answer time varies from a few seconds to over twenty, so embeddings get a
+                # longer allowance than a chat call.
+                async with httpx.AsyncClient(timeout=max(self.timeout_seconds, 60.0)) as client:
                     response = await client.post(
                         f"{self.base_url}/embeddings",
                         json=payload,
@@ -93,8 +95,15 @@ class JinaProvider(BaseProvider):
                     retry_after=retry_after,
                 ) from exc
             raise ServiceUnavailableError(f"Jina embedding request failed with status {exc.response.status_code}: {exc.response.text}") from exc
+        except httpx.TransportError as exc:
+            # Timeouts and dropped connections often carry an empty message, so name the type.
+            raise ProviderTimeoutError(
+                f"Jina embedding service did not respond ({type(exc).__name__}). Trying again."
+            ) from exc
         except httpx.HTTPError as exc:
-            raise ServiceUnavailableError(f"Jina embedding service is unavailable: {exc}") from exc
+            raise ServiceUnavailableError(
+                f"Jina embedding service is unavailable: {exc or type(exc).__name__}"
+            ) from exc
 
         data = response.json()
         raw_embeddings = [item["embedding"] for item in data.get("data", [])]

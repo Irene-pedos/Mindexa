@@ -3,12 +3,17 @@ app/services/academic_period_service.py
 
 Academic periods (year / semester / trimester / quarter) for the admin "Academic Periods" screen.
 
+An academic year contains its semesters (`parent_id`), the way a real calendar does: Rwanda
+Polytechnic's 2026/2027 year holds Semester 1 and Semester 2, each with its own teaching dates.
+
 Rules, all enforced here so the screen only has to show the message:
   - end date after start date, also when only one of the two is edited;
   - a name is unique within an institution (ignoring case and surrounding spaces);
-  - two periods of the same type cannot overlap in time (a semester may sit inside a year,
-    two semesters may not share days). Only checked when the dates or the type change, so
-    switching a period on or off is never blocked by old data.
+  - a semester / term / quarter may sit inside an academic year of the same institution, and
+    must stay within that year's dates; a year can never have a parent;
+  - a year's dates cannot be moved so that one of its semesters falls outside it;
+  - two periods of the same type cannot overlap in time. Only checked when the dates or the type
+    change, so switching a period on or off is never blocked by old data.
 """
 
 from __future__ import annotations
@@ -29,6 +34,8 @@ from app.schemas.academic_structure import AcademicPeriodItem, AcademicPeriodUpd
 
 logger = get_logger(__name__)
 
+YEAR = "YEAR"
+
 
 def _type_value(period_type: Any) -> str:
     return str(getattr(period_type, "value", period_type))
@@ -46,7 +53,8 @@ class AcademicPeriodService:
     async def list_periods(self, institution_id: uuid.UUID | None) -> list[AcademicPeriodItem]:
         return [AcademicPeriodItem(**row) for row in await self.repo.list_periods(institution_id)]
 
-    async def create(self, body: AcademicPeriodCreate) -> AcademicPeriod:
+    async def create(self, body: AcademicPeriodCreate, *, commit: bool = True) -> AcademicPeriod:
+        """Create a period. `commit=False` only flushes, for callers saving several at once."""
         institution = await self.db.get(Institution, body.institution_id)
         if institution is None or institution.is_deleted:
             raise NotFoundError("Institution not found.")
@@ -58,6 +66,7 @@ class AcademicPeriodService:
             period_type=_type_value(body.period_type),
             start=body.start_date,
             end=body.end_date,
+            parent_id=body.parent_id,
             exclude_id=None,
             check_overlap=True,
         )
@@ -68,9 +77,10 @@ class AcademicPeriodService:
             start_date=body.start_date,
             end_date=body.end_date,
             is_active=body.is_active,
+            parent_id=body.parent_id,
         )
         self.db.add(period)
-        await self._commit(name)
+        await self._commit(name, commit=commit)
         await self.db.refresh(period)
         logger.info(
             "academic_period_created",
@@ -97,15 +107,20 @@ class AcademicPeriodService:
         period_type = _type_value(changes.get("period_type", period.period_type))
         start = changes.get("start_date", period.start_date)
         end = changes.get("end_date", period.end_date)
-        timing_changed = any(key in changes for key in ("period_type", "start_date", "end_date"))
+        parent_id = changes.get("parent_id", period.parent_id)
+        timing_changed = any(
+            key in changes for key in ("period_type", "start_date", "end_date", "parent_id")
+        )
         await self._check_rules(
             period.institution_id,
             name=name,
             period_type=period_type,
             start=start,
             end=end,
+            parent_id=parent_id,
             exclude_id=period.id,
             check_overlap=timing_changed,
+            check_containment=timing_changed,
         )
         for field, value in changes.items():
             setattr(period, field, value)
@@ -124,17 +139,48 @@ class AcademicPeriodService:
         period_type: str,
         start: date,
         end: date,
+        parent_id: uuid.UUID | None,
         exclude_id: uuid.UUID | None,
         check_overlap: bool,
+        check_containment: bool = True,
     ) -> None:
         if end <= start:
             raise ValidationError("The end date must be after the start date.")
 
-        others = [p for p in await self.repo.live_periods(institution_id) if p.id != exclude_id]
+        live = await self.repo.live_periods(institution_id)
+        others = [p for p in live if p.id != exclude_id]
         if any(p.name.strip().lower() == name.strip().lower() for p in others):
             raise AlreadyExistsError(
                 detail=f"A period named '{name}' already exists for this institution."
             )
+
+        if not check_containment:
+            pass
+        elif parent_id is not None:
+            if period_type == YEAR:
+                raise ValidationError("An academic year cannot belong to another period.")
+            parent = next((p for p in others if p.id == parent_id), None)
+            if parent is None:
+                raise ValidationError("The academic year was not found for this institution.")
+            if _type_value(parent.period_type) != YEAR:
+                raise ValidationError("A period can only belong to an academic year.")
+            if start < parent.start_date or end > parent.end_date:
+                raise ValidationError(
+                    f"The dates must stay inside {parent.name} "
+                    f"({_fmt(parent.start_date)} to {_fmt(parent.end_date)})."
+                )
+        if check_containment and exclude_id is not None:
+            children = [p for p in others if p.parent_id == exclude_id]
+            if children and period_type != YEAR:
+                raise ValidationError(
+                    "This period contains semesters, so it must stay an academic year."
+                )
+            outside = [c for c in children if c.start_date < start or c.end_date > end]
+            if outside:
+                raise ValidationError(
+                    f"{outside[0].name} would fall outside these dates. Move or resize it first."
+                )
+
         if not check_overlap:
             return
         for other in others:
@@ -146,11 +192,15 @@ class AcademicPeriodService:
                     f"{_fmt(other.end_date)}). Periods of the same type cannot overlap."
                 )
 
-    async def _commit(self, name: str) -> None:
+    async def _commit(self, name: str, *, commit: bool = True) -> None:
         try:
-            await self.db.commit()
+            if commit:
+                await self.db.commit()
+            else:
+                await self.db.flush()
         except IntegrityError as exc:  # a concurrent request took the same name
-            await self.db.rollback()
+            if commit:  # otherwise the caller's savepoint undoes the partial work
+                await self.db.rollback()
             logger.info("academic_period_duplicate", name=name, error=str(exc.orig)[:160])
             raise AlreadyExistsError(
                 detail=f"A period named '{name}' already exists for this institution."

@@ -101,10 +101,21 @@ export interface StudentAcademicContext {
   levels: StudentContextLevel[];
   current_period: {
     name: string;
+    /** The academic year when `name` is a semester. */
+    year_name?: string | null;
     period_type: string;
     start_date: string;
     end_date: string;
   } | null;
+  /** The institution's next key dates (registration, exams, results…), soonest first. */
+  upcoming_dates?: {
+    title: string;
+    kind: string;
+    start_date: string;
+    end_date: string;
+    /** e.g. "Year 3"; empty means everyone. */
+    audience: string | null;
+  }[];
 }
 
 export interface StudentDashboardResponse {

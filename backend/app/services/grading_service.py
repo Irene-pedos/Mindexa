@@ -241,7 +241,6 @@ class GradingService:
         if not item:
             # Check if this ID belongs to a GroupSubmissionAnswer (dispatched from group grading endpoint)
             from app.db.models.attempt import GroupSubmissionAnswer
-            from sqlalchemy import select
             stmt = select(GroupSubmissionAnswer).where(GroupSubmissionAnswer.id == item_uuid)
             res = await self.db.execute(stmt)
             group_answer = res.scalar_one_or_none()

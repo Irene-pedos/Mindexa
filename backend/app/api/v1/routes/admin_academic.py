@@ -35,6 +35,18 @@ from app.db.schemas.academic import (
     CourseCreate,
     CourseResponse,
 )
+from fastapi import File, Form, UploadFile
+from app.db.models.auth import User
+from app.schemas.academic_calendar import (
+    CalendarApplyRequest,
+    CalendarApplyResult,
+    CalendarDraft,
+    CalendarEventIn,
+    CalendarEventItem,
+    CalendarEventUpdate,
+)
+from app.services import calendar_import_service as calendar_import
+from app.services.academic_calendar_service import AcademicCalendarService
 from app.services.academic_period_service import AcademicPeriodService
 from app.schemas.academic_structure import (
     AcademicPeriodItem,
@@ -313,6 +325,63 @@ async def create_period(body: AcademicPeriodCreate, db: AsyncSession = Depends(g
 @router.patch("/academic-periods/{id}", response_model=AcademicPeriodResponse)
 async def update_period(id: uuid.UUID, body: AcademicPeriodUpdate, db: AsyncSession = Depends(get_db)):
     return await AcademicPeriodService(db).update(id, body)
+
+
+# ── Dated items of a period (registration, holidays, special exams, results…) ─
+
+@router.get("/academic-periods/{id}/calendar-events", response_model=List[CalendarEventItem])
+async def list_period_events(id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    return await AcademicCalendarService(db).list_events(id)
+
+
+@router.post("/academic-periods/{id}/calendar-events", response_model=CalendarEventItem, status_code=201)
+async def create_period_event(
+    id: uuid.UUID,
+    body: CalendarEventIn,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    return await AcademicCalendarService(db).create_event(admin, id, body)
+
+
+@router.patch("/calendar-events/{event_id}", response_model=CalendarEventItem)
+async def update_period_event(event_id: uuid.UUID, body: CalendarEventUpdate, db: AsyncSession = Depends(get_db)):
+    return await AcademicCalendarService(db).update_event(event_id, body)
+
+
+@router.delete("/calendar-events/{event_id}", status_code=204)
+async def delete_period_event(event_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    await AcademicCalendarService(db).delete_event(event_id)
+
+
+# ── Calendar import: read a calendar file, review the draft, then save it ─────
+
+async def _read_upload(file: UploadFile) -> tuple[bytes, str]:
+    data = await file.read(calendar_import.MAX_BYTES + 1)
+    return data, (file.content_type or "").lower()
+
+
+@router.post("/calendar/preview")
+async def preview_calendar_file(file: UploadFile = File(...), rotation: int = Form(0)):
+    """First page as an image so a sideways scan can be rotated before it is read. No AI call."""
+    data, content_type = await _read_upload(file)
+    return calendar_import.preview(data, content_type, rotation)
+
+
+@router.post("/calendar/extract", response_model=CalendarDraft)
+async def extract_calendar_file(file: UploadFile = File(...), rotation: int = Form(0)):
+    """AI reads the calendar into a DRAFT. Nothing is saved until the admin applies it."""
+    data, content_type = await _read_upload(file)
+    return await calendar_import.extract(data, content_type, rotation)
+
+
+@router.post("/calendar/apply", response_model=CalendarApplyResult, status_code=201)
+async def apply_calendar_draft(
+    body: CalendarApplyRequest,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    return await AcademicCalendarService(db).apply_import(admin, body)
 
 
 @router.post("/courses", response_model=CourseResponse)

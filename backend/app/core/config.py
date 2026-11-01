@@ -216,6 +216,8 @@ class Settings(BaseSettings):
     GROQ_API_KEY: str = ""
     GROQ_BASE_URL: str = "https://api.groq.com/openai/v1"
     GROQ_DEFAULT_MODEL: str = "openai/gpt-oss-120b"
+    # Reads scanned documents (the academic-calendar import). Must accept images.
+    GROQ_VISION_MODEL: str = "qwen/qwen3.8-27b"
     OPENAI_API_KEY: str = ""
     ANTHROPIC_API_KEY: str = ""
     JINA_API_KEY: str = ""

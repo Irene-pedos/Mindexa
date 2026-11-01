@@ -146,6 +146,8 @@ def test_calendar_event_types_defined():
     expected = {
         "MARKS_DEADLINE", "DELIBERATION", "APPEAL_WINDOW",
         "REASSESSMENT_WINDOW", "EXAM_PERIOD", "OTHER",
+        # added with the academic-year calendar import
+        "REGISTRATION", "HOLIDAY", "RESULTS_PUBLICATION", "PLACEMENT", "DEFENSE",
     }
     actual = {e.value for e in CalendarEventType}
     assert expected == actual

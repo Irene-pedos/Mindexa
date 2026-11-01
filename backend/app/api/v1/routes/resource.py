@@ -68,6 +68,21 @@ async def upload_material(
     return LecturerMaterialResponse.model_validate(material)
 
 
+@router.post(
+    "/lecturer-materials/{material_id}/retry-processing",
+    response_model=LecturerMaterialResponse,
+    summary="Index a material again after it failed",
+)
+async def retry_material_processing(
+    material_id: uuid.UUID,
+    current_user=Depends(require_lecturer),
+    db: AsyncSession = Depends(get_db),
+) -> LecturerMaterialResponse:
+    """Queues indexing of an already-uploaded file again. Nothing is uploaded a second time."""
+    material = await ResourceService(db).retry_material_processing(current_user.id, material_id)
+    return LecturerMaterialResponse.model_validate(material)
+
+
 @router.get(
     "/workspaces/{workspace_id}/materials",
     response_model=List[LecturerMaterialResponse],

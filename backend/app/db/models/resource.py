@@ -109,6 +109,8 @@ class StudentResource(BaseModel, table=True):
     processing_error: str | None = Field(default=None, nullable=True, max_length=1000)
     chunk_count: int | None = Field(default=None, nullable=True)
     page_count: int | None = Field(default=None, nullable=True)
+    processing_progress: int = Field(default=0, nullable=False, sa_column_kwargs={"server_default": "0"})
+    processing_stage: str | None = Field(default=None, nullable=True, max_length=30)
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -309,6 +311,9 @@ class LecturerMaterial(BaseModel, table=True):
     )
     processing_error: str | None = Field(default=None, nullable=True, max_length=1000)
     chunk_count: int | None = Field(default=None, nullable=True)
+    # Live progress of the background indexing (0-100) and the step it is on, for the progress bar.
+    processing_progress: int = Field(default=0, nullable=False, sa_column_kwargs={"server_default": "0"})
+    processing_stage: str | None = Field(default=None, nullable=True, max_length=30)
 
     # ── RAG Integration ───────────────────────────────────────────────────────
 

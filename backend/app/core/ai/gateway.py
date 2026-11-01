@@ -16,7 +16,7 @@ from app.core.ai.providers import (
     BaseProvider,
 )
 from app.core.config import settings
-from app.core.exceptions import RateLimitError, ServiceUnavailableError
+from app.core.exceptions import ProviderTimeoutError, RateLimitError, ServiceUnavailableError
 from app.db.enums import AIActionStatus, AIActionType
 from app.db.models.ai import AIActionLog
 from app.db.repositories.ai_usage_repo import AIUsageRepository
@@ -389,6 +389,14 @@ class AIGateway:
                     # Never wait more than 30 seconds per attempt
                     sleep_time = min(sleep_time, 30.0)
                     await sleep(sleep_time)
+                except ProviderTimeoutError as exc:
+                    # A slow or dropped connection usually works a moment later: retry the same
+                    # provider a couple of times before moving on.
+                    if attempt >= 2:
+                        errors.append(f"{provider.name}: {exc}")
+                        break
+                    attempt += 1
+                    await sleep(2.0 * attempt)
                 except ServiceUnavailableError as exc:
                     errors.append(f"{provider.name}: {exc}")
                     break  # Fallback to next provider immediately
