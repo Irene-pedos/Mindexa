@@ -31,6 +31,7 @@ import {
   studyPlannerApi,
 } from "@/lib/api/study-planner";
 import { format, parseISO } from "date-fns";
+import { isSessionInProgress } from "@/lib/study-sessions";
 import { cn } from "@/lib/utils";
 import { useRouter } from "next/navigation";
 
@@ -52,6 +53,7 @@ export function StudyPlanDashboard({
   const router = useRouter();
   const activePlan = summary?.active_plan;
   const todaySession = summary?.today_session;
+  const todayInProgress = todaySession ? isSessionInProgress(todaySession) : false;
   const readinessScore = summary?.assessment_readiness_score ?? 0;
   const weakTopics = summary?.weak_topics || [];
   const proactive = summary?.proactive_suggestion;
@@ -165,7 +167,7 @@ export function StudyPlanDashboard({
                 size="sm"
                 className="h-8 text-xs gap-1.5"
               >
-                <Play className="size-3 fill-current" /> Start Session
+                <Play className="size-3 fill-current" /> {todayInProgress ? "Resume Session" : "Start Session"}
               </Button>
             )}
             <Button
@@ -266,10 +268,15 @@ export function StudyPlanDashboard({
                       variant={todaySession.status === "COMPLETED" ? "outline" : "secondary"}
                       className={cn(
                         "text-[10px] uppercase shrink-0",
-                        todaySession.status === "COMPLETED" && "text-emerald-600 border-emerald-500/30"
+                        todaySession.status === "COMPLETED" && "text-emerald-600 border-emerald-500/30",
+                        todayInProgress && "text-sky-700 dark:text-sky-300 border-sky-500/30 bg-sky-500/10",
                       )}
                     >
-                      {todaySession.status}
+                      {todaySession.status === "COMPLETED"
+                        ? "COMPLETED"
+                        : todayInProgress
+                          ? "IN PROGRESS"
+                          : todaySession.status}
                     </Badge>
                   </div>
                 </div>
@@ -295,7 +302,7 @@ export function StudyPlanDashboard({
                       onClick={() => router.push(`/student/study/session/${todaySession.id}`)}
                       className="h-7 text-[11px] gap-1 shrink-0"
                     >
-                      <Play className="size-3 fill-current" /> Start
+                      <Play className="size-3 fill-current" /> {todayInProgress ? "Resume" : "Start"}
                     </Button>
                   )}
                 </div>

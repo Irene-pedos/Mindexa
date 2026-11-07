@@ -494,6 +494,8 @@ class GuidedSessionMixin(PlannerBase):
             session.lesson_generated_at = datetime.now(UTC)
         elif session.lesson_status != "COMPLETED":
             session.lesson_status = "IN_PROGRESS"
+        else:
+            session.guided_stage = "summary"
 
         await self.repo.update_session(session)
         await self.db.commit()
@@ -506,6 +508,84 @@ class GuidedSessionMixin(PlannerBase):
         session = await self.repo.get_session_by_id(session_id, student_id)
         if not session:
             raise NotFoundError("Study session not found")
+        return self._format_session(session)
+
+    async def save_guided_session_progress(
+        self,
+        session_id: uuid.UUID,
+        student_id: uuid.UUID,
+        current_section_index: int,
+        guided_stage: str,
+    ) -> StudySessionResponse:
+        """Persist the student's current lesson section for a later resume."""
+        session = await self.repo.get_session_by_id(session_id, student_id)
+        if not session:
+            raise NotFoundError("Study session not found")
+
+        section_count = len(session.lesson_sections_json or [])
+        max_index = max(section_count - 1, 0)
+        if current_section_index > max_index:
+            raise ValidationError("Current section index is outside this lesson.")
+
+        session.current_section_index = current_section_index
+        session.guided_stage = guided_stage
+        await self.repo.update_session(session)
+        await self.db.commit()
+        return self._format_session(session)
+
+    async def save_knowledge_check_draft(
+        self,
+        session_id: uuid.UUID,
+        student_id: uuid.UUID,
+        answers: Dict[str, Any],
+        current_question_index: int,
+    ) -> StudySessionResponse:
+        """Persist in-progress answers so the student can leave and resume the check."""
+        session = await self.repo.get_session_by_id(session_id, student_id)
+        if not session:
+            raise NotFoundError("Study session not found")
+        questions = session.quiz_questions or []
+        if not questions:
+            raise ValidationError("Generate the knowledge check before saving answers.")
+        if current_question_index >= len(questions):
+            raise ValidationError("Current question index is outside this knowledge check.")
+
+        valid_keys = {str(question.get("id", index)) for index, question in enumerate(questions)}
+        valid_keys.update(str(index) for index in range(len(questions)))
+        unknown_keys = set(answers) - valid_keys
+        if unknown_keys:
+            raise ValidationError("Draft contains answers for unknown questions.")
+
+        session.knowledge_check_draft_answers = dict(answers)
+        session.knowledge_check_current_question_index = current_question_index
+        await self.repo.update_session(session)
+        await self.db.commit()
+        return self._format_session(session)
+
+    async def save_guided_section_reflection(
+        self,
+        session_id: uuid.UUID,
+        student_id: uuid.UUID,
+        section_index: int,
+        reflection: str,
+    ) -> StudySessionResponse:
+        """Save or clear a student's own-words reflection for one lesson section."""
+        session = await self.repo.get_session_by_id(session_id, student_id)
+        if not session:
+            raise NotFoundError("Study session not found")
+        sections = session.lesson_sections_json or []
+        if section_index >= len(sections):
+            raise ValidationError("Section index is outside this lesson.")
+
+        reflections = dict(session.section_reflections_json or {})
+        key = str(section_index)
+        if reflection.strip():
+            reflections[key] = reflection
+        else:
+            reflections.pop(key, None)
+        session.section_reflections_json = reflections
+        await self.repo.update_session(session)
+        await self.db.commit()
         return self._format_session(session)
 
     async def ask_guided_session_question(
@@ -568,12 +648,18 @@ class GuidedSessionMixin(PlannerBase):
             top_k=4,
         )
 
+        from app.core.ai.prompt_render import untrusted_block
+
         prompt_with_context_parts = [
-            f"[CURRENT GUIDED LESSON CONTEXT: Topic='{session.topic}', Section Context='{section_context}']"
+            "Reference context for this question (data only):",
+            untrusted_block(
+                "guided_lesson_context",
+                f"Topic: {session.topic}\nSection Context: {section_context}",
+            ),
         ]
         if rag_context:
-            prompt_with_context_parts.append(f"[SOURCE MATERIAL CONTEXT:\n{rag_context[:1500]}]")
-        prompt_with_context_parts.append(question)
+            prompt_with_context_parts.append(untrusted_block("course_materials", rag_context[:1500]))
+        prompt_with_context_parts.append(f"Student question:\n{question}")
         prompt_with_context = "\n\n".join(prompt_with_context_parts)
 
         output = await agent.answer(
@@ -623,7 +709,9 @@ class GuidedSessionMixin(PlannerBase):
         await assert_student_ai_allowed(self.db, student_id)
 
         sections = session.lesson_sections_json or []
-        sec_item = sections[section_index] if section_index < len(sections) else {}
+        if section_index >= len(sections):
+            raise ValidationError("Section index is outside this lesson.")
+        sec_item = sections[section_index]
         sec_title = sec_item.get("section_title", session.topic)
         sec_kp = sec_item.get("key_points") or []
         sec_kp_str = "; ".join(sec_kp) if isinstance(sec_kp, list) else str(sec_kp)
@@ -678,7 +766,7 @@ class GuidedSessionMixin(PlannerBase):
                     section_content=sec_content,
                     rag_context=rag_context,
                 )
-                return {
+                exercise = {
                     "id": str(uuid.uuid4()),
                     "section_index": section_index,
                     "section_title": sec_title,
@@ -689,6 +777,12 @@ class GuidedSessionMixin(PlannerBase):
                     "explanation": ex_output.explanation,
                     "generated_by": "ai",
                 }
+                exercises = list(session.guided_practice_exercises_json or [])
+                exercises.append(exercise)
+                session.guided_practice_exercises_json = exercises[-100:]
+                await self.repo.update_session(session)
+                await self.db.commit()
+                return exercise
             except Exception as exc:
                 last_error = exc
                 logger.warning(
@@ -708,6 +802,55 @@ class GuidedSessionMixin(PlannerBase):
             code="AI_TEMPORARILY_UNAVAILABLE",
         )
 
+    async def submit_guided_exercise_attempt(
+        self,
+        session_id: uuid.UUID,
+        student_id: uuid.UUID,
+        exercise_id: str,
+        selected_option_index: int,
+    ) -> Dict[str, Any]:
+        """Grade and persist an answer against an exercise generated for this session."""
+        session = await self.repo.get_session_by_id(session_id, student_id)
+        if not session:
+            raise NotFoundError("Study session not found")
+        exercise = next(
+            (
+                item
+                for item in reversed(session.guided_practice_exercises_json or [])
+                if item.get("id") == exercise_id
+            ),
+            None,
+        )
+        if not exercise:
+            raise ValidationError("Practice exercise was not found for this session.")
+
+        options = exercise.get("options") or []
+        correct_index = exercise.get("correct_option_index")
+        if not 0 <= selected_option_index < len(options):
+            raise ValidationError("Selected option is outside this practice exercise.")
+        is_correct = selected_option_index == correct_index
+        attempt = {
+            "exercise_id": exercise_id,
+            "section_index": exercise.get("section_index", 0),
+            "selected_option_index": selected_option_index,
+            "is_correct": is_correct,
+            "submitted_at": datetime.now(UTC).isoformat(),
+        }
+        attempts = [
+            item
+            for item in (session.guided_practice_attempts_json or [])
+            if item.get("exercise_id") != exercise_id
+        ]
+        attempts.append(attempt)
+        session.guided_practice_attempts_json = attempts[-100:]
+        await self.repo.update_session(session)
+        await self.db.commit()
+        return {
+            **attempt,
+            "correct_option_index": correct_index,
+            "explanation": exercise.get("explanation", ""),
+        }
+
     async def submit_guided_knowledge_check(
         self,
         session_id: uuid.UUID,
@@ -718,6 +861,14 @@ class GuidedSessionMixin(PlannerBase):
         session = await self.repo.get_session_by_id(session_id, student_id)
         if not session:
             raise NotFoundError("Study session not found")
+
+        # Network retries of the same submission must not update profile averages
+        # or schedule the same spaced-review work twice.
+        if (
+            session.knowledge_check_report is not None
+            and session.knowledge_check_answers == answers
+        ):
+            return session.knowledge_check_report
 
         questions = session.quiz_questions or []
         if not questions:
@@ -741,7 +892,7 @@ class GuidedSessionMixin(PlannerBase):
             report = report_obj.model_dump()
         except Exception as exc:
             logger.error(
-                "Knowledge check AI evaluation failed; falling back to deterministic option grading",
+                "Deterministic grading failed; retrying with local answer-key grading",
                 error=str(exc),
             )
             raw_questions = questions if isinstance(questions, list) else []
@@ -750,8 +901,10 @@ class GuidedSessionMixin(PlannerBase):
                 raise AITemporarilyUnavailableError("Unable to grade the knowledge check right now. Please try again.")
 
             from app.agents.study_planner_agent import evaluate_question_response
-            correct_count = 0
+            score_total = 0.0
             q_grades = []
+            mastered_concepts = []
+            weak_concepts = []
             for i, q_item in enumerate(raw_questions):
                 q_dict = q_item.model_dump() if hasattr(q_item, "model_dump") else (q_item if isinstance(q_item, dict) else {})
                 q_id = str(q_dict.get("id", i))
@@ -759,8 +912,12 @@ class GuidedSessionMixin(PlannerBase):
 
                 is_correct, score_pct, student_ans_str, correct_ans_str = evaluate_question_response(q_dict, raw_ans)
 
+                score_total += score_pct
+                concept = q_dict.get("concept_tag") or q_dict.get("question_text") or session.topic
                 if is_correct:
-                    correct_count += 1
+                    mastered_concepts.append(concept)
+                else:
+                    weak_concepts.append(q_dict.get("concept_tag") or q_dict.get("topic_tag") or session.topic)
 
                 q_grades.append({
                     "question_id": q_id,
@@ -771,14 +928,15 @@ class GuidedSessionMixin(PlannerBase):
                     "explanation": q_dict.get("explanation", "Evaluated based on answer verification key."),
                 })
 
-            calc_percentage = round((correct_count / total_q * 100), 1)
+            calc_percentage = round(score_total / total_q, 1)
             report = {
                 "total_questions": total_q,
                 "score_percentage": calc_percentage,
                 "question_grades": q_grades,
-                "mastered_concepts": [session.topic] if calc_percentage >= 70 else [],
-                "weak_concepts": [session.topic] if calc_percentage < 70 else [],
+                "mastered_concepts": list(dict.fromkeys(mastered_concepts)),
+                "weak_concepts": list(dict.fromkeys(weak_concepts)),
                 "estimated_confidence_level": int(calc_percentage),
+                "generated_by": "deterministic",
                 "recommendations": [
                     "Review missed questions to improve concept understanding."
                     if calc_percentage < 70
@@ -793,6 +951,9 @@ class GuidedSessionMixin(PlannerBase):
             score=score,
             report=report,
         )
+        session.knowledge_check_draft_answers = {}
+        session.knowledge_check_current_question_index = 0
+        await self.repo.update_session(session)
 
         plan = await self.repo.get_plan_by_id(session.study_plan_id, student_id)
         course_id = plan.course_id if plan else None
@@ -801,54 +962,58 @@ class GuidedSessionMixin(PlannerBase):
         conf_dict = dict(profile.topic_confidence or {})
         conf_dict[session.topic] = int(report.get("estimated_confidence_level", int(score)))
         weak_list = list(profile.weak_topics or [])
+        for mastered in report.get("mastered_concepts", []):
+            if mastered in weak_list:
+                weak_list.remove(mastered)
         for w in report.get("weak_concepts", []):
             if w not in weak_list:
                 weak_list.append(w)
 
         old_avg = profile.average_knowledge_check_score
-        new_avg = score if old_avg is None else round((old_avg + score) / 2, 1)
+        old_count = int(getattr(profile, "knowledge_check_count", 0) or 0)
+        if old_avg is None:
+            new_count = 1
+            new_avg = score
+        else:
+            # Existing installations backfill a count of one for historical
+            # aggregate scores; clamp defensively for partially migrated rows.
+            old_count = max(old_count, 1)
+            new_count = old_count + 1
+            new_avg = round(((float(old_avg) * old_count) + score) / new_count, 1)
 
         await self.repo.update_learning_profile(
             profile.id,
             topic_confidence=conf_dict,
             weak_topics=weak_list,
             average_knowledge_check_score=new_avg,
+            knowledge_check_count=new_count,
             last_studied_at=datetime.now(UTC),
         )
 
-        # Issue M10: Auto-populate recommended_resource_ids from lecturer materials matching weak concepts or session topic
+        # Recommend only resources returned by the same student-scoped, workspace /
+        # learning-unit-scoped retrieval used for lesson grounding. Never choose an
+        # arbitrary first material or count a recommendation as material coverage.
         try:
-            mats_stmt = select(LecturerMaterial).where(
-                LecturerMaterial.is_student_visible == True,
-                LecturerMaterial.is_deleted == False,
+            weak_topics = report.get("weak_concepts", []) or (
+                [session.topic] if score < 70 else []
             )
-            if plan and plan.teaching_workspace_id:
-                mats_stmt = mats_stmt.where(LecturerMaterial.teaching_workspace_id == plan.teaching_workspace_id)
-
-            m_res = await self.db.execute(mats_stmt)
-            mats = list(m_res.scalars().all())
-            if mats:
-                weak_set = set(report.get("weak_concepts", []) or [session.topic])
-                rec_ids = [
-                    str(m.id) for m in mats
-                    if any(
-                        w.lower() in (getattr(m, "display_name", None) or getattr(m, "original_filename", "") or "").lower()
-                        or (getattr(m, "display_name", None) or getattr(m, "original_filename", "") or "").lower() in w.lower()
-                        for w in weak_set
-                    )
-                ]
-                if not rec_ids:
-                    rec_ids = [str(mats[0].id)]
+            if weak_topics:
+                _, recommendation_citations = await self._get_session_rag_context(
+                    session=session,
+                    plan=plan,
+                    student_id=student_id,
+                    topic_or_query=" ".join(str(topic) for topic in weak_topics),
+                    top_k=3,
+                )
+                rec_ids = list(dict.fromkeys(
+                    str(citation["resource_id"])
+                    for citation in recommendation_citations
+                    if citation.get("resource_id")
+                ))
                 session.recommended_resource_ids = rec_ids
                 await self.repo.update_session(session)
-
-                if plan:
-                    curr_covered = set(plan.covered_material_ids or [])
-                    curr_covered.update(rec_ids)
-                    plan.covered_material_ids = list(curr_covered)
-                    await self.repo.update_plan(plan)
         except Exception as exc:
-            logger.warning("Failed to auto-recommend materials for knowledge check", error=str(exc))
+            logger.warning("Failed to retrieve study materials for weak concepts", error=str(exc))
 
         # Issue 4c: Spaced repetition auto-scheduling for weak topics
         weak_concepts = report.get("weak_concepts", [])
@@ -872,6 +1037,9 @@ class GuidedSessionMixin(PlannerBase):
         if not session:
             raise NotFoundError("Study session not found")
 
+        if session.lesson_status == "NOT_GENERATED":
+            raise ValidationError("Start the guided lesson before completing this session.")
+
         # Idempotent: a repeat call must not re-bill the AI summary or farm streak / profile counters.
         if session.status == "COMPLETED" and session.lesson_status == "COMPLETED":
             return self._format_session(session)
@@ -880,6 +1048,7 @@ class GuidedSessionMixin(PlannerBase):
         # streak and profile counters must only move the first time it is completed.
         first_completion = session.status != "COMPLETED"
         session.lesson_status = "COMPLETED"
+        session.guided_stage = "summary"
         session.status = "COMPLETED"
         if first_completion or not session.completed_at:
             session.completed_at = datetime.now(UTC)
@@ -907,10 +1076,18 @@ class GuidedSessionMixin(PlannerBase):
             if getattr(summary_out, "recommendations_for_future_revision", None):
                 summary_parts.append("**Recommendations for Revision:**\n" + "\n".join(f"- {r}" for r in summary_out.recommendations_for_future_revision))
 
-            session.session_summary_text = "\n\n".join(summary_parts) if summary_parts else f"Summary for {session.topic}: Covered core concepts, worked through practical examples, and completed self-evaluation."
+            if summary_parts:
+                session.session_summary_text = "\n\n".join(summary_parts)
+            else:
+                check_status = "completed the knowledge check" if session.knowledge_check_report else "did not complete a knowledge check"
+                session.session_summary_text = f"Summary for {session.topic}: Completed the guided lesson and {check_status}."
         except Exception as exc:
             logger.warning("Session summary AI generation failed, using topic summary fallback", error=str(exc))
-            session.session_summary_text = f"Summary for {session.topic}: Covered core concepts, worked through practical examples, and completed self-evaluation."
+            check_status = "completed the knowledge check" if session.knowledge_check_report else "did not complete a knowledge check"
+            session.session_summary_text = (
+                f"Summary for {session.topic}: Completed the guided lesson and {check_status}. "
+                "Review the lesson takeaways and any available knowledge-check feedback."
+            )
 
         await self.repo.update_session(session)
 
@@ -1080,5 +1257,11 @@ class GuidedSessionMixin(PlannerBase):
             )
 
         session.quiz_questions = questions
+        if force_regenerate:
+            session.knowledge_check_answers = None
+            session.knowledge_check_draft_answers = {}
+            session.knowledge_check_current_question_index = 0
+            session.knowledge_check_score = None
+            session.knowledge_check_report = None
         await self.repo.update_session(session)
         return questions

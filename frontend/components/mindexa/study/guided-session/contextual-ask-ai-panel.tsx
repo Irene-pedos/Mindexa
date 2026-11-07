@@ -173,7 +173,8 @@ export function ContextualAskAiPanel({
         <Button
           onClick={() => setIsOpen(true)}
           size="icon"
-          className="fixed bottom-6 right-6 z-50 rounded-full size-11 bg-card border border-border/60 shadow-xs text-primary hover:bg-muted transition-all"
+          aria-label="Ask AI Tutor"
+          className="fixed bottom-4 right-4 sm:bottom-6 sm:right-6 z-50 rounded-full size-11 bg-card border border-border/60 shadow-xs text-primary hover:bg-muted transition-all cursor-pointer"
           title="Ask AI Tutor"
         >
           <SparklesIcon size={20} className="text-primary" />
@@ -182,7 +183,7 @@ export function ContextualAskAiPanel({
 
       {/* Floating Chat Drawer / Panel */}
       {isOpen && (
-        <Card className="fixed bottom-6 right-6 z-50 w-[90vw] max-w-[400px] h-[540px] max-h-[80vh] border border-border/60 bg-card shadow-xs rounded-xl flex flex-col overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-200">
+        <Card className="fixed bottom-4 right-4 sm:bottom-6 sm:right-6 z-50 w-[calc(100vw-2rem)] max-w-[400px] h-[520px] max-h-[80vh] border border-border/60 bg-card shadow-lg rounded-xl flex flex-col overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-200">
           {/* Header */}
           <CardHeader className="p-4 border-b border-border/60 bg-muted/30 flex flex-row items-center justify-between space-y-0">
             <div className="flex items-center gap-2.5">
@@ -201,7 +202,7 @@ export function ContextualAskAiPanel({
                     Live Session
                   </Badge>
                 </div>
-                <p className="text-[11px] text-muted-foreground truncate max-w-[240px]">
+                <p className="text-[11px] text-muted-foreground truncate max-w-[200px] sm:max-w-[240px]">
                   Context: {currentSectionTitle}
                 </p>
               </div>
@@ -209,8 +210,9 @@ export function ContextualAskAiPanel({
             <Button
               variant="ghost"
               size="icon"
+              aria-label="Close AI Tutor panel"
               onClick={() => setIsOpen(false)}
-              className="size-7 rounded-full text-muted-foreground hover:bg-muted"
+              className="size-7 rounded-full text-muted-foreground hover:bg-muted cursor-pointer"
             >
               <X className="size-4" />
             </Button>

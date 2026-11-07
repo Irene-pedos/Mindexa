@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import json
 import re
 import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional, Self
 
 from app.db.models.study_plan import DEFAULT_INITIAL_READINESS_SCORE
-from pydantic import (AliasChoices, BaseModel, Field, model_validator)
+from pydantic import (AliasChoices, BaseModel, Field, field_validator, model_validator)
 
 
 # Request bounds: free text reaches the LLM prompt and JSON columns, so it must be capped.
@@ -15,6 +16,8 @@ MAX_QUESTION_CHARS = 2_000
 MAX_SECTION_CONTEXT_CHARS = 4_000
 MAX_FEEDBACK_CHARS = 2_000
 MAX_QUIZ_ANSWERS = 50
+MAX_KNOWLEDGE_CHECK_DRAFT_BYTES = 40_000
+MAX_KNOWLEDGE_CHECK_DRAFT_VALUE_CHARS = 4_000
 MAX_CHECKLIST_ITEMS = 50
 MAX_BLACKOUT_DATES = 366
 MAX_SESSION_MINUTES = 480
@@ -69,10 +72,16 @@ class StudySessionResponse(BaseModel):
     lesson_plan_json: Optional[Dict[str, Any]] = None
     lesson_status: str = "NOT_GENERATED"
     current_section_index: int = 0
+    guided_stage: Literal["intro", "lesson", "practice", "knowledge_check", "summary"] = "intro"
     lesson_generated_at: Optional[datetime] = None
     knowledge_check_answers: Optional[Dict[str, Any]] = None
+    knowledge_check_draft_answers: Dict[str, Any] = Field(default_factory=dict)
+    knowledge_check_current_question_index: int = 0
     knowledge_check_score: Optional[float] = None
     knowledge_check_report: Optional[Dict[str, Any]] = None
+    section_reflections_json: Dict[str, str] = Field(default_factory=dict)
+    guided_practice_exercises_json: List[Dict[str, Any]] = Field(default_factory=list)
+    guided_practice_attempts_json: List[Dict[str, Any]] = Field(default_factory=list)
     session_summary_text: Optional[str] = None
     student_notes: Optional[str] = None
     tutor_chat_history: List[Dict[str, Any]] = []
@@ -109,6 +118,46 @@ class SaveSessionNotesRequest(BaseModel):
         max_length=MAX_NOTES_CHARS,
         description="Personal notes written by the student for this study session",
     )
+
+
+class SaveGuidedSessionProgressRequest(BaseModel):
+    current_section_index: int = Field(ge=0, le=100)
+    guided_stage: Literal["intro", "lesson", "practice", "knowledge_check", "summary"]
+
+
+class SaveKnowledgeCheckDraftRequest(BaseModel):
+    answers: Dict[str, Any] = Field(default_factory=dict, max_length=MAX_QUIZ_ANSWERS)
+    current_question_index: int = Field(ge=0, le=MAX_QUIZ_ANSWERS)
+
+    @field_validator("answers")
+    @classmethod
+    def _bound_answer_draft(cls, answers: Dict[str, Any]) -> Dict[str, Any]:
+        encoded = json.dumps(answers, ensure_ascii=False, separators=(",", ":"))
+        if len(encoded.encode("utf-8")) > MAX_KNOWLEDGE_CHECK_DRAFT_BYTES:
+            raise ValueError("Knowledge-check draft is too large.")
+
+        def validate_value(value: Any) -> None:
+            if isinstance(value, str) and len(value) > MAX_KNOWLEDGE_CHECK_DRAFT_VALUE_CHARS:
+                raise ValueError("An answer in the knowledge-check draft is too long.")
+            if isinstance(value, dict):
+                for nested_value in value.values():
+                    validate_value(nested_value)
+            elif isinstance(value, list):
+                for nested_value in value:
+                    validate_value(nested_value)
+
+        validate_value(answers)
+        return answers
+
+
+class SaveGuidedSectionReflectionRequest(BaseModel):
+    section_index: int = Field(ge=0, le=100)
+    reflection: str = Field(default="", max_length=MAX_NOTES_CHARS)
+
+
+class SubmitGuidedExerciseRequest(BaseModel):
+    exercise_id: str = Field(min_length=1, max_length=36)
+    selected_option_index: int = Field(ge=0, le=3)
 
 
 class GuidedSessionAskRequest(BaseModel):

@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { formatSessionRelativeTime } from "@/lib/date-utils";
-import { planProgress, sessionLabel } from "@/lib/study-sessions";
+import { isSessionInProgress, planProgress, sessionLabel } from "@/lib/study-sessions";
 import { cn } from "@/lib/utils";
 
 interface PlanCardProps {
@@ -116,6 +116,11 @@ export function PlanCard({ plan, expanded, onToggleExpanded, onAdjust, onResched
                 <p className="text-[10px] text-muted-foreground flex items-center gap-1">
                   <CalendarIcon className="size-2" aria-hidden />
                   {s.scheduled_start ? formatSessionRelativeTime(s.scheduled_start) : "Unscheduled"}
+                  {isSessionInProgress(s) && (
+                    <span className="text-[9px] font-bold text-sky-600 dark:text-sky-400 bg-sky-500/10 px-1 rounded ml-1">
+                      In Progress
+                    </span>
+                  )}
                 </p>
               </div>
 
@@ -142,7 +147,7 @@ export function PlanCard({ plan, expanded, onToggleExpanded, onAdjust, onResched
                       onClick={() => onStart(s)}
                       className="h-5 text-[10px] px-2 gap-0.5 font-bold cursor-pointer"
                     >
-                      <Play className="size-2 fill-current" aria-hidden /> Start
+                      <Play className="size-2 fill-current" aria-hidden /> {isSessionInProgress(s) ? "Resume" : "Start"}
                     </Button>
                   </>
                 )}

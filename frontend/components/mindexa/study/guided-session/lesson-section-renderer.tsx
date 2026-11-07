@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   Sparkles,
   CheckCircle2,
@@ -12,26 +12,34 @@ import {
   HelpCircle,
   AlertOctagon,
   FileText,
+  Loader2,
+  AlertCircle,
 } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { RichMessageRenderer } from "@/components/mindexa/common/rich-message-renderer";
-import { LessonSection } from "@/lib/api/study-planner";
+import { LessonSection, studyPlannerApi } from "@/lib/api/study-planner";
 
 interface LessonSectionRendererProps {
+  sessionId: string;
   section: LessonSection;
   sectionIndex: number;
   totalSections: number;
+  initialReflection?: string;
+  onReflectionChange?: (sectionIndex: number, reflection: string) => void;
   onNextSection: () => void;
   onPrevSection: () => void;
   onStartPractice: () => void;
 }
 
 export function LessonSectionRenderer({
+  sessionId,
   section,
   sectionIndex,
   totalSections,
+  initialReflection = "",
+  onReflectionChange,
   onNextSection,
   onPrevSection,
   onStartPractice,
@@ -201,18 +209,14 @@ export function LessonSectionRenderer({
 
         {/* 5c. Feynman Self-Explanation Prompt */}
         {section.self_explanation_prompt && (
-          <div className="rounded-xl border border-teal-500/25 bg-teal-500/5 p-5 space-y-3">
-            <h4 className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-teal-600 dark:text-teal-400">
-              <FileText className="size-4" /> Feynman Self-Explanation Nudge
-            </h4>
-            <p className="text-xs text-foreground font-medium">
-              {section.self_explanation_prompt}
-            </p>
-            <textarea
-              placeholder="Explain in your own words before continuing..."
-              className="w-full min-h-[70px] p-3 text-xs rounded-lg border border-teal-500/20 bg-background text-foreground focus:outline-hidden focus:ring-1 focus:ring-teal-500"
-            />
-          </div>
+          <SectionReflectionEditor
+            key={sectionIndex}
+            sessionId={sessionId}
+            sectionIndex={sectionIndex}
+            initialReflection={initialReflection}
+            prompt={section.self_explanation_prompt}
+            onSave={onReflectionChange}
+          />
         )}
 
         {/* 5d. Video Search Link */}
@@ -387,6 +391,145 @@ function MicroCheckCard({
               {microCheck.answer}
             </p>
           </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SectionReflectionEditor({
+  sessionId,
+  sectionIndex,
+  initialReflection,
+  prompt,
+  onSave,
+}: {
+  sessionId: string;
+  sectionIndex: number;
+  initialReflection: string;
+  prompt: string;
+  onSave?: (sectionIndex: number, text: string) => void;
+}) {
+  const [reflection, setReflection] = useState(initialReflection);
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [lastSaved, setLastSaved] = useState(initialReflection);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const currentTextRef = useRef(reflection);
+  const lastSavedRef = useRef(lastSaved);
+
+  useEffect(() => {
+    currentTextRef.current = reflection;
+  }, [reflection]);
+
+  useEffect(() => {
+    lastSavedRef.current = lastSaved;
+  }, [lastSaved]);
+
+  const saveText = useCallback(
+    async (textToSave: string) => {
+      if (textToSave === lastSavedRef.current) return;
+      setSaveStatus("saving");
+      try {
+        await studyPlannerApi.saveGuidedSectionReflection(
+          sessionId,
+          sectionIndex,
+          textToSave
+        );
+        setLastSaved(textToSave);
+        lastSavedRef.current = textToSave;
+        setSaveStatus("saved");
+        onSave?.(sectionIndex, textToSave);
+      } catch {
+        setSaveStatus("error");
+      }
+    },
+    [sessionId, sectionIndex, onSave]
+  );
+
+  const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const val = e.target.value;
+    setReflection(val);
+    if (val === lastSaved) {
+      setSaveStatus("idle");
+      if (timerRef.current) clearTimeout(timerRef.current);
+      return;
+    }
+    setSaveStatus("saving");
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => {
+      void saveText(val);
+    }, 1000);
+  };
+
+  const handleBlur = () => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+    }
+    if (reflection !== lastSaved) {
+      void saveText(reflection);
+    }
+  };
+
+  // Flush on unmount if dirty
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+      if (currentTextRef.current !== lastSavedRef.current) {
+        studyPlannerApi
+          .saveGuidedSectionReflection(
+            sessionId,
+            sectionIndex,
+            currentTextRef.current
+          )
+          .catch(() => {});
+      }
+    };
+  }, [sessionId, sectionIndex]);
+
+  return (
+    <div className="rounded-xl border border-teal-500/25 bg-teal-500/5 p-5 space-y-3">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <h4 className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-teal-600 dark:text-teal-400">
+          <FileText className="size-4" /> Feynman Self-Explanation Nudge
+        </h4>
+        <div className="flex items-center gap-2 text-[11px]" aria-live="polite">
+          {saveStatus === "saving" && (
+            <span className="text-muted-foreground flex items-center gap-1 font-medium">
+              <Loader2 className="size-3 animate-spin text-teal-600" /> Saving...
+            </span>
+          )}
+          {saveStatus === "saved" && (
+            <span className="text-teal-700 dark:text-teal-300 flex items-center gap-1 font-semibold">
+              <CheckCircle2 className="size-3" /> Saved
+            </span>
+          )}
+          {saveStatus === "error" && (
+            <div className="flex items-center gap-1.5 text-destructive font-semibold">
+              <AlertCircle className="size-3" /> Save failed
+              <button
+                type="button"
+                onClick={() => saveText(reflection)}
+                className="underline hover:no-underline text-[10px] ml-1 font-bold cursor-pointer"
+              >
+                Retry
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+      <p className="text-xs text-foreground font-medium">{prompt}</p>
+      <textarea
+        value={reflection}
+        onChange={handleChange}
+        onBlur={handleBlur}
+        placeholder="Explain in your own words before continuing (e.g. key principles, how it works, common pitfalls)..."
+        aria-label={`Feynman explanation for ${prompt}`}
+        className="w-full min-h-[85px] p-3 text-xs rounded-lg border border-teal-500/30 bg-background text-foreground focus:outline-hidden focus:ring-1 focus:ring-teal-500 resize-y leading-relaxed"
+      />
+      <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+        <span>Cleared automatically if left empty.</span>
+        {reflection.trim().length > 0 && (
+          <span>{reflection.trim().split(/\s+/).length} words</span>
         )}
       </div>
     </div>

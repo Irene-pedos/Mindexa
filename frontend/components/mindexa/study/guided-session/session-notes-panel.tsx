@@ -117,7 +117,8 @@ export function SessionNotesPanel({
         <Button
           onClick={() => setIsOpen(true)}
           size="icon"
-          className="fixed bottom-6 left-6 z-40 rounded-full size-11 bg-card border border-border/60 shadow-xs text-primary hover:bg-muted transition-all"
+          aria-label="My Session Notes"
+          className="fixed bottom-4 left-4 sm:bottom-6 sm:left-6 z-40 rounded-full size-11 bg-card border border-border/60 shadow-xs text-primary hover:bg-muted transition-all cursor-pointer"
           title="My Session Notes"
         >
           <FileText className="size-5 text-primary" />
@@ -126,8 +127,8 @@ export function SessionNotesPanel({
 
       {/* Floating Notes Card Panel */}
       {isOpen && (
-        <div className="fixed bottom-6 left-6 z-40 max-w-sm w-full md:w-80 transition-all">
-          <Card className="border border-border/60 bg-card rounded-xl overflow-hidden shadow-none">
+        <div className="fixed bottom-4 left-4 sm:bottom-6 sm:left-6 z-40 w-[calc(100vw-2rem)] max-w-sm md:w-80 transition-all">
+          <Card className="border border-border/60 bg-card rounded-xl overflow-hidden shadow-lg">
             <CardHeader
               onClick={() => setIsOpen(false)}
               className="p-3 px-3.5 border-b border-border/60 bg-muted/20 cursor-pointer flex flex-row items-center justify-between hover:bg-muted/40 transition-colors space-y-0"
@@ -152,11 +153,12 @@ export function SessionNotesPanel({
               <Button
                 variant="ghost"
                 size="icon"
+                aria-label="Close session notes panel"
                 onClick={(e) => {
                   e.stopPropagation();
                   setIsOpen(false);
                 }}
-                className="size-6 text-muted-foreground hover:bg-muted rounded-md"
+                className="size-6 text-muted-foreground hover:bg-muted rounded-md cursor-pointer"
               >
                 <ChevronDown className="size-3.5" />
               </Button>

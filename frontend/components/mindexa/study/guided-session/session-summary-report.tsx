@@ -7,7 +7,6 @@ import {
   TrendingUp,
   Sparkles,
   ArrowRight,
-  BookOpen,
   Clock,
   CheckCircle2,
 } from "lucide-react";
@@ -19,7 +18,6 @@ import {
   CardFooter,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { RichMessageRenderer } from "@/components/mindexa/common/rich-message-renderer";
 import { StudySession, KnowledgeCheckReport } from "@/lib/api/study-planner";
 
@@ -34,15 +32,28 @@ export function SessionSummaryReport({
   report,
   onReturnToPlanner,
 }: SessionSummaryReportProps) {
+  const activeReport = report || session.knowledge_check_report;
+  const hasKnowledgeCheck = Boolean(activeReport && typeof activeReport.score_percentage === "number");
+
+  const plannedMinutes =
+    session.lesson_plan_json?.estimated_duration_minutes ?? session.duration_minutes;
+
   return (
     <Card className="w-full border border-border bg-card rounded-2xl overflow-hidden space-y-6 shadow-xs animate-in fade-in duration-300">
-      {/* Clean, Non-Gradient Header */}
+      {/* Non-Gradient Clean Header */}
       <CardHeader className="border-b border-border/60 bg-background px-6 sm:px-8 py-6 text-center space-y-3">
-        <div className="mx-auto inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20 text-xs font-semibold">
-          <Trophy className="size-4 text-emerald-600 dark:text-emerald-400" />
-          <span>Guided Session Completed</span>
-        </div>
-        
+        {hasKnowledgeCheck ? (
+          <div className="mx-auto inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20 text-xs font-semibold">
+            <Trophy className="size-4 text-emerald-600 dark:text-emerald-400" />
+            <span>Completed with Knowledge Check</span>
+          </div>
+        ) : (
+          <div className="mx-auto inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-sky-500/10 text-sky-700 dark:text-sky-400 border border-sky-500/20 text-xs font-semibold">
+            <CheckCircle2 className="size-4 text-sky-600 dark:text-sky-400" />
+            <span>Completed (Without Knowledge Check)</span>
+          </div>
+        )}
+
         <div className="space-y-1">
           <CardTitle className="text-xl sm:text-2xl md:text-3xl font-bold tracking-tight text-foreground">
             {session.topic}
@@ -65,6 +76,7 @@ export function SessionSummaryReport({
             <p className="text-lg sm:text-xl font-bold text-foreground flex items-center gap-1">
               <CheckCircle2 className="size-4 text-emerald-500 inline" /> Active
             </p>
+            <span className="text-[10px] text-muted-foreground">Session logged</span>
           </div>
 
           <div className="p-4 rounded-xl border border-border/70 bg-muted/20 hover:bg-muted/30 transition-colors text-center space-y-1 flex flex-col items-center justify-center">
@@ -72,17 +84,21 @@ export function SessionSummaryReport({
               <TrendingUp className="size-3.5 text-emerald-500" /> Knowledge Check
             </span>
             <p className="text-lg sm:text-xl font-bold text-foreground">
-              {report ? `${Math.round(report.score_percentage)}%` : "Completed"}
+              {hasKnowledgeCheck ? `${Math.round(activeReport!.score_percentage)}%` : "Not Taken"}
             </p>
+            <span className="text-[10px] text-muted-foreground">
+              {hasKnowledgeCheck ? "Score achieved" : "Self-study evaluation"}
+            </span>
           </div>
 
           <div className="p-4 rounded-xl border border-border/70 bg-muted/20 hover:bg-muted/30 transition-colors text-center space-y-1 flex flex-col items-center justify-center">
             <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider flex items-center justify-center gap-1.5">
-              <Clock className="size-3.5 text-primary" /> Session Time
+              <Clock className="size-3.5 text-primary" /> Planned Duration
             </span>
             <p className="text-lg sm:text-xl font-bold text-foreground">
-              {session.duration_minutes}m
+              {plannedMinutes}m
             </p>
+            <span className="text-[10px] text-muted-foreground">Scheduled study time</span>
           </div>
         </div>
 

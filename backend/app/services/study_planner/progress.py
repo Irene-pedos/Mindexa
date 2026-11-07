@@ -407,10 +407,16 @@ class ProgressMixin(PlannerBase):
             lesson_plan_json=_get_val("lesson_plan_json", None) if include_content else None,
             lesson_status=_get_val("lesson_status", "NOT_GENERATED"),
             current_section_index=_get_val("current_section_index", 0),
+            guided_stage=_get_val("guided_stage", "intro"),
             lesson_generated_at=_get_val("lesson_generated_at", None),
             knowledge_check_answers=_get_val("knowledge_check_answers", None) if include_content else None,
+            knowledge_check_draft_answers=_get_val("knowledge_check_draft_answers", {}) if include_content else {},
+            knowledge_check_current_question_index=_get_val("knowledge_check_current_question_index", 0),
             knowledge_check_score=_get_val("knowledge_check_score", None),
             knowledge_check_report=_get_val("knowledge_check_report", None) if include_content else None,
+            section_reflections_json=_get_val("section_reflections_json", {}) if include_content else {},
+            guided_practice_exercises_json=_get_val("guided_practice_exercises_json", []) if include_content else [],
+            guided_practice_attempts_json=_get_val("guided_practice_attempts_json", []) if include_content else [],
             session_summary_text=_get_val("session_summary_text", None) if include_content else None,
             student_notes=_get_val("student_notes", None) if include_content else None,
             tutor_chat_history=_get_val("tutor_chat_history", []) if include_content else [],
@@ -452,6 +458,19 @@ class ProgressMixin(PlannerBase):
 
         now = datetime.now(UTC)
         target_date = now + timedelta(days=days_ahead)
+        topic_name = f"Spaced Revision: {', '.join(weak_topics[:2])}"
+
+        # Avoid creating another pending review for a retry or a second weak
+        # concept submission that targets the same revision window.
+        review_window_end = target_date + timedelta(days=5)
+        for existing in plan.sessions or []:
+            if (
+                existing.session_type == "REVISION"
+                and existing.topic == topic_name
+                and existing.status in {"SCHEDULED", "RESCHEDULED", "IN_PROGRESS"}
+                and now <= _ensure_utc(existing.scheduled_start) <= review_window_end
+            ):
+                return existing
 
         start_hour, start_min = 19, 0
         try:
@@ -468,7 +487,6 @@ class ProgressMixin(PlannerBase):
             sched_start = _ensure_utc(conflict.scheduled_end) + timedelta(minutes=15)
             sched_end = sched_start + timedelta(minutes=20)
 
-        topic_name = f"Spaced Revision: {', '.join(weak_topics[:2])}"
         session = StudySession(
             study_plan_id=plan.id,
             student_id=student_id,

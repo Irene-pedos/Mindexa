@@ -16,6 +16,15 @@ export function isSessionCompleted(session: StudySession): boolean {
   return session.status === "COMPLETED";
 }
 
+export function isSessionInProgress(session: StudySession): boolean {
+  if (isSessionCompleted(session)) return false;
+  return (
+    session.status === "IN_PROGRESS" ||
+    session.lesson_status === "IN_PROGRESS" ||
+    (Boolean(session.guided_stage) && session.guided_stage !== "intro")
+  );
+}
+
 /** A session needs rescheduling when it was missed/skipped or its start time passed without it running. */
 export function isSessionOverdue(session: StudySession, now: Date = new Date()): boolean {
   if (isSessionCompleted(session)) return false;

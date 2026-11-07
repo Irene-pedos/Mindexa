@@ -182,11 +182,23 @@ class LessonPlanOutput(BaseModel):
             return res
         return []
 
+    @model_validator(mode="after")
+    def _require_teachable_sections(self) -> "LessonPlanOutput":
+        if not self.sections:
+            raise ValueError("A guided lesson must contain at least one section.")
+        if any(
+            not section.section_title.strip() or not section.content.strip()
+            for section in self.sections
+        ):
+            raise ValueError("Every guided lesson section requires a title and teaching content.")
+        return self
+
 
 class KnowledgeCheckQuestion(BaseModel):
     """Schema for an individual self-evaluation question supporting diverse question types."""
     id: str
     question_text: str
+    concept_tag: Optional[str] = None
     question_type: str = Field(default="MCQ")  # MCQ, TRUE_FALSE, MATCHING, FILL_BLANKS, SHORT_ANSWER, OPEN_QUESTION
     options: List[str] = Field(default_factory=list)
     premises: List[str] = Field(default_factory=list)
@@ -196,6 +208,24 @@ class KnowledgeCheckQuestion(BaseModel):
     correct_answer: Optional[Any] = None
     explanation: str = ""
     generated_by: str = Field(default="ai", description="ai or fallback")
+
+    @field_validator("question_type", mode="before")
+    @classmethod
+    def _normalize_question_type(cls, value: Any) -> str:
+        normalized = str(value or "MCQ").strip().upper()
+        aliases = {"FILL_BLANK": "FILL_BLANKS", "FILL_IN_BLANK": "FILL_BLANKS"}
+        normalized = aliases.get(normalized, normalized)
+        supported = {
+            "MCQ",
+            "TRUE_FALSE",
+            "MATCHING",
+            "FILL_BLANKS",
+            "SHORT_ANSWER",
+            "OPEN_QUESTION",
+        }
+        if normalized not in supported:
+            raise ValueError(f"Unsupported knowledge check type: {normalized}")
+        return normalized
 
     @field_validator("options", "premises", "matches", mode="before")
     @classmethod
@@ -248,6 +278,9 @@ class KnowledgeCheckQuestion(BaseModel):
                 f"FILL_BLANKS has {blank_count} blank(s) but only {len(self.options)} option(s). "
                 "options must contain at least one entry per blank."
             )
+        required_keys = {str(index) for index in range(blank_count)}
+        if not required_keys.issubset(self.blank_answers):
+            raise ValueError("FILL_BLANKS requires a correct answer for every blank index.")
         return self
 
     @model_validator(mode="after")
@@ -282,12 +315,57 @@ class KnowledgeCheckQuestion(BaseModel):
                     "Real domain-specific content is required."
                 )
 
+        if self.blank_answers and any(
+            str(self.blank_answers.get(premise, "")).strip().casefold()
+            != self.matches[index].strip().casefold()
+            for index, premise in enumerate(self.premises)
+        ):
+            raise ValueError("MATCHING blank_answers must agree with the premise/match pairs.")
+
         if len(self.question_text) > 200:
             raise ValueError(
                 "MATCHING question_text is too long (>200 chars). "
                 "It must be a short instruction only — the answer key must not appear in question_text."
             )
 
+        return self
+
+
+    @model_validator(mode="after")
+    def _validate_answer_key(self) -> "KnowledgeCheckQuestion":
+        """Reject choice questions whose answer key cannot be graded reliably."""
+        q_type = self.question_type.upper()
+        if q_type == "MCQ":
+            if len(self.options) < 2:
+                raise ValueError("MCQ questions require at least two options.")
+            if self.correct_option_index is not None and not (
+                0 <= self.correct_option_index < len(self.options)
+            ):
+                raise ValueError("MCQ correct_option_index must refer to an existing option.")
+            if (
+                self.correct_option_index is not None
+                and self.correct_answer is not None
+                and str(self.correct_answer).strip().casefold()
+                != self.options[self.correct_option_index].strip().casefold()
+            ):
+                raise ValueError("MCQ correct_answer must match correct_option_index.")
+            if self.correct_option_index is None and self.correct_answer is None:
+                raise ValueError("MCQ questions require a correct option or answer.")
+            if (
+                self.correct_option_index is None
+                and str(self.correct_answer).strip().casefold()
+                not in {option.strip().casefold() for option in self.options}
+            ):
+                raise ValueError("MCQ correct_answer must match one of its options.")
+        if q_type == "TRUE_FALSE" and str(self.correct_answer).strip().lower() not in {
+            "true",
+            "false",
+        }:
+            raise ValueError("TRUE_FALSE questions require correct_answer to be True or False.")
+        if q_type in {"SHORT_ANSWER", "OPEN_QUESTION"} and not str(
+            self.correct_answer or ""
+        ).strip():
+            raise ValueError(f"{q_type} questions require an answer rubric.")
         return self
 
 
@@ -309,7 +387,7 @@ class KnowledgeCheckQuestionGrade(BaseModel):
 
 
 class KnowledgeCheckReport(BaseModel):
-    """Aggregated self-improvement report after completing a session knowledge check."""
+    """Aggregated report from deterministic answer-key evaluation."""
     total_questions: int
     score_percentage: float
     question_grades: List[KnowledgeCheckQuestionGrade] = Field(default_factory=list)
@@ -317,7 +395,7 @@ class KnowledgeCheckReport(BaseModel):
     weak_concepts: List[str] = Field(default_factory=list)
     estimated_confidence_level: int = 70
     recommendations: List[str] = Field(default_factory=list)
-    generated_by: str = Field(default="ai", description="ai or fallback")
+    generated_by: str = Field(default="deterministic", description="deterministic or fallback")
 
 
 class GuidedExerciseOutput(BaseModel):
@@ -334,6 +412,17 @@ class GuidedExerciseOutput(BaseModel):
         if isinstance(v, list):
             return [str(item) if not isinstance(item, str) else item for item in v]
         return v
+
+
+    @model_validator(mode="after")
+    def _validate_exercise_answer_key(self) -> "GuidedExerciseOutput":
+        if len(self.options) != 4:
+            raise ValueError("Guided exercises require exactly four options.")
+        if not 0 <= self.correct_option_index < len(self.options):
+            raise ValueError("correct_option_index must refer to an existing option.")
+        if not self.question_text.strip() or not self.explanation.strip():
+            raise ValueError("Guided exercises require a question and explanation.")
+        return self
 
 
 class SessionSummaryOutput(BaseModel):
@@ -361,6 +450,10 @@ def evaluate_question_response(
 
     st_ans_str = json.dumps(raw_ans) if isinstance(raw_ans, (dict, list)) else str(raw_ans if raw_ans is not None else "")
     corr_ans_str = json.dumps(correct_ans) if isinstance(correct_ans, (dict, list)) else str(correct_ans if correct_ans is not None else "")
+
+    # A blank TRUE_FALSE response must not match a False answer key.
+    if raw_ans is None or raw_ans == "" or raw_ans == {} or raw_ans == []:
+        return False, 0.0, "", corr_ans_str or "N/A"
 
     if not corr_ans_str and correct_idx is not None and 0 <= correct_idx < len(options):
         corr_ans_str = str(options[correct_idx])
@@ -421,11 +514,10 @@ def evaluate_question_response(
         st_text = str(raw_ans).strip()
         cr_text = str(correct_ans or "").strip()
         if not cr_text:
-            is_valid = len(st_text) > 10
-            return is_valid, (100.0 if is_valid else 0.0), st_text, "Comprehensive answer expected"
+            return False, 0.0, st_text, "No grading rubric available"
 
         st_lower = st_text.lower()
-        cr_keywords = [w for w in re.findall(r"\b[\w'-]{4,}\b", cr_text.lower())]
+        cr_keywords = list(dict.fromkeys(re.findall(r"\b[\w'-]{4,}\b", cr_text.lower())))
         matches = 0
         for keyword in cr_keywords:
             if re.search(rf"\b{re.escape(keyword)}\b", st_lower):
@@ -539,11 +631,11 @@ class StudyPlannerAgent(BaseAgent):
         system_content = render_prompt(
             template,
             {
-                "topic": session.topic,
-                "session_title": session.title,
+                "topic": untrusted_block("session_topic", session.topic),
+                "session_title": untrusted_block("session_title", session.title),
                 "duration_minutes": str(duration),
                 "target_sections": target_sections,
-                "learning_profile": profile_str,
+                "learning_profile": untrusted_block("student_learning_profile", profile_str),
                 "rag_context": untrusted_block("lecturer_materials", rag_context)
                 if rag_context
                 else "No additional lecturer materials retrieved.",
@@ -555,7 +647,7 @@ class StudyPlannerAgent(BaseAgent):
                 AIMessage(role="system", content=system_content),
                 AIMessage(
                     role="user",
-                    content=f"Teach me today's {duration}-minute lesson on '{session.topic}' with {target_sections} well-structured sections. Use the formatting techniques specified in the system prompt only where they genuinely add clarity for this specific topic.",
+                    content=f"Generate the requested {duration}-minute lesson using the system instructions and structured output contract.",
                 ),
             ],
             temperature=0.4,
@@ -595,11 +687,11 @@ class StudyPlannerAgent(BaseAgent):
         system_content = render_prompt(
             template,
             {
-                "topic": session.topic,
-                "lesson_content": lesson_content[:3000]
+                "topic": untrusted_block("session_topic", session.topic),
+                "lesson_content": untrusted_block("lesson_content", lesson_content[:3000])
                 if lesson_content
-                else f"Session topic: {session.topic}",
-                "weak_topics": weak_str,
+                else untrusted_block("session_topic", session.topic),
+                "weak_topics": untrusted_block("student_weak_topics", weak_str),
                 "question_count": str(question_count),
             },
         )
@@ -607,7 +699,7 @@ class StudyPlannerAgent(BaseAgent):
         request = AICompletionRequest(
             messages=[
                 AIMessage(role="system", content=system_content),
-                AIMessage(role="user", content=f"Generate {question_count} knowledge check questions for '{session.topic}'."),
+                AIMessage(role="user", content=f"Generate the requested {question_count} knowledge check questions using the system instructions and structured output contract."),
             ],
             temperature=0.3,
             max_tokens=1800,
@@ -693,9 +785,9 @@ class StudyPlannerAgent(BaseAgent):
         student_answers: dict[str, Any],
         session_topic: str = "",
     ) -> KnowledgeCheckReport:
-        """Evaluate student responses to a knowledge check and generate personal learning report."""
+        """Evaluate responses against stored answer keys and summarize learning signals."""
         question_grades: List[KnowledgeCheckQuestionGrade] = []
-        correct_count = 0
+        score_total = 0.0
         mastered: List[str] = []
         weak: List[str] = []
 
@@ -707,8 +799,10 @@ class StudyPlannerAgent(BaseAgent):
             is_correct, score_pct, st_ans_str, corr_ans_str = evaluate_question_response(q_dict, raw_ans)
 
             if is_correct:
-                correct_count += 1
-                mastered.append(q_dict.get("question_text", f"Question {q_id}"))
+                mastered.append(
+                    q_dict.get("concept_tag")
+                    or q_dict.get("question_text", f"Question {q_id}")
+                )
             else:
                 weak.append(
                     q_dict.get("concept_tag")
@@ -728,9 +822,10 @@ class StudyPlannerAgent(BaseAgent):
                     explanation=q_dict.get("explanation", "Review core concept for details."),
                 )
             )
+            score_total += score_pct
 
         total = len(questions) or 1
-        pct = round((correct_count / total) * 100, 1)
+        pct = round(score_total / total, 1)
 
         # Log AI action audit trail directly without wasting LLM provider tokens/latency
         await self.gateway.log_action(
@@ -751,6 +846,7 @@ class StudyPlannerAgent(BaseAgent):
             mastered_concepts=mastered,
             weak_concepts=weak,
             estimated_confidence_level=int(min(100, max(30, pct))),
+            generated_by="deterministic",
             recommendations=[
                 "Review weak concepts in your personal profile." if weak else "Great job! Keep maintaining this streak.",
             ],
@@ -771,16 +867,16 @@ class StudyPlannerAgent(BaseAgent):
         system_content = render_prompt(
             template,
             {
-                "topic": topic,
-                "lesson_content": lesson_content[:2500] if lesson_content else topic,
-                "knowledge_check_report": kc_str,
+                "topic": untrusted_block("session_topic", topic),
+                "lesson_content": untrusted_block("lesson_content", lesson_content[:2500]) if lesson_content else untrusted_block("lesson_topic", topic),
+                "knowledge_check_report": untrusted_block("knowledge_check_report", kc_str),
             },
         )
 
         request = AICompletionRequest(
             messages=[
                 AIMessage(role="system", content=system_content),
-                AIMessage(role="user", content=f"Generate a concise post-session summary for '{topic}'."),
+                AIMessage(role="user", content="Generate the requested concise post-session summary using the system instructions and structured output contract."),
             ],
             temperature=0.3,
             max_tokens=1200,
@@ -814,11 +910,11 @@ class StudyPlannerAgent(BaseAgent):
         system_content = render_prompt(
             template,
             {
-                "topic": topic,
-                "section_title": section_title,
-                "section_content": section_content[:1500]
+                "topic": untrusted_block("session_topic", topic),
+                "section_title": untrusted_block("lesson_section_title", section_title),
+                "section_content": untrusted_block("lesson_section_content", section_content[:1500])
                 if section_content
-                else f"Section on {section_title}",
+                else untrusted_block("lesson_section_title", section_title),
                 "rag_context": untrusted_block("lecturer_materials", rag_context[:1500])
                 if rag_context
                 else "None available.",
@@ -828,7 +924,7 @@ class StudyPlannerAgent(BaseAgent):
         request = AICompletionRequest(
             messages=[
                 AIMessage(role="system", content=system_content),
-                AIMessage(role="user", content=f"Generate 1 practice exercise for section '{section_title}'."),
+                AIMessage(role="user", content="Generate one practice exercise using the system instructions and structured output contract."),
             ],
             temperature=0.3,
             max_tokens=1000,

@@ -10,6 +10,10 @@ from app.schemas.study_planner import (AdjustPlanRequest,
                                        CreateStudyPlanRequest,
                                        GeneratePlanFromAssessmentRequest,
                                        GenerateQuizRequest,
+                                       SaveGuidedSessionProgressRequest,
+                                       SaveGuidedSectionReflectionRequest,
+                                       SaveKnowledgeCheckDraftRequest,
+                                       SubmitGuidedExerciseRequest,
                                        GuidedSessionAskRequest,
                                        GuidedSessionExerciseRequest,
                                        LearningUnitResponse,
@@ -222,6 +226,66 @@ async def get_guided_session(
 
 
 @router.patch(
+    "/sessions/{session_id}/guided/progress",
+    response_model=StudySessionResponse,
+    summary="Save the current section of a guided study session",
+)
+async def save_guided_session_progress(
+    session_id: uuid.UUID,
+    body: SaveGuidedSessionProgressRequest,
+    current_user=Depends(require_student),
+    db: AsyncSession = Depends(get_db),
+) -> StudySessionResponse:
+    service = StudyPlannerService(db)
+    return await service.save_guided_session_progress(
+        session_id,
+        current_user.id,
+        body.current_section_index,
+        body.guided_stage,
+    )
+
+
+@router.patch(
+    "/sessions/{session_id}/guided/knowledge-check/draft",
+    response_model=StudySessionResponse,
+    summary="Save in-progress knowledge-check answers",
+)
+async def save_knowledge_check_draft(
+    session_id: uuid.UUID,
+    body: SaveKnowledgeCheckDraftRequest,
+    current_user=Depends(require_student),
+    db: AsyncSession = Depends(get_db),
+) -> StudySessionResponse:
+    service = StudyPlannerService(db)
+    return await service.save_knowledge_check_draft(
+        session_id,
+        current_user.id,
+        body.answers,
+        body.current_question_index,
+    )
+
+
+@router.patch(
+    "/sessions/{session_id}/guided/reflection",
+    response_model=StudySessionResponse,
+    summary="Save a reflection for a guided lesson section",
+)
+async def save_guided_section_reflection(
+    session_id: uuid.UUID,
+    body: SaveGuidedSectionReflectionRequest,
+    current_user=Depends(require_student),
+    db: AsyncSession = Depends(get_db),
+) -> StudySessionResponse:
+    service = StudyPlannerService(db)
+    return await service.save_guided_section_reflection(
+        session_id,
+        current_user.id,
+        body.section_index,
+        body.reflection,
+    )
+
+
+@router.patch(
     "/sessions/{session_id}/notes",
     response_model=StudySessionResponse,
     summary="Save student personal notes for a study session",
@@ -267,6 +331,26 @@ async def generate_guided_exercise(
     service = StudyPlannerService(db)
     return await service.generate_guided_exercise(
         session_id, current_user.id, body.section_index or 0
+    )
+
+
+@router.post(
+    "/sessions/{session_id}/guided/exercise/submit",
+    response_model=Dict[str, Any],
+    summary="Record and grade a guided practice response",
+)
+async def submit_guided_exercise(
+    session_id: uuid.UUID,
+    body: SubmitGuidedExerciseRequest,
+    current_user=Depends(require_student),
+    db: AsyncSession = Depends(get_db),
+) -> Dict[str, Any]:
+    service = StudyPlannerService(db)
+    return await service.submit_guided_exercise_attempt(
+        session_id,
+        current_user.id,
+        body.exercise_id,
+        body.selected_option_index,
     )
 
 

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   CheckCircle2,
   AlertTriangle,
@@ -34,25 +34,62 @@ import { toast } from "sonner";
 interface KnowledgeCheckFlowProps {
   sessionId: string;
   topic: string;
-  onCompleteKnowledgeCheck: (report: KnowledgeCheckReport) => void;
+  initialQuestions?: QuizQuestion[];
+  initialDraftAnswers?: Record<string, any>;
+  initialQuestionIndex?: number;
+  initialReport?: KnowledgeCheckReport | null;
+  onQuestionsChange?: (questions: QuizQuestion[]) => void;
+  onDraftChange?: (answers: Record<string, any>, questionIndex: number) => void;
+  onCompleteKnowledgeCheck: (report: KnowledgeCheckReport | null) => void;
 }
 
 export function KnowledgeCheckFlow({
   sessionId,
   topic,
+  initialQuestions = [],
+  initialDraftAnswers = {},
+  initialQuestionIndex = 0,
+  initialReport = null,
+  onQuestionsChange,
+  onDraftChange,
   onCompleteKnowledgeCheck,
 }: KnowledgeCheckFlowProps) {
-  const [questions, setQuestions] = useState<QuizQuestion[]>([]);
-  const [currentIdx, setCurrentIdx] = useState(0);
-  const [answers, setAnswers] = useState<Record<string, any>>({});
-  const [loading, setLoading] = useState(true);
+  const [questions, setQuestions] = useState<QuizQuestion[]>(initialQuestions);
+  const [currentIdx, setCurrentIdx] = useState<number>(() => {
+    const maxIdx = Math.max((initialQuestions?.length || 1) - 1, 0);
+    return Math.max(0, Math.min(initialQuestionIndex ?? 0, maxIdx));
+  });
+  const [answers, setAnswers] = useState<Record<string, any>>(initialDraftAnswers || {});
+  const [report, setReport] = useState<KnowledgeCheckReport | null>(initialReport);
+  const [loading, setLoading] = useState<boolean>(() => {
+    // If we already have a report or quiz questions from the server, no initial loading fetch needed
+    if (initialReport) return false;
+    if (initialQuestions && initialQuestions.length > 0) return false;
+    return true;
+  });
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [report, setReport] = useState<KnowledgeCheckReport | null>(null);
+  const [showPartialConfirm, setShowPartialConfirm] = useState(false);
+  const [saveDraftStatus, setSaveDraftStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
 
-  const loadQuestions = React.useCallback(async (forceRegenerate: boolean = false) => {
+  // Version tracking & queue to prevent queued writes from overwriting newer answers
+  const draftVersionRef = useRef(0);
+  const latestDraftRef = useRef({ answers: initialDraftAnswers || {}, currentIdx: initialQuestionIndex ?? 0 });
+  const lastSavedDraftRef = useRef({ answers: initialDraftAnswers || {}, currentIdx: initialQuestionIndex ?? 0 });
+  const pendingSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const activeSavePromiseRef = useRef<Promise<void>>(Promise.resolve());
+
+  const loadQuestions = useCallback(async (forceRegenerate: boolean = false) => {
     setLoading(true);
     setError(null);
+    if (forceRegenerate) {
+      setAnswers({});
+      setCurrentIdx(0);
+      setReport(null);
+      latestDraftRef.current = { answers: {}, currentIdx: 0 };
+      lastSavedDraftRef.current = { answers: {}, currentIdx: 0 };
+      onDraftChange?.({}, 0);
+    }
     try {
       const qList = await studyPlannerApi.generateKnowledgeCheck(
         sessionId,
@@ -63,6 +100,7 @@ export function KnowledgeCheckFlow({
         throw new Error("No knowledge check questions were generated.");
       }
       setQuestions(qList);
+      onQuestionsChange?.(qList);
     } catch (err: any) {
       const msg = err?.message || "Failed to load knowledge check questions";
       setError(msg);
@@ -70,20 +108,112 @@ export function KnowledgeCheckFlow({
     } finally {
       setLoading(false);
     }
-  }, [sessionId]);
+  }, [sessionId, onQuestionsChange, onDraftChange]);
 
+  // Initial load only if questions are completely missing and no report exists
   useEffect(() => {
+    if (initialReport) {
+      setLoading(false);
+      return;
+    }
+    if (questions.length > 0) {
+      setLoading(false);
+      return;
+    }
     loadQuestions(false);
-  }, [loadQuestions]);
+  }, [initialReport, questions.length, loadQuestions]);
+
+  // Update latest draft ref
+  useEffect(() => {
+    latestDraftRef.current = { answers, currentIdx };
+  }, [answers, currentIdx]);
+
+  // Debounced auto-save for draft answers and question index
+  useEffect(() => {
+    if (questions.length === 0 || report) return;
+
+    // Check if anything actually changed from last saved draft
+    const answersChanged =
+      JSON.stringify(answers) !== JSON.stringify(lastSavedDraftRef.current.answers);
+    const indexChanged = currentIdx !== lastSavedDraftRef.current.currentIdx;
+
+    if (!answersChanged && !indexChanged) return;
+
+    draftVersionRef.current += 1;
+    const thisVersion = draftVersionRef.current;
+    setSaveDraftStatus("saving");
+
+    if (pendingSaveTimerRef.current) {
+      clearTimeout(pendingSaveTimerRef.current);
+    }
+
+    pendingSaveTimerRef.current = setTimeout(() => {
+      activeSavePromiseRef.current = activeSavePromiseRef.current
+        .catch(() => undefined)
+        .then(async () => {
+          // If a newer write has been queued, skip this one to avoid overwriting newer answers
+          if (thisVersion < draftVersionRef.current) return;
+
+          const toSaveAnswers = latestDraftRef.current.answers;
+          const toSaveIdx = Math.max(
+            0,
+            Math.min(latestDraftRef.current.currentIdx, questions.length - 1),
+          );
+
+          await studyPlannerApi.saveKnowledgeCheckDraft(
+            sessionId,
+            toSaveAnswers,
+            toSaveIdx,
+          );
+
+          if (thisVersion === draftVersionRef.current) {
+            lastSavedDraftRef.current = { answers: toSaveAnswers, currentIdx: toSaveIdx };
+            setSaveDraftStatus("saved");
+            onDraftChange?.(toSaveAnswers, toSaveIdx);
+          }
+        })
+        .catch(() => {
+          if (thisVersion === draftVersionRef.current) {
+            setSaveDraftStatus("error");
+          }
+        });
+    }, 600);
+  }, [answers, currentIdx, questions.length, report, sessionId, onDraftChange]);
+
+  // Flush on unmount if dirty
+  useEffect(() => {
+    return () => {
+      if (pendingSaveTimerRef.current) {
+        clearTimeout(pendingSaveTimerRef.current);
+      }
+      if (
+        questions.length > 0 &&
+        !report &&
+        (JSON.stringify(latestDraftRef.current.answers) !==
+          JSON.stringify(lastSavedDraftRef.current.answers) ||
+          latestDraftRef.current.currentIdx !== lastSavedDraftRef.current.currentIdx)
+      ) {
+        studyPlannerApi
+          .saveKnowledgeCheckDraft(
+            sessionId,
+            latestDraftRef.current.answers,
+            Math.max(0, Math.min(latestDraftRef.current.currentIdx, questions.length - 1)),
+          )
+          .catch(() => {});
+      }
+    };
+  }, [sessionId, questions.length, report]);
 
   const handleSelect = (questionId: string, val: any) => {
     setAnswers((prev) => ({ ...prev, [questionId]: val }));
+    setShowPartialConfirm(false);
   };
 
   const answeredCount = Object.keys(answers).length;
 
   const handleSubmit = async () => {
     setSubmitting(true);
+    setShowPartialConfirm(false);
     try {
       const res = await studyPlannerApi.submitKnowledgeCheck(
         sessionId,
@@ -109,7 +239,7 @@ export function KnowledgeCheckFlow({
         </div>
         <div className="space-y-1">
           <p className="text-sm font-bold text-foreground">
-            Generating AI Knowledge Check...
+            Preparing Knowledge Check...
           </p>
           <p className="text-xs text-muted-foreground font-medium max-w-sm mx-auto">
             Personalizing active-recall questions based on {topic} and your lesson notes.
@@ -240,6 +370,8 @@ export function KnowledgeCheckFlow({
                   const qText = matchingQ
                     ? matchingQ.question_text
                     : `Question ${idx + 1}`;
+                  const isUnanswered = !qg.student_answer || qg.student_answer.trim() === "";
+
                   return (
                     <div
                       key={qg.question_id || idx}
@@ -263,7 +395,11 @@ export function KnowledgeCheckFlow({
                               : "border-rose-500 text-rose-600 dark:text-rose-400 bg-rose-500/10",
                           )}
                         >
-                          {qg.is_correct ? "Correct (+100%)" : "Incorrect"}
+                          {qg.is_correct
+                            ? "Correct (+100%)"
+                            : isUnanswered
+                              ? "Incorrect (Unanswered)"
+                              : "Incorrect (0%)"}
                         </Badge>
                       </div>
 
@@ -272,8 +408,13 @@ export function KnowledgeCheckFlow({
                           <span className="font-semibold text-muted-foreground block text-[10px]">
                             Your Answer
                           </span>
-                          <span className="font-medium text-foreground">
-                            {qg.student_answer || "No answer provided"}
+                          <span
+                            className={cn(
+                              "font-medium",
+                              isUnanswered ? "text-amber-600 dark:text-amber-400 italic" : "text-foreground",
+                            )}
+                          >
+                            {isUnanswered ? "No answer provided" : qg.student_answer}
                           </span>
                         </div>
                         {!qg.is_correct && (
@@ -304,10 +445,17 @@ export function KnowledgeCheckFlow({
           )}
         </CardContent>
 
-        <CardFooter className="px-8 py-6 border-t border-border/50 flex justify-end">
+        <CardFooter className="px-8 py-6 border-t border-border/50 flex flex-wrap items-center justify-between gap-3">
+          <Button
+            variant="outline"
+            onClick={() => loadQuestions(true)}
+            className="text-xs font-semibold gap-1.5 cursor-pointer"
+          >
+            <Sparkles className="size-3.5" /> Retake Knowledge Check
+          </Button>
           <Button
             onClick={() => onCompleteKnowledgeCheck(report)}
-            className="text-xs font-semibold px-6 gap-2 bg-gradient-to-r from-primary to-indigo-600 hover:from-primary/90 text-primary-foreground shadow-md"
+            className="text-xs font-semibold px-6 gap-2 bg-gradient-to-r from-primary to-indigo-600 hover:from-primary/90 text-primary-foreground shadow-md cursor-pointer"
           >
             Finalize Session & View Summary <ArrowRight className="size-4" />
           </Button>
@@ -327,20 +475,21 @@ export function KnowledgeCheckFlow({
             {error ? "Knowledge Check Unavailable" : "No Questions Generated"}
           </CardTitle>
           <p className="text-xs text-muted-foreground max-w-md mx-auto leading-relaxed">
-            {error || "We couldn't generate questions for this session topic. You can retry AI generation or proceed directly to your session summary."}
+            {error ||
+              "We couldn't generate questions for this session topic. You can retry generation or proceed directly to your session summary."}
           </p>
         </div>
         <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
           <Button
             variant="outline"
-            onClick={() => onCompleteKnowledgeCheck(null as any)}
-            className="text-xs font-semibold px-4"
+            onClick={() => onCompleteKnowledgeCheck(null)}
+            className="text-xs font-semibold px-4 cursor-pointer"
           >
             Skip & View Summary
           </Button>
           <Button
             onClick={() => loadQuestions(true)}
-            className="text-xs font-semibold px-4 gap-2 bg-primary hover:bg-primary/90 text-primary-foreground shadow-sm"
+            className="text-xs font-semibold px-4 gap-2 bg-primary hover:bg-primary/90 text-primary-foreground shadow-xs cursor-pointer"
           >
             <Sparkles className="size-3.5" /> Try Generating Again
           </Button>
@@ -352,9 +501,6 @@ export function KnowledgeCheckFlow({
   const currentQ = questions[currentIdx];
   const qType = (currentQ.question_type || "MCQ").toUpperCase();
 
-  // Defensive: only render the DnD fill-in-the-blanks component when the
-  // question_text actually contains ___ markers. Malformed questions (plain
-  // prose tagged as FILL_BLANKS) fall through to the SHORT_ANSWER branch.
   const HAS_BLANK_MARKER = /_{2,}/;
   const rawFillBlank =
     qType === "FILL_BLANKS" || qType === "FILL_BLANK" || qType === "FILL_IN_BLANK";
@@ -365,23 +511,29 @@ export function KnowledgeCheckFlow({
       {questions.some((q) => q.generated_by === "fallback") && (
         <div className="mx-6 mt-4 p-3 rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-300 text-xs flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-2">
-            <Badge variant="outline" className="border-amber-500/50 bg-amber-500/20 text-amber-700 dark:text-amber-300 text-[10px] font-bold uppercase shrink-0">
+            <Badge
+              variant="outline"
+              className="border-amber-500/50 bg-amber-500/20 text-amber-700 dark:text-amber-300 text-[10px] font-bold uppercase shrink-0"
+            >
               Offline Review Mode
             </Badge>
-            <span className="text-xs">AI question generation was temporarily unavailable. Showing standard review questions.</span>
+            <span className="text-xs">
+              AI question generation was temporarily unavailable. Showing standard review questions.
+            </span>
           </div>
           <Button
             variant="ghost"
             size="sm"
             onClick={() => loadQuestions(true)}
-            className="text-[11px] font-bold text-amber-700 dark:text-amber-300 hover:bg-amber-500/20 h-7 px-2.5 gap-1 shrink-0"
+            className="text-[11px] font-bold text-amber-700 dark:text-amber-300 hover:bg-amber-500/20 h-7 px-2.5 gap-1 shrink-0 cursor-pointer"
           >
             <Sparkles className="size-3" /> Retry AI
           </Button>
         </div>
       )}
+
       <CardHeader className="border-b border-border/50 bg-muted/20 px-6 py-5 space-y-3">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between flex-wrap gap-2">
           <div className="flex items-center gap-2">
             <Badge
               variant="outline"
@@ -400,14 +552,29 @@ export function KnowledgeCheckFlow({
                 : qType.replace("_", " ")}
             </Badge>
           </div>
-          <span className="text-xs text-muted-foreground font-medium">
-            Answered: {answeredCount}/{questions.length}
-          </span>
+
+          <div className="flex items-center gap-3">
+            {saveDraftStatus === "saving" && (
+              <span className="text-[11px] text-muted-foreground flex items-center gap-1">
+                <Loader2 className="size-3 animate-spin text-primary" /> Saving draft...
+              </span>
+            )}
+            {saveDraftStatus === "saved" && (
+              <span className="text-[11px] text-emerald-600 dark:text-emerald-400 flex items-center gap-1 font-medium">
+                <CheckCircle2 className="size-3" /> Draft saved
+              </span>
+            )}
+            <span className="text-xs text-muted-foreground font-medium">
+              Answered: {answeredCount}/{questions.length}
+            </span>
+          </div>
         </div>
+
         <Progress
           value={((currentIdx + 1) / questions.length) * 100}
           className="h-1.5 w-full bg-muted"
         />
+
         <CardTitle className="text-base md:text-lg font-bold text-foreground leading-snug pt-2">
           {currentQ.question_text}
         </CardTitle>
@@ -453,9 +620,10 @@ export function KnowledgeCheckFlow({
                 <button
                   key={idx}
                   type="button"
+                  aria-pressed={isSelected}
                   onClick={() => handleSelect(currentQ.id, opt)}
                   className={cn(
-                    "p-4 rounded-xl border text-sm font-bold transition-all duration-200 text-center shadow-xs",
+                    "p-4 rounded-xl border text-sm font-bold transition-all duration-200 text-center shadow-2xs cursor-pointer",
                     isSelected
                       ? "border-primary bg-primary/10 text-primary ring-2 ring-primary/20"
                       : "border-border/60 hover:border-primary/50 hover:bg-muted/30",
@@ -468,7 +636,7 @@ export function KnowledgeCheckFlow({
           </div>
         )}
 
-        {/* 4. SHORT_ANSWER Question Type (also handles malformed FILL_BLANKS with no ___ markers) */}
+        {/* 4. SHORT_ANSWER Question Type */}
         {(qType === "SHORT_ANSWER" || (rawFillBlank && !isFillBlank)) && (
           <div className="space-y-2">
             <label className="text-xs font-semibold text-muted-foreground block">
@@ -510,7 +678,7 @@ export function KnowledgeCheckFlow({
             "SHORT_ANSWER",
             "OPEN_QUESTION",
           ].includes(qType)) && (
-          <div className="space-y-3">
+          <div className="space-y-3" role="radiogroup" aria-label="Question options">
             {(currentQ.options || []).map((opt, idx) => {
               const isSelected =
                 answers[currentQ.id] === opt ||
@@ -520,9 +688,11 @@ export function KnowledgeCheckFlow({
                 <button
                   key={idx}
                   type="button"
+                  role="radio"
+                  aria-checked={isSelected}
                   onClick={() => handleSelect(currentQ.id, opt)}
                   className={cn(
-                    "w-full text-left p-4 rounded-xl border text-xs transition-all duration-200 flex items-center gap-3",
+                    "w-full text-left p-4 rounded-xl border text-xs transition-all duration-200 flex items-center gap-3 cursor-pointer",
                     isSelected
                       ? "border-primary bg-primary/10 text-primary font-semibold ring-1 ring-primary"
                       : "border-border/60 hover:border-primary/50 hover:bg-muted/30",
@@ -539,12 +709,12 @@ export function KnowledgeCheckFlow({
         )}
       </CardContent>
 
-      <CardFooter className="p-6 border-t border-border/50 flex items-center justify-between gap-4">
+      <CardFooter className="p-6 border-t border-border/50 flex flex-wrap items-center justify-between gap-4">
         <Button
           variant="outline"
           onClick={() => setCurrentIdx((p) => Math.max(0, p - 1))}
           disabled={currentIdx === 0}
-          className="text-xs font-semibold"
+          className="text-xs font-semibold cursor-pointer"
         >
           Previous
         </Button>
@@ -555,18 +725,48 @@ export function KnowledgeCheckFlow({
               onClick={() =>
                 setCurrentIdx((p) => Math.min(questions.length - 1, p + 1))
               }
-              className="text-xs font-semibold px-5"
+              className="text-xs font-semibold px-5 cursor-pointer"
             >
               Next Question
             </Button>
+          ) : showPartialConfirm ? (
+            <div className="flex items-center gap-2 p-1.5 rounded-lg border border-amber-500/40 bg-amber-500/10">
+              <span className="text-[11px] text-amber-800 dark:text-amber-300 font-medium">
+                {answeredCount}/{questions.length} answered. Unanswered = 0%.
+              </span>
+              <Button
+                size="sm"
+                onClick={handleSubmit}
+                disabled={submitting}
+                className="h-7 text-xs font-bold px-3 bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer"
+              >
+                {submitting ? <Loader2 className="size-3 animate-spin" /> : "Confirm & Submit"}
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setShowPartialConfirm(false)}
+                className="h-7 text-xs text-muted-foreground cursor-pointer"
+              >
+                Cancel
+              </Button>
+            </div>
           ) : (
             <Button
-              onClick={handleSubmit}
+              onClick={() => {
+                if (answeredCount < questions.length) {
+                  setShowPartialConfirm(true);
+                } else {
+                  handleSubmit();
+                }
+              }}
               disabled={submitting || answeredCount === 0}
-              className="text-xs font-bold px-6 gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white shadow-md"
+              className="text-xs font-bold px-6 gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white shadow-md cursor-pointer"
             >
               {submitting ? (
                 <Loader2 className="size-4 animate-spin" />
+              ) : answeredCount < questions.length ? (
+                `Submit Check (${answeredCount}/${questions.length})`
               ) : (
                 "Submit Knowledge Check"
               )}

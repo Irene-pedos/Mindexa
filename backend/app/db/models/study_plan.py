@@ -100,10 +100,19 @@ class StudySession(BaseModel, table=True):
     lesson_plan_json: Optional[Dict[str, Any]] = Field(default=None, sa_column=Column(JSON))
     lesson_status: str = Field(default="NOT_GENERATED", max_length=20)  # NOT_GENERATED | IN_PROGRESS | COMPLETED
     current_section_index: int = Field(default=0)
+    guided_stage: str = Field(
+        default="intro",
+        sa_column=Column(String(24), nullable=False, server_default="intro"),
+    )
     lesson_generated_at: Optional[datetime] = Field(default=None, sa_type=DateTime(timezone=True))
     knowledge_check_answers: Optional[Dict[str, Any]] = Field(default=None, sa_column=Column(JSON))
+    knowledge_check_draft_answers: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
+    knowledge_check_current_question_index: int = Field(default=0)
     knowledge_check_score: Optional[float] = Field(default=None)
     knowledge_check_report: Optional[Dict[str, Any]] = Field(default=None, sa_column=Column(JSON))
+    section_reflections_json: Dict[str, str] = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
+    guided_practice_exercises_json: List[Dict[str, Any]] = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
+    guided_practice_attempts_json: List[Dict[str, Any]] = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
     session_summary_text: Optional[str] = Field(default=None, sa_column=Column(Text))
     student_notes: Optional[str] = Field(default=None, sa_column=Column(Text))
     tutor_chat_history: List[Dict[str, Any]] = Field(

@@ -4,7 +4,8 @@ import { Clock, Play, RotateCcw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { formatSessionRelativeTime } from "@/lib/date-utils";
-import { sessionLabel, type SessionWithPlan } from "@/lib/study-sessions";
+import { isSessionInProgress, sessionLabel, type SessionWithPlan } from "@/lib/study-sessions";
+import { cn } from "@/lib/utils";
 
 interface NextUpBannerProps {
   session: SessionWithPlan;
@@ -13,6 +14,8 @@ interface NextUpBannerProps {
 }
 
 export function NextUpBanner({ session, onStart, onReschedule }: NextUpBannerProps) {
+  const inProgress = isSessionInProgress(session);
+
   return (
     <section
       aria-label="Next study session"
@@ -22,9 +25,12 @@ export function NextUpBanner({ session, onStart, onReschedule }: NextUpBannerPro
         <div className="flex items-center gap-1.5">
           <Badge
             variant="secondary"
-            className="text-[10px] font-bold uppercase tracking-wider bg-primary text-primary-foreground border-none px-1.5 py-0"
+            className={cn(
+              "text-[10px] font-bold uppercase tracking-wider border-none px-1.5 py-0",
+              inProgress ? "bg-sky-600 text-white" : "bg-primary text-primary-foreground",
+            )}
           >
-            Up Next
+            {inProgress ? "In Progress" : "Up Next"}
           </Badge>
           <span className="text-[11px] text-muted-foreground font-medium flex items-center gap-1">
             <Clock className="size-2.5 text-primary" aria-hidden />
@@ -62,7 +68,7 @@ export function NextUpBanner({ session, onStart, onReschedule }: NextUpBannerPro
             onClick={() => onStart(session)}
             className="h-7 px-3 text-xs font-bold rounded-lg shadow-2xs gap-1 cursor-pointer"
           >
-            <Play className="size-2.5 fill-current" aria-hidden /> Start Lesson
+            <Play className="size-2.5 fill-current" aria-hidden /> {inProgress ? "Resume Lesson" : "Start Lesson"}
           </Button>
         </div>
       </div>

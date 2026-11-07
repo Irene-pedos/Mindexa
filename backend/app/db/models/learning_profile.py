@@ -33,5 +33,6 @@ class StudentLearningProfile(BaseModel, table=True):
     weak_topics: List[str] = Field(default=[], sa_column=Column(JSON))
     total_sessions_completed: int = Field(default=0)
     average_knowledge_check_score: Optional[float] = Field(default=None)
+    knowledge_check_count: int = Field(default=0)
     current_streak_days: int = Field(default=0)
     last_studied_at: Optional[datetime] = Field(default=None, sa_type=DateTime(timezone=True))

@@ -189,6 +189,7 @@ class StudyPlannerRepository:
                 weak_topics=[],
                 total_sessions_completed=0,
                 average_knowledge_check_score=None,
+                knowledge_check_count=0,
                 current_streak_days=0,
             )
             self.db.add(profile)

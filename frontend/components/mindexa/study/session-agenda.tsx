@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { formatSessionRelativeTime } from "@/lib/date-utils";
 import {
   isSessionCompleted,
+  isSessionInProgress,
   isSessionOverdue,
   sessionLabel,
   type CategorizedSessions,
@@ -102,7 +103,8 @@ interface SessionCardProps {
 
 function SessionCard({ session, onReschedule, onOpen }: SessionCardProps) {
   const completed = isSessionCompleted(session);
-  const overdue = isSessionOverdue(session);
+  const inProgress = !completed && isSessionInProgress(session);
+  const overdue = !completed && !inProgress && isSessionOverdue(session);
   const hasScore = session.knowledge_check_score !== undefined && session.knowledge_check_score !== null;
 
   return (
@@ -111,9 +113,11 @@ function SessionCard({ session, onReschedule, onOpen }: SessionCardProps) {
         "p-3 rounded-xl border bg-card shadow-2xs space-y-2 flex flex-col justify-between hover:border-primary/30 transition-all",
         completed
           ? "border-emerald-500/25 bg-emerald-500/5"
-          : overdue
-            ? "border-amber-500/25 bg-amber-500/5"
-            : "border-border/50",
+          : inProgress
+            ? "border-sky-500/30 bg-sky-500/5 ring-1 ring-sky-500/20"
+            : overdue
+              ? "border-amber-500/25 bg-amber-500/5"
+              : "border-border/50",
       )}
     >
       <div className="space-y-1.5">
@@ -123,11 +127,12 @@ function SessionCard({ session, onReschedule, onOpen }: SessionCardProps) {
             className={cn(
               "text-[10px] font-semibold px-1.5 py-0",
               completed && "border-emerald-500/30 text-emerald-600 bg-emerald-500/10",
+              inProgress && "border-sky-500/30 text-sky-700 dark:text-sky-300 bg-sky-500/10",
               overdue && "border-amber-500/30 text-amber-700 bg-amber-500/10",
-              !completed && !overdue && "border-primary/20 text-primary bg-primary/5",
+              !completed && !inProgress && !overdue && "border-primary/20 text-primary bg-primary/5",
             )}
           >
-            {completed ? "Completed" : overdue ? "Overdue" : "Scheduled"}
+            {completed ? "Completed" : inProgress ? "In Progress" : overdue ? "Overdue" : "Scheduled"}
           </Badge>
           <span className="font-mono text-muted-foreground">{session.duration_minutes}m</span>
         </div>
@@ -158,6 +163,19 @@ function SessionCard({ session, onReschedule, onOpen }: SessionCardProps) {
               className="h-6 text-[10px] px-2 text-muted-foreground hover:text-foreground cursor-pointer"
             >
               Review
+            </Button>
+          </>
+        ) : inProgress ? (
+          <>
+            <span className="text-[10px] font-semibold text-sky-700 dark:text-sky-300">
+              In progress
+            </span>
+            <Button
+              size="sm"
+              onClick={() => onOpen(session)}
+              className="h-6 text-[10px] px-2.5 font-bold rounded-md gap-1 cursor-pointer bg-sky-600 hover:bg-sky-700 text-white"
+            >
+              <Play className="size-2 fill-current" aria-hidden /> Resume
             </Button>
           </>
         ) : overdue ? (

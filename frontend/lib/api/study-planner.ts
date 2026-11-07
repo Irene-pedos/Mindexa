@@ -74,6 +74,28 @@ export interface KnowledgeCheckReport {
   generated_by?: "ai" | "fallback" | string;
 }
 
+export interface GuidedExercise {
+  id: string;
+  section_index: number;
+  section_title: string;
+  question_text: string;
+  question_type?: string;
+  options: string[];
+  correct_option_index: number;
+  explanation: string;
+  generated_by?: "ai" | "fallback" | string;
+}
+
+export interface GuidedExerciseAttempt {
+  exercise_id: string;
+  section_index: number;
+  selected_option_index: number;
+  is_correct: boolean;
+  submitted_at: string;
+  correct_option_index?: number;
+  explanation?: string;
+}
+
 export type { SourceCitation };
 
 export interface LearningUnit {
@@ -125,10 +147,16 @@ export interface StudySession {
   lesson_plan_json?: LessonPlanOutput | null;
   lesson_status?: "NOT_GENERATED" | "IN_PROGRESS" | "COMPLETED" | string;
   current_section_index?: number;
+  guided_stage?: "intro" | "lesson" | "practice" | "knowledge_check" | "summary";
   lesson_generated_at?: string | null;
   knowledge_check_answers?: Record<string, any> | null;
+  knowledge_check_draft_answers?: Record<string, any>;
+  knowledge_check_current_question_index?: number;
   knowledge_check_score?: number | null;
   knowledge_check_report?: KnowledgeCheckReport | null;
+  section_reflections_json?: Record<string, string>;
+  guided_practice_exercises_json?: GuidedExercise[];
+  guided_practice_attempts_json?: GuidedExerciseAttempt[];
   session_summary_text?: string | null;
   student_notes?: string | null;
   tutor_chat_history?: Array<{
@@ -316,6 +344,45 @@ export const studyPlannerApi = {
       method: "POST",
     });
   },
+  saveGuidedSessionProgress: async (
+    sessionId: string,
+    currentSectionIndex: number,
+    guidedStage: "intro" | "lesson" | "practice" | "knowledge_check" | "summary"
+  ): Promise<StudySession> => {
+    return apiClient(`/students/study-plans/sessions/${sessionId}/guided/progress`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        current_section_index: currentSectionIndex,
+        guided_stage: guidedStage,
+      }),
+    });
+  },
+  saveKnowledgeCheckDraft: async (
+    sessionId: string,
+    answers: Record<string, any>,
+    currentQuestionIndex: number
+  ): Promise<StudySession> => {
+    return apiClient(`/students/study-plans/sessions/${sessionId}/guided/knowledge-check/draft`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        answers,
+        current_question_index: currentQuestionIndex,
+      }),
+    });
+  },
+  saveGuidedSectionReflection: async (
+    sessionId: string,
+    sectionIndex: number,
+    reflection: string
+  ): Promise<StudySession> => {
+    return apiClient(`/students/study-plans/sessions/${sessionId}/guided/reflection`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        section_index: sectionIndex,
+        reflection,
+      }),
+    });
+  },
   saveSessionNotes: async (
     sessionId: string,
     studentNotes: string
@@ -340,20 +407,23 @@ export const studyPlannerApi = {
   generateGuidedExercise: async (
     sessionId: string,
     sectionIndex: number = 0
-  ): Promise<{
-    id: string;
-    section_index: number;
-    section_title: string;
-    question_text: string;
-    question_type: string;
-    options: string[];
-    correct_option_index: number;
-    explanation: string;
-    generated_by?: "ai" | "fallback" | string;
-  }> => {
+  ): Promise<GuidedExercise> => {
     return apiClient(`/students/study-plans/sessions/${sessionId}/guided/exercise`, {
       method: "POST",
       body: JSON.stringify({ section_index: sectionIndex }),
+    });
+  },
+  submitGuidedExercise: async (
+    sessionId: string,
+    exerciseId: string,
+    selectedOptionIndex: number
+  ): Promise<GuidedExerciseAttempt> => {
+    return apiClient(`/students/study-plans/sessions/${sessionId}/guided/exercise/submit`, {
+      method: "POST",
+      body: JSON.stringify({
+        exercise_id: exerciseId,
+        selected_option_index: selectedOptionIndex,
+      }),
     });
   },
   generateKnowledgeCheck: async (
