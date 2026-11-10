@@ -173,7 +173,7 @@ from app.db.models.appeals import (
     AppealPolicy,
 )
 from app.db.models.calendar import AcademicCalendarEvent
-from app.db.models.export import ExportJob, ExportTemplate
+from app.db.models.export import ExportJob, ExportTemplate, MarkedScript
 
 
 __all__: list[str] = [
@@ -312,4 +312,5 @@ __all__: list[str] = [
     "AcademicCalendarEvent",
     "ExportTemplate",
     "ExportJob",
+    "MarkedScript",
 ]

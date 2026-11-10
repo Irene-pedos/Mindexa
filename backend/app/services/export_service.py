@@ -30,7 +30,7 @@ from app.core.exceptions import NotFoundError, ValidationError
 from app.db.base import utcnow
 from app.db.enums import ExportJobStatus, ExportType
 from app.db.models.auth import User
-from app.utils.spreadsheet import sanitize_cell
+from app.utils.spreadsheet import format_letter_grade, sanitize_cell
 
 log = structlog.get_logger(__name__)
 
@@ -49,28 +49,28 @@ class ExportService:
         assessment_id: uuid.UUID,
         requester: User,
         template_code: str = "default_marksheet",
+        *,
+        fmt: str = "xlsx",
+        include_unreleased: bool = False,
     ) -> bytes:
         """
-        Build the Assessment Mark Sheet Excel workbook and return raw bytes.
-        For >300 rows, call create_async_export_job() instead.
+        Build the Assessment Mark Sheet and return raw bytes.
 
-        Sheets: "Marks", "Summary", "Meta"
+        fmt="xlsx": workbook with sheets "Marks", "Summary", "Meta".
+        fmt="csv":  the Marks table only, UTF-8 with a BOM so Excel opens accents correctly.
+        Released results only, unless include_unreleased=True; those rows are then
+        labelled in the "Release Status" column so they are never mistaken for final.
+        For >300 rows (xlsx), call create_async_export_job() instead.
         Rule: NO integrity flags, NO AI details.
         """
-        try:
-            import openpyxl
-            from openpyxl.styles import Alignment, Font, PatternFill
-            from openpyxl.utils import get_column_letter
-        except ImportError:
-            raise ValidationError(
-                message="openpyxl is required for Excel exports. Install it with: pip install openpyxl",
-                field="export",
-            )
+        if fmt not in ("xlsx", "csv"):
+            raise ValidationError(message="Format must be 'xlsx' or 'csv'.", field="format")
 
         from app.db.models.assessment import Assessment
         from app.db.models.auth import User as UserModel
         from app.db.models.question import AssessmentQuestion
         from app.db.models.result import AssessmentResult
+        from app.db.repositories.export_repo import ExportRepository
 
         # Load assessment
         assessment_res = await self.db.execute(
@@ -85,22 +85,18 @@ class ExportService:
         if not assessment:
             raise NotFoundError(resource="Assessment", resource_id=str(assessment_id))
 
-        # Load released results with attempt and student info
+        # Load results with student info (released only unless asked otherwise)
+        result_filters = [
+            AssessmentResult.assessment_id == assessment_id,
+            AssessmentResult.is_deleted == False,  # noqa: E712
+        ]
+        if not include_unreleased:
+            result_filters.append(AssessmentResult.is_released == True)  # noqa: E712
         results_res = await self.db.execute(
-            select(AssessmentResult)
-            .where(
-                AssessmentResult.assessment_id == assessment_id,
-                AssessmentResult.is_released == True,  # noqa: E712
-                AssessmentResult.is_deleted == False,  # noqa: E712
-            )
-            .options(
-                selectinload(AssessmentResult.attempt),
-            )
-            .order_by(AssessmentResult.student_id)
+            select(AssessmentResult).where(*result_filters).order_by(AssessmentResult.student_id)
         )
         results = list(results_res.scalars().all())
 
-        # Load student profiles for display
         student_ids = [r.student_id for r in results]
         students: dict[uuid.UUID, UserModel] = {}
         if student_ids:
@@ -112,6 +108,74 @@ class ExportService:
             for s in students_res.scalars().all():
                 students[s.id] = s
 
+        markers = await ExportRepository(self.db).markers_by_attempt(
+            [r.attempt_id for r in results if r.attempt_id]
+        )
+
+        from app.services.assessment_marks import required_marks
+
+        req_marks = required_marks(assessment) or getattr(assessment, "total_marks", 0)
+
+        headers = [
+            "No.", "Reg No", "Full Name",
+            "Raw Total", f"Max ({req_marks})",
+            "Percentage", "Grade", "Outcome", "Release Status", "Marker",
+        ]
+
+        def _release_status(r: Any) -> str:
+            if r.is_released:
+                return "Released"
+            if r.integrity_hold:
+                return "On integrity hold"
+            if r.total_question_count and r.graded_question_count < r.total_question_count:
+                return "Marking in progress"
+            return "Awaiting release"
+
+        body_rows: list[list[Any]] = []
+        for result in results:
+            student = students.get(result.student_id)
+            profile = getattr(student, "profile", None) if student else None
+            first = (getattr(profile, "first_name", None) or "").strip()
+            last = (getattr(profile, "last_name", None) or "").strip()
+            full_name = f"{first} {last}".strip() or (student.email if student else str(result.student_id))
+            body_rows.append([
+                sanitize_cell(getattr(profile, "student_id", None) or ""),
+                sanitize_cell(full_name),
+                round(result.total_score, 2),
+                round(result.max_score, 2),
+                round(result.percentage, 2),
+                format_letter_grade(result.letter_grade),
+                "PASS" if result.is_passing else "FAIL",
+                _release_status(result),
+                sanitize_cell(", ".join(markers.get(result.attempt_id, [])) if result.attempt_id else ""),
+            ])
+        body_rows.sort(key=lambda row: str(row[1]).lower())
+        table = [[i, *row] for i, row in enumerate(body_rows, 1)]
+
+        if fmt == "csv":
+            import csv
+
+            text = io.StringIO()
+            writer = csv.writer(text, lineterminator="\r\n")
+            writer.writerow(headers)
+            writer.writerows(table)
+            data = text.getvalue().encode("utf-8-sig")
+            self._audit_export(
+                "export.assessment_marksheet", requester, len(results), data,
+                assessment_id=assessment_id, fmt=fmt, include_unreleased=include_unreleased,
+            )
+            return data
+
+        try:
+            import openpyxl
+            from openpyxl.styles import Alignment, Font, PatternFill
+            from openpyxl.utils import get_column_letter
+        except ImportError:
+            raise ValidationError(
+                message="openpyxl is required for Excel exports. Install it with: pip install openpyxl",
+                field="export",
+            )
+
         wb = openpyxl.Workbook()
 
         # ── Sheet 1: Marks ────────────────────────────────────────────────────
@@ -120,15 +184,6 @@ class ExportService:
 
         header_fill = PatternFill("solid", fgColor="1F4E79")
         header_font = Font(color="FFFFFF", bold=True)
-
-        from app.services.assessment_marks import required_marks
-        req_marks = required_marks(assessment) or getattr(assessment, "total_marks", 0)
-
-        headers = [
-            "No.", "Reg No", "Full Name",
-            "Raw Total", f"Max ({req_marks})",
-            "Percentage", "Grade", "Status", "Marker",
-        ]
         for col_idx, h in enumerate(headers, 1):
             cell = ws_marks.cell(row=1, column=col_idx, value=h)
             cell.fill = header_fill
@@ -136,38 +191,8 @@ class ExportService:
             cell.alignment = Alignment(horizontal="center")
 
         ws_marks.freeze_panes = "A2"
-
-        row_num = 2
-        for i, result in enumerate(results, 1):
-            student = students.get(result.student_id)
-            profile = student.profile if student and hasattr(student, "profile") else None
-            full_name = sanitize_cell(
-                f"{profile.first_name} {profile.last_name}" if profile else str(result.student_id)
-            )
-            reg_no = sanitize_cell(
-                getattr(profile, "registration_number", "") if profile else ""
-            )
-            grader_name = ""
-            grader_id = getattr(result.attempt, "graded_by_id", None) if result.attempt else None
-            if grader_id:
-                grader = students.get(grader_id)
-                if grader and hasattr(grader, "profile") and grader.profile:
-                    grader_name = sanitize_cell(
-                        f"{grader.profile.first_name} {grader.profile.last_name}"
-                    )
-
-            ws_marks.append([
-                i,
-                reg_no,
-                full_name,
-                round(result.total_score, 2),
-                round(result.max_score, 2),
-                round(result.percentage, 2),
-                sanitize_cell(result.letter_grade.value if result.letter_grade else ""),
-                "PASS" if result.is_passing else "FAIL",
-                grader_name,
-            ])
-            row_num += 1
+        for row in table:
+            ws_marks.append(row)
 
         # Auto column widths
         for col in ws_marks.columns:
@@ -179,7 +204,6 @@ class ExportService:
         # ── Sheet 2: Summary ──────────────────────────────────────────────────
         ws_summary = wb.create_sheet("Summary")
         percentages = [r.percentage for r in results if r.percentage is not None]
-        scores = [r.total_score for r in results]
         passed_count = sum(1 for r in results if r.is_passing)
 
         _summary_rows = [
@@ -190,6 +214,7 @@ class ExportService:
             ("Average (%)", round(sum(percentages) / len(percentages), 2) if percentages else 0),
             ("Highest (%)", round(max(percentages), 2) if percentages else 0),
             ("Lowest (%)", round(min(percentages), 2) if percentages else 0),
+            ("Not yet released", sum(1 for r in results if not r.is_released)),
         ]
         for label, value in _summary_rows:
             ws_summary.append([label, value])
@@ -208,18 +233,30 @@ class ExportService:
         ws_meta.append(["Exported At (UTC)", export_ts])
         ws_meta.append(["Verification Code", seal_hash])
         ws_meta.append(["Row Count", len(results)])
+        ws_meta.append(["Includes unreleased results", "Yes" if include_unreleased else "No"])
 
         buf = io.BytesIO()
         wb.save(buf)
-        buf.seek(0)
+        data = buf.getvalue()
+        self._audit_export(
+            "export.assessment_marksheet", requester, len(results), data,
+            assessment_id=assessment_id, fmt=fmt, include_unreleased=include_unreleased,
+        )
+        return data
+
+    @staticmethod
+    def _audit_export(event: str, requester: User, row_count: int, data: bytes, **fields: Any) -> None:
+        """One audit line per export: who, what, how many rows and the file's SHA-256."""
+        import hashlib
 
         log.info(
-            "[AUDIT] export.assessment_marksheet",
-            assessment_id=str(assessment_id),
+            f"[AUDIT] {event}",
             requester_id=str(requester.id),
-            row_count=len(results),
+            row_count=row_count,
+            size_bytes=len(data),
+            file_sha256=hashlib.sha256(data).hexdigest(),
+            **{k: str(v) for k, v in fields.items()},
         )
-        return buf.read()
 
     # ── Course Consolidated Marksheet ─────────────────────────────────────────
 
@@ -229,6 +266,8 @@ class ExportService:
         period_id: uuid.UUID,
         requester: User,
         template_code: str = "default_course_marksheet",
+        *,
+        fmt: str = "xlsx",
     ) -> bytes:
         """
         Course Consolidated Mark Sheet: one row per student.
@@ -343,7 +382,7 @@ class ExportService:
                 f"{profile.first_name} {profile.last_name}" if profile else str(enrollment.student_id)
             )
             reg_no = sanitize_cell(
-                getattr(profile, "registration_number", "") if profile else ""
+                getattr(profile, "student_id", None) or "" if profile else ""
             )
 
             row: list[Any] = [reg_no, full_name]
@@ -400,18 +439,24 @@ class ExportService:
             ws.column_dimensions[get_column_letter(col[0].column)].width = min(max_len + 4, 40)
         ws.page_setup.orientation = "landscape"
 
-        buf = io.BytesIO()
-        wb.save(buf)
-        buf.seek(0)
+        if fmt == "csv":
+            import csv
 
-        log.info(
-            "[AUDIT] export.course_consolidated",
-            course_id=str(course_id),
-            period_id=str(period_id),
-            requester_id=str(requester.id),
-            row_count=len(enrollments),
+            text = io.StringIO()
+            writer = csv.writer(text, lineterminator="\r\n")
+            for values in ws.iter_rows(values_only=True):
+                writer.writerow(["" if v is None else v for v in values])
+            data = text.getvalue().encode("utf-8-sig")
+        else:
+            buf = io.BytesIO()
+            wb.save(buf)
+            data = buf.getvalue()
+
+        self._audit_export(
+            "export.course_consolidated", requester, len(enrollments), data,
+            course_id=course_id, period_id=period_id, fmt=fmt,
         )
-        return buf.read()
+        return data
 
     # ── Async Job (>300 rows) ─────────────────────────────────────────────────
 

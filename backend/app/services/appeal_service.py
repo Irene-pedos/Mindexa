@@ -477,6 +477,13 @@ class AppealService:
         if not original:
             return
 
+        # Keep the paper as it was before the appeal, so the archive holds both versions.
+        from app.services.marked_script_service import MarkedScriptService
+
+        archive = MarkedScriptService(self.db)
+        if original.is_released:
+            await archive.snapshot_result_safely(original, trigger="BACKFILL")
+
         original.total_score = final_total
         if original.max_score and original.max_score > 0:
             original.percentage = round((final_total / original.max_score) * 100, 2)
@@ -484,6 +491,11 @@ class AppealService:
         original.post_release_corrected_at = utcnow()
         original.updated_at = utcnow()
         await self.db.flush()
+
+        if original.is_released:
+            await archive.snapshot_result_safely(
+                original, trigger="APPEAL", created_by_id=decided_by_id
+            )
 
     # ── Student: Withdraw Appeal ──────────────────────────────────────────────
 

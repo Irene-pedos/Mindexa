@@ -300,6 +300,7 @@ class ResultService:
         # Only IMMEDIATE mode releases automatically. MANUAL waits for the lecturer
         # (spec §13.1) even for objective-only assessments; SCHEDULED is released
         # by the scheduler.
+        newly_released = False
         if (
             release_mode == ResultReleaseMode.IMMEDIATE.value
             and not result.integrity_hold
@@ -308,10 +309,20 @@ class ResultService:
         ):
             await self.result_repo.release(result.id, released_by_id=None)
             result.is_released = True
+            newly_released = True
 
             await self._notify_result_released(
                 result=result,
                 assessment_title=assessment.title if assessment else "Assessment",
+            )
+
+        # Freeze the marked paper: on first release, and again if a released
+        # result is re-marked (the archive only adds a version when content changed).
+        if result.is_released:
+            from app.services.marked_script_service import MarkedScriptService
+
+            await MarkedScriptService(self.db).snapshot_result_safely(
+                result, trigger="RELEASE" if newly_released else "CORRECTION"
             )
 
         return result, created
@@ -508,6 +519,17 @@ class ResultService:
                 self.db.add(g_sub)
         if group_sub_ids:
             await self.db.flush()
+
+        # Freeze each released paper (bulk_release updates rows in SQL, so reload first)
+        if releasable:
+            from app.services.marked_script_service import MarkedScriptService
+
+            archive = MarkedScriptService(self.db)
+            for r in releasable:
+                await self.db.refresh(r)
+                await archive.snapshot_result_safely(
+                    r, trigger="RELEASE", created_by_id=released_by_id
+                )
 
         # Dispatch notifications for released results
         if released_ids:

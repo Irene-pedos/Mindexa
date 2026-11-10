@@ -8,7 +8,7 @@ Phase 6C: Excel Export endpoints.
 from __future__ import annotations
 
 import uuid
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -44,26 +44,54 @@ router = APIRouter(tags=["Excel Export"])
 async def export_assessment_marksheet(
     assessment_id: uuid.UUID,
     template_code: str = Query(default="default_marksheet"),
+    format: Literal["xlsx", "csv"] = Query(default="xlsx"),
+    include_unreleased: bool = Query(
+        default=False,
+        description="Also list results that are not released yet, labelled in 'Release Status'.",
+    ),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_lecturer_or_admin),
 ):
+    # Only lecturers on this assessment (and admins) may export its marks.
+    from app.services.result_service import ResultService
+
+    await ResultService(db).assert_lecturer_assessment_access(assessment_id, user=current_user)
+
     service = ExportService(db)
+
+    if format == "csv":
+        csv_bytes = await service.export_assessment_marksheet(
+            assessment_id=assessment_id,
+            requester=current_user,
+            template_code=template_code,
+            fmt="csv",
+            include_unreleased=include_unreleased,
+        )
+        return Response(
+            content=csv_bytes,
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": f"attachment; filename=marksheet_{assessment_id}.csv"},
+        )
 
     # Row count check: load result count first
     from sqlalchemy import func, select
 
     from app.db.models.result import AssessmentResult
 
+    count_filters = [
+        AssessmentResult.assessment_id == assessment_id,
+        AssessmentResult.is_deleted == False,  # noqa: E712
+    ]
+    if not include_unreleased:
+        count_filters.append(AssessmentResult.is_released == True)  # noqa: E712
     count_res = await db.execute(
-        select(func.count()).select_from(AssessmentResult).where(
-            AssessmentResult.assessment_id == assessment_id,
-            AssessmentResult.is_released == True,  # noqa: E712
-            AssessmentResult.is_deleted == False,  # noqa: E712
-        )
+        select(func.count()).select_from(AssessmentResult).where(*count_filters)
     )
     row_count = count_res.scalar_one() or 0
 
-    if row_count > _SYNC_ROW_LIMIT:
+    # The background job always exports released results as xlsx, so a request for
+    # unreleased rows is built in the request instead.
+    if row_count > _SYNC_ROW_LIMIT and not include_unreleased:
         job = await service.create_async_export_job(
             requester=current_user,
             export_type=ExportType.ASSESSMENT_MARKSHEET,
@@ -76,6 +104,7 @@ async def export_assessment_marksheet(
         assessment_id=assessment_id,
         requester=current_user,
         template_code=template_code,
+        include_unreleased=include_unreleased,
     )
     return Response(
         content=xlsx_bytes,
@@ -95,10 +124,37 @@ async def export_course_consolidated(
     course_id: uuid.UUID,
     period_id: uuid.UUID = Query(...),
     template_code: str = Query(default="default_course_marksheet"),
+    format: Literal["xlsx", "csv"] = Query(default="xlsx"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_lecturer_or_admin),
 ):
+    # Only a lecturer teaching this course (or an admin) may export its marks.
+    from app.core.constants import UserRole
+    from app.core.exceptions import AuthorizationError
+    from app.db.repositories.export_repo import ExportRepository
+
+    if current_user.role != UserRole.ADMIN and not await ExportRepository(
+        db
+    ).lecturer_teaches_course(current_user.id, course_id):
+        raise AuthorizationError(
+            "You are not assigned to this course", code="COURSE_ACCESS_DENIED"
+        )
+
     service = ExportService(db)
+
+    if format == "csv":
+        csv_bytes = await service.export_course_consolidated(
+            course_id=course_id,
+            period_id=period_id,
+            requester=current_user,
+            template_code=template_code,
+            fmt="csv",
+        )
+        return Response(
+            content=csv_bytes,
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": f"attachment; filename=consolidated_{course_id}.csv"},
+        )
 
     # Row count = number of enrolled students
     from sqlalchemy import func, select

@@ -108,6 +108,8 @@ import { AIFeedbackEditor } from "@/components/mindexa/grading/ai-feedback-edito
 import { GradingGuardAlerts } from "@/components/mindexa/grading/grading-guard-alerts";
 import { GradeCheckPanel } from "@/components/mindexa/grading/grade-check-panel";
 import { AttemptReviewDialog } from "@/components/mindexa/grading/attempt-review-dialog";
+import { GradingExportMenu } from "@/components/mindexa/grading/grading-export-menu";
+import { MarkedPaperButton } from "@/components/mindexa/grading/marked-paper-button";
 import { evaluateConsistency, evaluateGrade } from "@/lib/grading-guard";
 import { useAuth } from "@/hooks/use-auth";
 import {
@@ -4843,7 +4845,12 @@ function LecturerGradingQueueContent() {
                     </p>
                   </div>
 
-                  {/* View Tab Switcher */}
+                  {/* Export + view tab switcher */}
+                  <div className="flex flex-wrap items-center gap-2">
+                  <GradingExportMenu
+                    assessmentId={selectedAssessment.id}
+                    assessmentTitle={selectedAssessment.title}
+                  />
                   <Tabs
                     value={activeStepDView}
                     onValueChange={(v) => {
@@ -4878,6 +4885,7 @@ function LecturerGradingQueueContent() {
                       </TabsTrigger>
                     </TabsList>
                   </Tabs>
+                  </div>
                 </div>
 
                 {/* Progress bar */}
@@ -5375,6 +5383,12 @@ function LecturerGradingQueueContent() {
                                   >
                                     Publish
                                   </Button>
+                                )}
+                                {isReleased && item.attempt_id && (
+                                  <MarkedPaperButton
+                                    attemptId={item.attempt_id}
+                                    studentName={item.student_name}
+                                  />
                                 )}
                               </TableCell>
                             </TableRow>

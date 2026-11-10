@@ -20,3 +20,15 @@ def sanitize_cell(value: object) -> object:
     if value and value[0] in _INJECTION_PREFIXES:
         return f"'{value}"
     return value
+
+
+def format_letter_grade(grade: object) -> str:
+    """Enum names ("A_PLUS", "C_MINUS") as people write them ("A+", "C-")."""
+    if grade is None or grade == "":
+        return ""
+    text = str(getattr(grade, "value", grade))
+    if text.endswith("_PLUS"):
+        return text[: -len("_PLUS")] + "+"
+    if text.endswith("_MINUS"):
+        return text[: -len("_MINUS")] + "-"
+    return text

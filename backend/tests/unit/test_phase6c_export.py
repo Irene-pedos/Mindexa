@@ -141,3 +141,12 @@ def test_export_types_defined():
     expected = {"ASSESSMENT_MARKSHEET", "COURSE_CONSOLIDATED"}
     actual = {e.value for e in ExportType}
     assert expected == actual
+
+
+def test_letter_grades_read_like_people_write_them() -> None:
+    from app.utils.spreadsheet import format_letter_grade
+
+    assert format_letter_grade("A_PLUS") == "A+"
+    assert format_letter_grade("C_MINUS") == "C-"
+    assert format_letter_grade("B") == "B"
+    assert format_letter_grade(None) == ""

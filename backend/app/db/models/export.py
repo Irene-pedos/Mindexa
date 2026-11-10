@@ -174,3 +174,75 @@ class ExportJob(BaseModel, table=True):
     period: Optional["AcademicPeriod"] = Relationship(
         sa_relationship_kwargs={"foreign_keys": "[ExportJob.period_id]"}
     )
+
+
+class MarkedScript(BaseModel, table=True):
+    """
+    Frozen record of one student's marked paper.
+
+    A row is never edited: when a mark changes after release (appeal, re-mark),
+    a new row with the next ``version`` is added and the earlier one is kept.
+    ``snapshot`` holds the questions as the student saw them, their answers, the
+    correct answers, marks and feedback at the moment of the snapshot, so later
+    edits in the question bank cannot change what the paper proves.
+    """
+
+    __tablename__ = "marked_script"
+    __table_args__ = (
+        UniqueConstraint("result_id", "version", name="uq_marked_script_result_version"),
+        Index("ix_marked_script_assessment_id", "assessment_id"),
+        Index("ix_marked_script_attempt_id", "attempt_id"),
+        Index("ix_marked_script_student_id", "student_id"),
+    )
+
+    result_id: uuid.UUID = Field(
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("assessment_result.id", ondelete="CASCADE"),
+            nullable=False,
+        )
+    )
+    attempt_id: Optional[uuid.UUID] = Field(
+        default=None,
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("assessment_attempt.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
+    )
+    assessment_id: uuid.UUID = Field(
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("assessment.id", ondelete="CASCADE"),
+            nullable=False,
+        )
+    )
+    student_id: uuid.UUID = Field(
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("user.id", ondelete="CASCADE"),
+            nullable=False,
+        )
+    )
+    version: int = Field(default=1, nullable=False)
+    # RELEASE | CORRECTION | APPEAL | BACKFILL
+    trigger: str = Field(sa_column=Column(String(32), nullable=False))
+    snapshot: dict = Field(sa_column=Column(JSONB, nullable=False))
+    snapshot_hash: str = Field(sa_column=Column(String(64), nullable=False))
+    verification_code: str = Field(
+        sa_column=Column(String(32), nullable=False, unique=True, index=True)
+    )
+    total_score: float = Field(default=0.0, nullable=False)
+    max_score: float = Field(default=0.0, nullable=False)
+    created_by_id: Optional[uuid.UUID] = Field(
+        default=None,
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("user.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
+    )
+    retain_until: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )

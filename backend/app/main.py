@@ -8,7 +8,7 @@ from app.api.v1.routes import (academic, admin, admin_academic, admin_ai_audit,
                                auth, authoring, blueprint, eligibility, gemini, grading, group_work,
                                health, integrity, lecturer, marking, me, moderation, notification,
                                question, resource, result, seal, student, student_ai, student_resources,
-                               study_planner, study_reader, submission, appeals, calendar, export)
+                               study_planner, study_reader, submission, appeals, calendar, export, marked_scripts)
 from app.core.config import settings
 from app.core.handlers import register_exception_handlers
 from app.core.logging import get_logger
@@ -126,6 +126,7 @@ def create_app() -> FastAPI:
     app.include_router(appeals.router, prefix=settings.API_V1_STR)
     app.include_router(calendar.router, prefix=settings.API_V1_STR)
     app.include_router(export.router, prefix=settings.API_V1_STR)
+    app.include_router(marked_scripts.router, prefix=settings.API_V1_STR)
 
     # ── EXCEPTION HANDLERS ───────────────────────────────────────────────────
     register_exception_handlers(app)

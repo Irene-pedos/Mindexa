@@ -39,8 +39,12 @@ import { toast } from "sonner";
 import { assessmentApi } from "@/lib/api/assessment";
 import { attemptApi } from "@/lib/api/attempt";
 import { resultApi } from "@/lib/api/result";
+import { OfficialPaperButton } from "@/components/mindexa/student/official-paper-button";
 import { formatLetterGrade } from "@/lib/letter-grade";
-import { appealApi, APPEAL_REASON_MIN_LENGTH } from "@/lib/api/appeals";
+import { appealApi, APPEAL_REASON_MIN_LENGTH, type Appeal } from "@/lib/api/appeals";
+import { markedScriptsApi } from "@/lib/api/marked-scripts";
+import { useAuth } from "@/hooks/use-auth";
+import { ResultPrintSheet } from "@/components/mindexa/student/result-print-sheet";
 import { submissionApi } from "@/lib/api/submission";
 import {
   isOpenEnded,
@@ -696,6 +700,82 @@ function SubmittedQuestionCard({
   );
 }
 
+const OPEN_APPEAL_STATUSES = ["SUBMITTED", "PAYMENT_PENDING", "PAID", "ASSIGNED", "UNDER_REVIEW"];
+
+const APPEAL_STATUS_LABEL: Record<string, string> = {
+  SUBMITTED: "Submitted",
+  PAYMENT_PENDING: "Awaiting payment",
+  PAID: "Payment received",
+  ASSIGNED: "Reviewer assigned",
+  UNDER_REVIEW: "Under review",
+  DECIDED: "Decided",
+  CLOSED: "Closed",
+  REJECTED_INVALID: "Not accepted",
+  WITHDRAWN: "Withdrawn",
+};
+
+const APPEAL_OUTCOME_LABEL: Record<string, string> = {
+  MARK_CONFIRMED: "Your mark was confirmed",
+  MARK_INCREASED: "Your mark was increased",
+  MARK_DECREASED: "Your mark was adjusted",
+};
+
+function AppealStatusPanel({ appeal }: { appeal: Appeal }) {
+  const open = OPEN_APPEAL_STATUSES.includes(appeal.status);
+  const decided = appeal.status === "DECIDED" || appeal.status === "CLOSED";
+  return (
+    <section
+      className={cn(
+        "no-print rounded-xl border p-3.5 space-y-1.5 w-full min-w-0",
+        open
+          ? "border-sky-300/70 bg-sky-50 dark:border-sky-900/50 dark:bg-sky-950/20"
+          : "border-border/70 bg-card",
+      )}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs font-semibold text-foreground inline-flex items-center gap-1.5">
+          <MessageCircle className="size-3.5 text-primary" />
+          Your review request
+        </p>
+        <Badge variant="outline" className="text-[10px] font-semibold">
+          {APPEAL_STATUS_LABEL[appeal.status] ?? appeal.status}
+        </Badge>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Sent {fmtDate(appeal.submitted_at, false) ?? "recently"}
+        {typeof appeal.original_total === "number" && <> · mark when requested: {appeal.original_total}</>}
+      </p>
+      {decided && (
+        <p className="text-xs text-foreground">
+          <span className="font-semibold">
+            {(appeal.outcome && APPEAL_OUTCOME_LABEL[appeal.outcome]) || "A decision was recorded"}
+          </span>
+          {typeof appeal.final_total === "number" && <> — final mark {appeal.final_total}</>}
+          {appeal.decision_note ? <>. {appeal.decision_note}</> : null}
+        </p>
+      )}
+      {appeal.status === "PAYMENT_PENDING" && (
+        <p className="text-xs text-amber-800 dark:text-amber-300">
+          A fee is needed before a reviewer is assigned.{" "}
+          <Link href="/student/requests" className="underline font-medium">
+            Complete it under My Requests
+          </Link>
+          .
+        </p>
+      )}
+      {open && appeal.status !== "PAYMENT_PENDING" && (
+        <p className="text-xs text-muted-foreground">
+          You will be notified of the outcome. Follow it under{" "}
+          <Link href="/student/requests" className="underline font-medium">
+            My Requests
+          </Link>
+          .
+        </p>
+      )}
+    </section>
+  );
+}
+
 const REVIEW_CATEGORY_LABELS: Record<string, string> = {
   recalculation: "Score recalculation",
   question_appeal: "Question / rubric appeal",
@@ -722,6 +802,10 @@ export default function ResultDetailPage() {
   const [reviewType, setReviewType] = useState("recalculation");
   const [reviewNotes, setReviewNotes] = useState("");
   const [reviewSubmitting, setReviewSubmitting] = useState(false);
+
+  const { user } = useAuth();
+  const [appeals, setAppeals] = useState<Appeal[]>([]);
+  const [verificationCode, setVerificationCode] = useState<string | null>(null);
 
   useEffect(() => {
     async function loadResult() {
@@ -754,6 +838,28 @@ export default function ResultDetailPage() {
     loadResult();
   }, [attemptId]);
 
+  // This attempt's review requests, and the archived copy's code for the printed slip.
+  useEffect(() => {
+    if (!result?.attempt_id) return;
+    let cancelled = false;
+    appealApi
+      .listMine()
+      .then((all) => {
+        if (!cancelled) setAppeals(all.filter((a) => a.attempt_id === result.attempt_id));
+      })
+      .catch(() => undefined);
+    markedScriptsApi
+      .getHistory(attemptId)
+      .then((h) => {
+        const latest = h.versions[h.versions.length - 1];
+        if (!cancelled && latest) setVerificationCode(latest.verification_code);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [result?.attempt_id, attemptId]);
+
   const handleReviewSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (reviewNotes.trim().length < APPEAL_REASON_MIN_LENGTH) {
@@ -781,6 +887,10 @@ export default function ResultDetailPage() {
       );
       setReviewDialogOpen(false);
       setReviewNotes("");
+      appealApi
+        .listMine()
+        .then((all) => setAppeals(all.filter((a) => a.attempt_id === result.attempt_id)))
+        .catch(() => undefined);
     } catch (err: unknown) {
       toast.error(
         err instanceof Error && err.message
@@ -989,14 +1099,30 @@ export default function ResultDetailPage() {
     result.assessment_type,
     result.assessment_title,
   );
+  const profile = user?.profile;
+  const studentName =
+    [profile?.first_name, profile?.last_name].filter(Boolean).join(" ").trim() ||
+    profile?.display_name ||
+    user?.email ||
+    "";
+  const studentNumber = profile?.student_id ?? null;
+  const latestAppeal = [...appeals].sort(
+    (a, b) => new Date(b.submitted_at).getTime() - new Date(a.submitted_at).getTime(),
+  )[0];
+  const hasOpenAppeal = appeals.some((a) => OPEN_APPEAL_STATUSES.includes(a.status));
 
   return (
     <div className="result-container relative space-y-4 w-full min-w-0 transition-all duration-200 ease-linear pb-12">
       {/* ── Official Print Styles (Screen Clean & Print-Ready) ── */}
       <style jsx global>{`
+        @page {
+          size: A4;
+          margin: 12mm 12mm 14mm;
+        }
         @media print {
+          html,
           body {
-            background: white !important;
+            background: #ffffff !important;
             color: #0f172a !important;
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
@@ -1004,12 +1130,33 @@ export default function ResultDetailPage() {
           aside,
           header,
           nav,
+          [data-sidebar],
           .no-print {
             display: none !important;
           }
-          main {
+          [data-slot="sidebar-gap"],
+          [data-slot="sidebar-container"],
+          [data-slot="sidebar"] {
+            display: none !important;
+            width: 0 !important;
+          }
+          [data-slot="sidebar-wrapper"],
+          [data-slot="sidebar-inset"] {
+            display: block !important;
+            width: 100% !important;
+            margin: 0 !important;
             padding: 0 !important;
-            background: white !important;
+            min-height: auto !important;
+            background: #ffffff !important;
+          }
+          [data-slot="sidebar-inset"] main,
+          main {
+            display: block !important;
+            width: 100% !important;
+            max-width: 100% !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            background: #ffffff !important;
             min-height: auto !important;
           }
           .result-container {
@@ -1018,6 +1165,8 @@ export default function ResultDetailPage() {
           }
         }
       `}</style>
+
+      <div className="space-y-4 print:hidden">
 
       {/* ── Top Navigation & Actions Bar (Screen Only) ── */}
       <div className="no-print flex flex-wrap items-center justify-between gap-2.5 pb-1 w-full min-w-0">
@@ -1036,10 +1185,12 @@ export default function ResultDetailPage() {
               variant="outline"
               size="sm"
               onClick={() => setReviewDialogOpen(true)}
+              disabled={hasOpenAppeal}
+              title={hasOpenAppeal ? "You already have a review request open for this result" : undefined}
               className="h-8 gap-1.5 text-xs rounded-lg border-border/70 font-medium"
             >
               <MessageCircle className="size-3.5 text-primary" />
-              Request Review
+              {hasOpenAppeal ? "Review requested" : "Request Review"}
             </Button>
           )}
 
@@ -1056,6 +1207,11 @@ export default function ResultDetailPage() {
               Group Workspace
             </Button>
           )}
+
+          <OfficialPaperButton
+            attemptId={attemptId}
+            label={result.assessment_title || "assessment"}
+          />
 
           <Button
             variant="outline"
@@ -1084,8 +1240,46 @@ export default function ResultDetailPage() {
         </section>
       )}
 
+      {latestAppeal && <AppealStatusPanel appeal={latestAppeal} />}
+
       {/* ── Executive Performance Summary Card ── */}
       <section className="rounded-xl border border-border/70 bg-card text-card-foreground p-4 sm:p-5 shadow-xs space-y-4 w-full min-w-0 transition-all duration-200 ease-linear">
+        {/* Institution and student identity, as on the printed slip */}
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/40 pb-3">
+          <div className="flex items-center gap-3 min-w-0">
+            {result.institution_logo_url ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={result.institution_logo_url}
+                alt=""
+                className="h-10 w-auto max-w-[96px] object-contain"
+              />
+            ) : (
+              <span className="flex size-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                <School className="size-5" />
+              </span>
+            )}
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-foreground truncate">
+                {result.institution_name || "Institution"}
+              </p>
+              <p className="text-xs text-muted-foreground truncate">
+                {[result.college_name, result.department_name, result.option_name]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </p>
+            </div>
+          </div>
+          <div className="text-right text-xs">
+            <p className="font-semibold text-foreground">{studentName}</p>
+            <p className="text-muted-foreground">
+              {studentNumber ? `Student no. ${studentNumber}` : "Student"}
+              {result.class_name ? ` · ${result.class_name}` : ""}
+              {result.academic_level ? ` · ${result.academic_level}` : ""}
+            </p>
+          </div>
+        </div>
+
         {/* Course & Assessment Header */}
         <div className="flex flex-wrap items-center justify-between gap-2.5 border-b border-border/40 pb-3">
           <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -1130,6 +1324,12 @@ export default function ResultDetailPage() {
                 <span className="inline-flex items-center gap-1.5">
                   <Calendar className="size-3.5 text-primary" />
                   Submitted: {fmtDate(result.submitted_at, false)}
+                </span>
+              )}
+              {result.released_at && (
+                <span className="inline-flex items-center gap-1.5">
+                  <CheckCircle2 className="size-3.5 text-primary" />
+                  Released: {fmtDate(result.released_at, false)}
                 </span>
               )}
               {result.duration_minutes ? (
@@ -1464,6 +1664,16 @@ export default function ResultDetailPage() {
           </form>
         </DialogContent>
       </Dialog>
+      </div>
+
+      {/* Print-only result slip (light theme, letterhead, watermark, repeating footer) */}
+      <ResultPrintSheet
+        result={result}
+        assessmentTypeLabel={assessmentTypeLabel}
+        studentName={studentName}
+        studentNumber={studentNumber}
+        verificationCode={verificationCode}
+      />
     </div>
   );
 }

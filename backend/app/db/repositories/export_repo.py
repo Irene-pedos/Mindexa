@@ -171,3 +171,59 @@ class ExportRepository:
         await self.db.flush()
         await self.db.refresh(template)
         return template
+
+    # ── Marker names (for mark sheets) ────────────────────────────────────────
+
+    async def markers_by_attempt(
+        self, attempt_ids: Sequence[uuid.UUID]
+    ) -> dict[uuid.UUID, list[str]]:
+        """Names of everyone who gave a final mark on each attempt (sorted, unique)."""
+        from sqlalchemy.orm import selectinload
+
+        from app.db.models.attempt import SubmissionGrade
+        from app.db.models.auth import User
+
+        if not attempt_ids:
+            return {}
+        pairs = await self.db.execute(
+            select(SubmissionGrade.attempt_id, SubmissionGrade.graded_by_id)
+            .where(
+                SubmissionGrade.attempt_id.in_(list(attempt_ids)),
+                SubmissionGrade.is_current.is_(True),
+                SubmissionGrade.is_final.is_(True),
+                SubmissionGrade.is_deleted.is_(False),
+                SubmissionGrade.graded_by_id.is_not(None),
+            )
+            .distinct()
+        )
+        rows = list(pairs.all())
+        user_ids = {r[1] for r in rows}
+        names: dict[uuid.UUID, str] = {}
+        if user_ids:
+            users = await self.db.execute(
+                select(User).where(User.id.in_(user_ids)).options(selectinload(User.profile))
+            )
+            for u in users.scalars().all():
+                prof = getattr(u, "profile", None)
+                first = getattr(prof, "first_name", "") or ""
+                last = getattr(prof, "last_name", "") or ""
+                names[u.id] = f"{first} {last}".strip() or u.email
+        out: dict[uuid.UUID, list[str]] = {}
+        for attempt_id, user_id in rows:
+            out.setdefault(attempt_id, []).append(names.get(user_id, ""))
+        return {k: sorted({n for n in v if n}) for k, v in out.items()}
+
+    async def lecturer_teaches_course(
+        self, lecturer_id: uuid.UUID, course_id: uuid.UUID
+    ) -> bool:
+        from app.db.models.academic import TeachingAssignment
+
+        res = await self.db.execute(
+            select(TeachingAssignment.id).where(
+                TeachingAssignment.lecturer_id == lecturer_id,
+                TeachingAssignment.course_id == course_id,
+                TeachingAssignment.is_active.is_(True),
+                TeachingAssignment.is_deleted.is_(False),
+            ).limit(1)
+        )
+        return res.scalars().first() is not None

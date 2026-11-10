@@ -92,6 +92,7 @@ from app.db.models import (  # noqa: F401
     AcademicCalendarEvent,
     ExportTemplate,
     ExportJob,
+    MarkedScript,
 )
 
 # Autogenerate target — SQLModel metadata contains all registered models

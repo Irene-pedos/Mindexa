@@ -71,6 +71,7 @@ dependencies = [
 
     # ── Excel Export (Phase 6C) ───────────────────────────────────────
     "openpyxl>=3.1.0",
+    "reportlab>=4.2.0",
 ]
 
 [project.optional-dependencies]
