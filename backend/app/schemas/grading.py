@@ -236,7 +236,10 @@ class GradingQueueItemResponse(BaseModel):
     class_section_name: str | None = None
     question_type: str | None = None
     question_title: str | None = None
-    
+    # The student's written answer. The repository fills this in, but without it declared here
+    # FastAPI dropped it from the response, so Batch Grading showed an empty "Answer Response".
+    student_answer: str | None = None
+
     # Decision State & Metadata
     status: GradingQueueStatus
     priority: GradingQueuePriority

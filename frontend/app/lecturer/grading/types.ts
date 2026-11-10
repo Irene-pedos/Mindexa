@@ -397,7 +397,8 @@ export interface AnalyticsData {
     question_type: string;
     average_score: number;
     max_score: number;
-    difficulty: "Easy" | "Medium" | "Hard";
+    /** "No data yet" until some scores for the question are finalized. */
+    difficulty: "Easy" | "Medium" | "Hard" | "No data yet";
   }>;
   ai_narrative: string | null;
   weak_topics?: string[];

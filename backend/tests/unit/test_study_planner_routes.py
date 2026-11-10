@@ -333,11 +333,22 @@ def test_knowledge_check_question_coerces_boolean_options():
     assert g.student_answer == "True"
     assert g.correct_answer == "False"
 
+    # Exercises need exactly four options; non-string ones are coerced to strings.
     e = GuidedExerciseOutput.model_validate({
         "question_text": "Sample exercise",
-        "options": [True, False],
+        "options": [True, False, 3, "Neither"],
         "correct_option_index": 0,
         "explanation": "Exercise explanation",
     })
-    assert e.options == ["True", "False"]
+    assert e.options == ["True", "False", "3", "Neither"]
+
+    import pytest
+
+    with pytest.raises(ValueError, match="exactly four options"):
+        GuidedExerciseOutput.model_validate({
+            "question_text": "Sample exercise",
+            "options": [True, False],
+            "correct_option_index": 0,
+            "explanation": "Exercise explanation",
+        })
 

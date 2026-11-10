@@ -34,6 +34,10 @@ import { InlinePracticeExercise } from "@/components/mindexa/study/guided-sessio
 import { KnowledgeCheckFlow } from "@/components/mindexa/study/guided-session/knowledge-check-flow";
 import { SessionSummaryReport } from "@/components/mindexa/study/guided-session/session-summary-report";
 import { SessionNotesPanel } from "@/components/mindexa/study/guided-session/session-notes-panel";
+import {
+  StudyToolsBar,
+  StudyTool,
+} from "@/components/mindexa/study/guided-session/study-tools-bar";
 
 export default function GuidedStudySessionPage() {
   const params = useParams();
@@ -51,6 +55,10 @@ export default function GuidedStudySessionPage() {
   const [savingCompletion, setSavingCompletion] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loadAttempt, setLoadAttempt] = useState(0);
+  const [gettingWrittenFeedback, setGettingWrittenFeedback] = useState(false);
+  const [activeTool, setActiveTool] = useState<StudyTool | null>(null);
+  const [retryCountdown, setRetryCountdown] = useState<number | null>(null);
+  const [autoRetriesLeft, setAutoRetriesLeft] = useState(2);
 
   const mainRef = useRef<HTMLElement>(null);
   const progressSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
@@ -59,6 +67,16 @@ export default function GuidedStudySessionPage() {
   // Starting a session can generate an AI lesson. React StrictMode runs effects twice in
   // development; without this guard that would generate (and bill) the lesson twice.
   const startedSessionRef = useRef<string | null>(null);
+
+  // Escape closes whichever study tool is open.
+  useEffect(() => {
+    if (!activeTool) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setActiveTool(null);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [activeTool]);
 
   // Reset scroll to top on every section/stage transition
   useEffect(() => {
@@ -92,9 +110,20 @@ export default function GuidedStudySessionPage() {
         setCompletionFailed(
           restoredStage === "summary" && data.lesson_status !== "COMPLETED",
         );
-      } catch (err: any) {
+      } catch (err) {
         startedSessionRef.current = null;
-        setLoadError(err?.message || "Failed to initialize guided study session");
+        // "Not found / no access" is permanent, so retrying is pointless: leave loadError empty
+        // and the page shows the not-found state. Anything else (network, server, rate limit)
+        // is temporary and gets a Retry button.
+        const status = (err as { status?: number } | null)?.status;
+        const isMissing = status === 403 || status === 404 || status === 422;
+        setLoadError(
+          isMissing
+            ? null
+            : err instanceof Error && err.message
+              ? err.message
+              : "Failed to initialize guided study session",
+        );
       } finally {
         setLoading(false);
       }
@@ -148,8 +177,29 @@ export default function GuidedStudySessionPage() {
     if (currentSectionIdx < session.lesson_sections_json.length - 1) {
       setCurrentSectionIdx((prev) => prev + 1);
     } else {
-      setStage("practice");
+      handleStartPractice();
     }
+  };
+
+  // Practice walks through every lesson section from the first one, one question each.
+  const handleStartPractice = () => {
+    setCurrentSectionIdx(0);
+    setStage("practice");
+  };
+
+  const handleNextPracticeSection = () => {
+    const last = (session?.lesson_sections_json?.length ?? 1) - 1;
+    setCurrentSectionIdx((prev) => Math.min(prev + 1, Math.max(last, 0)));
+  };
+
+  const handlePrevPracticeSection = () => {
+    setCurrentSectionIdx((prev) => Math.max(prev - 1, 0));
+  };
+
+  // Let a finished student reopen the lesson from the summary.
+  const handleReviewLesson = () => {
+    setCurrentSectionIdx(0);
+    setStage("lesson");
   };
 
   const handlePrevSection = () => {
@@ -167,17 +217,47 @@ export default function GuidedStudySessionPage() {
       const data = await studyPlannerApi.startGuidedSession(sessionId, { regenerate: true });
       setSession(data);
       setCurrentSectionIdx(0);
-      if (data.lesson_plan_json?.generated_by === "fallback") {
-        toast.error("The AI service is still unavailable. Please try again in a few minutes.");
-      } else {
+      if (data.lesson_plan_json?.generated_by !== "fallback") {
         toast.success("Your lesson was rebuilt from your course materials.");
+      } else if (!data.lesson_plan_json?.ai_retry_after_seconds) {
+        toast.error("The AI service is still unavailable. Please try again in a few minutes.");
       }
-    } catch (err: any) {
-      toast.error(err?.message || "Could not regenerate the lesson");
+      // Otherwise the banner explains that the AI is busy and counts down to the next attempt.
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not regenerate the lesson");
     } finally {
       setRetryingLesson(false);
     }
   };
+
+  // When the AI was only rate-limited ("free again in N seconds"), rebuild the lesson by itself
+  // once that time has passed. At most MAX_AUTO_LESSON_RETRIES times, then it is up to the student.
+  const lessonRetryHint =
+    session?.lesson_plan_json?.generated_by === "fallback"
+      ? session.lesson_plan_json.ai_retry_after_seconds
+      : undefined;
+
+  useEffect(() => {
+    if (stage !== "intro" || !lessonRetryHint || autoRetriesLeft <= 0 || retryingLesson) {
+      setRetryCountdown(null);
+      return;
+    }
+    setRetryCountdown(lessonRetryHint);
+    const timer = setInterval(() => {
+      setRetryCountdown((remaining) => (remaining === null ? null : remaining - 1));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [stage, lessonRetryHint, autoRetriesLeft, retryingLesson]);
+
+  useEffect(() => {
+    if (retryCountdown !== null && retryCountdown <= 0) {
+      setRetryCountdown(null);
+      setAutoRetriesLeft((left) => left - 1);
+      void handleRetryLesson();
+    }
+    // handleRetryLesson is recreated every render; only the countdown reaching zero should fire it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [retryCountdown]);
 
   // Saving completion can fail (network, expired session). The student still sees their
   // results, but the failure stays visible with a retry, so progress is never silently lost.
@@ -193,6 +273,30 @@ export default function GuidedStudySessionPage() {
       toast.error(err?.message || "Error completing guided session");
     } finally {
       setSavingCompletion(false);
+    }
+  };
+
+  // Reports graded before AI marking existed have no feedback on written answers. The student
+  // asks for it explicitly, so no AI call is spent on a page load.
+  const handleGetWrittenFeedback = async () => {
+    setGettingWrittenFeedback(true);
+    try {
+      const updated = await studyPlannerApi.addWrittenAnswerFeedback(sessionId);
+      setReport(updated);
+      setSession((prev) =>
+        prev
+          ? {
+              ...prev,
+              knowledge_check_report: updated,
+              knowledge_check_score: updated.score_percentage,
+            }
+          : prev,
+      );
+      toast.success("Feedback added to your written answers.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not get feedback right now");
+    } finally {
+      setGettingWrittenFeedback(false);
     }
   };
 
@@ -220,7 +324,7 @@ export default function GuidedStudySessionPage() {
           {loadError ? "Could Not Load Study Session" : "Study Session Not Found"}
         </h2>
         <p className="text-xs text-muted-foreground max-w-md">
-          {loadError || "The requested study session could not be loaded or you do not have permission to access it."}
+          {loadError || "This study session doesn't exist, or it belongs to another account."}
         </p>
         <div className="flex items-center gap-2">
           {loadError && (
@@ -249,6 +353,11 @@ export default function GuidedStudySessionPage() {
   const plannedMinutes =
     session.lesson_plan_json?.estimated_duration_minutes ?? session.duration_minutes;
 
+  // Lessons saved before the `grounded` flag existed: infer from whether sources were attached.
+  const lessonGrounded =
+    session.lesson_plan_json?.grounded ??
+    (session.lesson_plan_json?.citations?.length ?? 0) > 0;
+
   return (
     <div className="fixed inset-0 z-50 bg-background text-foreground flex flex-col overflow-hidden">
       {/* Distraction-Free Header */}
@@ -263,7 +372,7 @@ export default function GuidedStudySessionPage() {
 
       {/* Main Learning Workspace Outer Scroll Container */}
       <div ref={mainRef as any} className="flex-1 overflow-y-auto w-full">
-        <main className="w-full px-4 py-5 md:px-6 space-y-5 pb-24 md:pb-16 max-w-5xl mx-auto">
+        <main className="w-full px-4 py-5 md:px-6 space-y-5 pb-24 md:pb-24 max-w-5xl mx-auto">
           {/* STAGE 1: INTRO / OVERVIEW */}
           {stage === "intro" && (
             <>
@@ -275,10 +384,25 @@ export default function GuidedStudySessionPage() {
                     <p className="text-sm font-bold text-amber-800 dark:text-amber-300">
                       General Study Outline — Standard Fallback
                     </p>
-                    <p className="text-xs text-amber-700 dark:text-amber-400 leading-relaxed max-w-2xl">
-                      We couldn&apos;t generate an AI lesson grounded in your course materials this time (the AI service was temporarily unavailable). This session is showing a general study outline instead.{" "}
-                      <strong>Try rebuilding this session</strong> for a lesson grounded in your lecture notes and course uploads.
-                    </p>
+                    {lessonRetryHint && autoRetriesLeft > 0 ? (
+                      <p role="status" className="text-xs text-amber-700 dark:text-amber-400 leading-relaxed max-w-2xl">
+                        The AI is busy right now (it can only write so much per minute). This is a general
+                        study outline for the moment.{" "}
+                        <strong>
+                          {retryingLesson
+                            ? "Rebuilding your lesson from your course materials..."
+                            : retryCountdown !== null
+                              ? `Rebuilding it automatically in ${Math.max(retryCountdown, 0)}s.`
+                              : "Rebuilding it automatically shortly."}
+                        </strong>{" "}
+                        You can start with the outline in the meantime.
+                      </p>
+                    ) : (
+                      <p className="text-xs text-amber-700 dark:text-amber-400 leading-relaxed max-w-2xl">
+                        We couldn&apos;t generate an AI lesson grounded in your course materials this time (the AI service was temporarily unavailable). This session is showing a general study outline instead.{" "}
+                        <strong>Try rebuilding this session</strong> for a lesson grounded in your lecture notes and course uploads.
+                      </p>
+                    )}
                     <div className="flex items-center gap-2 pt-1">
                       <Button
                         size="sm"
@@ -318,10 +442,14 @@ export default function GuidedStudySessionPage() {
                     <Badge variant="outline" className="text-xs font-semibold border-primary/20 text-primary bg-primary/5 px-2.5 py-0.5">
                       Personal Learning Workspace
                     </Badge>
-                    {/* Provenance: Only label as AI-Personalized if explicitly generated by AI */}
-                    {session.lesson_plan_json?.generated_by === "ai" ? (
+                    {/* Provenance: say exactly what the lesson was built from */}
+                    {session.lesson_plan_json?.generated_by === "ai" && lessonGrounded ? (
                       <Badge variant="outline" className="text-[11px] font-medium border-emerald-500/30 text-emerald-600 dark:text-emerald-400 bg-emerald-500/5 px-2 py-0.5">
-                        AI-Personalized
+                        AI lesson · built from your course materials
+                      </Badge>
+                    ) : session.lesson_plan_json?.generated_by === "ai" ? (
+                      <Badge variant="outline" className="text-[11px] font-medium border-sky-500/30 text-sky-600 dark:text-sky-400 bg-sky-500/5 px-2 py-0.5">
+                        AI lesson · general knowledge
                       </Badge>
                     ) : session.lesson_plan_json?.generated_by === "fallback" ? (
                       <Badge variant="outline" className="text-[11px] font-medium border-amber-500/30 text-amber-600 dark:text-amber-400 bg-amber-500/5 px-2 py-0.5">
@@ -339,24 +467,42 @@ export default function GuidedStudySessionPage() {
                   <p className="text-xs text-muted-foreground font-medium">
                     {session.title} &bull; Planned Duration: {plannedMinutes} minutes
                   </p>
+                  {session.lesson_plan_json?.generated_by === "ai" &&
+                    !lessonGrounded && (
+                      <p className="text-[11px] text-muted-foreground leading-relaxed max-w-2xl">
+                        No course materials were found for this topic, so this lesson was written from
+                        general knowledge. Check it against your lecture notes before relying on it.
+                      </p>
+                    )}
                 </CardHeader>
 
                 <CardContent className="p-5 md:p-6 space-y-5">
+                  {session.lesson_plan_json?.introduction?.trim() && (
+                    <p className="text-sm text-foreground/90 leading-relaxed max-w-3xl">
+                      {session.lesson_plan_json.introduction}
+                    </p>
+                  )}
+
                   {/* Bento Grid */}
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
                     <div className="p-4 rounded-xl border border-border/60 bg-card space-y-1 shadow-2xs">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Lesson Sections</span>
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">First Learn</span>
                       <p className="text-sm font-semibold text-foreground">{sections.length} Modules</p>
+                      <p className="text-[11px] text-muted-foreground">About {plannedMinutes} minutes in total</p>
                     </div>
 
                     <div className="p-4 rounded-xl border border-border/60 bg-card space-y-1 shadow-2xs">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Practice Activities</span>
-                      <p className="text-sm font-semibold text-foreground">Interactive Exercises</p>
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Then Practise</span>
+                      <p className="text-sm font-semibold text-foreground">
+                        1 question per section
+                      </p>
+                      <p className="text-[11px] text-muted-foreground">Multiple choice or written, your pick</p>
                     </div>
 
                     <div className="p-4 rounded-xl border border-border/60 bg-card space-y-1 shadow-2xs">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Final Evaluation</span>
-                      <p className="text-sm font-semibold text-foreground">Self Knowledge Check</p>
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Finally Check</span>
+                      <p className="text-sm font-semibold text-foreground">Short knowledge check</p>
+                      <p className="text-[11px] text-muted-foreground">With feedback and a review plan</p>
                     </div>
                   </div>
 
@@ -408,6 +554,24 @@ export default function GuidedStudySessionPage() {
                       ))}
                     </div>
                   </div>
+
+                  {/* Key terms used in the lesson */}
+                  {(session.lesson_plan_json?.glossary?.length ?? 0) > 0 && (
+                    <details className="rounded-xl border border-border/60 bg-card shadow-2xs group">
+                      <summary className="cursor-pointer select-none p-4 text-xs font-semibold uppercase tracking-wider text-foreground flex items-center gap-2">
+                        <BookOpen className="size-4 text-primary" /> Key Terms (
+                        {session.lesson_plan_json?.glossary?.length})
+                      </summary>
+                      <dl className="px-4 pb-4 grid gap-2.5 text-xs">
+                        {session.lesson_plan_json?.glossary?.map((entry, i) => (
+                          <div key={`${entry.term}-${i}`}>
+                            <dt className="font-semibold text-foreground">{entry.term}</dt>
+                            <dd className="text-muted-foreground leading-relaxed">{entry.definition}</dd>
+                          </div>
+                        ))}
+                      </dl>
+                    </details>
+                  )}
 
                   {/* Source Material & Citations (when grounded) */}
                   {(() => {
@@ -492,16 +656,21 @@ export default function GuidedStudySessionPage() {
               }}
               onNextSection={handleNextSection}
               onPrevSection={handlePrevSection}
-              onStartPractice={() => setStage("practice")}
+              onStartPractice={handleStartPractice}
             />
           )}
 
           {/* STAGE 3: INLINE PRACTICE EXERCISE */}
           {stage === "practice" && (
             <InlinePracticeExercise
+              key={currentSectionIdx}
               sessionId={sessionId}
               sectionIndex={currentSectionIdx}
               sectionTitle={currentSection.section_title}
+              totalSections={sections.length}
+              onNextSection={handleNextPracticeSection}
+              onPrevSection={handlePrevPracticeSection}
+              onBackToLesson={() => setStage("lesson")}
               savedExercises={session.guided_practice_exercises_json || []}
               savedAttempts={session.guided_practice_attempts_json || []}
               onExerciseCreated={(newEx) => {
@@ -533,6 +702,18 @@ export default function GuidedStudySessionPage() {
           )}
 
           {/* STAGE 4: KNOWLEDGE CHECK */}
+          {stage === "knowledge_check" && (
+            <div className="flex justify-start">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setStage("practice")}
+                className="text-xs text-muted-foreground gap-1 cursor-pointer"
+              >
+                <ArrowLeft className="size-3.5" /> Back to practice
+              </Button>
+            </div>
+          )}
           {stage === "knowledge_check" && (
             <KnowledgeCheckFlow
               sessionId={sessionId}
@@ -587,25 +768,36 @@ export default function GuidedStudySessionPage() {
                 session={session}
                 report={report || session.knowledge_check_report}
                 onReturnToPlanner={handleExit}
+                onReviewLesson={handleReviewLesson}
+                onGetWrittenFeedback={handleGetWrittenFeedback}
+                gettingWrittenFeedback={gettingWrittenFeedback}
               />
             </>
           )}
         </main>
       </div>
 
-      {/* Floating Contextual Ask AI Panel */}
+      {/* Study tools: one labelled bar, one panel open at a time */}
+      <StudyToolsBar
+        active={activeTool}
+        onToggle={(tool) => setActiveTool((current) => (current === tool ? null : tool))}
+      />
+
       <ContextualAskAiPanel
         sessionId={sessionId}
         currentSectionTitle={currentSection.section_title}
         currentSectionContent={currentSection.content}
         initialChatHistory={session.tutor_chat_history}
+        open={activeTool === "tutor"}
+        onOpenChange={(open) => setActiveTool(open ? "tutor" : null)}
       />
 
-      {/* Floating Personal Session Notes Panel */}
       <SessionNotesPanel
         sessionId={sessionId}
         initialNotes={session.student_notes}
         currentSectionTitle={currentSection.section_title}
+        open={activeTool === "notes"}
+        onOpenChange={(open) => setActiveTool(open ? "notes" : null)}
       />
     </div>
   );

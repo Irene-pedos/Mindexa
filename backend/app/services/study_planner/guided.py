@@ -12,6 +12,11 @@ from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
+# Recent tutor turns sent back to the model with each new question.
+MAX_TUTOR_HISTORY_MESSAGES = 12
+# A provider "try again in N seconds" longer than this is not worth promising an automatic retry for.
+MAX_RETRY_HINT_SECONDS = 120
+
 from sqlalchemy import or_, select
 
 from app.db.models.resource import LecturerMaterial
@@ -476,6 +481,7 @@ class GuidedSessionMixin(PlannerBase):
                 if grounded_refs and hasattr(lesson_output, "lecturer_references"):
                     lesson_output.lecturer_references = grounded_refs
 
+                lesson_output.grounded = bool(rag_context and rag_context.strip())
                 session.lesson_plan_json = lesson_output.model_dump()  # a real AI lesson: no fallback flag
                 # Guard: null out any diagram_prompt that doesn't pass structural Mermaid validation
                 # before persisting so the frontend renderer never receives malformed syntax.
@@ -489,6 +495,16 @@ class GuidedSessionMixin(PlannerBase):
             except Exception as exc:
                 logger.warning("Guided lesson AI generation failed, using fallback lesson content", error=str(exc))
                 self._apply_fallback_lesson(session, rag_citations)
+                # If the provider only said "busy, try again in N seconds", pass that on so the
+                # page can rebuild the lesson by itself when the wait is over, instead of the
+                # student having to notice and press the button.
+                from app.agents.study_planner_agent import provider_retry_after_seconds
+
+                retry_after = provider_retry_after_seconds(str(exc))
+                if retry_after is not None and retry_after <= MAX_RETRY_HINT_SECONDS:
+                    plan = dict(session.lesson_plan_json or {})
+                    plan["ai_retry_after_seconds"] = int(retry_after) + 2
+                    session.lesson_plan_json = plan
 
             session.lesson_status = "IN_PROGRESS"
             session.lesson_generated_at = datetime.now(UTC)
@@ -624,11 +640,14 @@ class GuidedSessionMixin(PlannerBase):
         agent = StudySupportAgent(gateway)
 
         existing_history = list(session.tutor_chat_history or [])
+        # Only the most recent turns go back to the model: the full history is still stored and
+        # shown, but sending all of it would make every question slower and costlier as the
+        # conversation grows.
         conv_history = [
             {"role": item["role"], "content": item["content"]}
             for item in existing_history
             if isinstance(item, dict) and "role" in item and "content" in item
-        ]
+        ][-MAX_TUTOR_HISTORY_MESSAGES:]
 
         lu_source_material_id = None
         if getattr(session, "learning_unit_id", None):
@@ -680,6 +699,8 @@ class GuidedSessionMixin(PlannerBase):
             "role": "assistant",
             "content": output.answer,
             "citations": citations_data,
+            # True when no relevant course material was found and the answer is general knowledge.
+            "fallback_used": bool(output.fallback_used),
             "timestamp": now_iso,
         }
 
@@ -700,8 +721,13 @@ class GuidedSessionMixin(PlannerBase):
         session_id: uuid.UUID,
         student_id: uuid.UUID,
         section_index: int = 0,
+        exercise_type: str = "MCQ",
     ) -> Dict[str, Any]:
-        """Generate one inline practice activity for the current section with immediate feedback, grounded in AI and RAG."""
+        """Generate one inline practice activity for a section, grounded in AI and RAG.
+
+        ``exercise_type`` is ``MCQ`` (answer-key graded) or ``SHORT_ANSWER`` (a written answer
+        that the AI marks for meaning, with feedback).
+        """
         session = await self.repo.get_session_by_id(session_id, student_id)
         if not session:
             raise NotFoundError("Study session not found")
@@ -758,31 +784,55 @@ class GuidedSessionMixin(PlannerBase):
 
         for attempt in range(1, max_attempts + 1):
             try:
-                ex_output = await agent.generate_guided_exercise(
-                    student_id=student_id,
-                    session_id=session_id,
-                    topic=session.topic,
-                    section_title=sec_title,
-                    section_content=sec_content,
-                    rag_context=rag_context,
-                )
-                exercise = {
-                    "id": str(uuid.uuid4()),
-                    "section_index": section_index,
-                    "section_title": sec_title,
-                    "question_text": ex_output.question_text,
-                    "question_type": "MCQ",
-                    "options": ex_output.options,
-                    "correct_option_index": ex_output.correct_option_index,
-                    "explanation": ex_output.explanation,
-                    "generated_by": "ai",
-                }
+                if exercise_type == "SHORT_ANSWER":
+                    written = await agent.generate_guided_written_exercise(
+                        student_id=student_id,
+                        session_id=session_id,
+                        topic=session.topic,
+                        section_title=sec_title,
+                        section_content=sec_content,
+                        rag_context=rag_context,
+                    )
+                    exercise = {
+                        "id": str(uuid.uuid4()),
+                        "section_index": section_index,
+                        "section_title": sec_title,
+                        "question_text": written.question_text,
+                        "question_type": "SHORT_ANSWER",
+                        "options": [],
+                        "correct_option_index": None,
+                        "explanation": written.explanation,
+                        # Kept server-side until the student answers, so it is not sent to the
+                        # browser with the question (see _public_exercises).
+                        "model_answer": written.model_answer,
+                        "generated_by": "ai",
+                    }
+                else:
+                    ex_output = await agent.generate_guided_exercise(
+                        student_id=student_id,
+                        session_id=session_id,
+                        topic=session.topic,
+                        section_title=sec_title,
+                        section_content=sec_content,
+                        rag_context=rag_context,
+                    )
+                    exercise = {
+                        "id": str(uuid.uuid4()),
+                        "section_index": section_index,
+                        "section_title": sec_title,
+                        "question_text": ex_output.question_text,
+                        "question_type": "MCQ",
+                        "options": ex_output.options,
+                        "correct_option_index": ex_output.correct_option_index,
+                        "explanation": ex_output.explanation,
+                        "generated_by": "ai",
+                    }
                 exercises = list(session.guided_practice_exercises_json or [])
                 exercises.append(exercise)
                 session.guided_practice_exercises_json = exercises[-100:]
                 await self.repo.update_session(session)
                 await self.db.commit()
-                return exercise
+                return {key: value for key, value in exercise.items() if key != "model_answer"}
             except Exception as exc:
                 last_error = exc
                 logger.warning(
@@ -807,9 +857,15 @@ class GuidedSessionMixin(PlannerBase):
         session_id: uuid.UUID,
         student_id: uuid.UUID,
         exercise_id: str,
-        selected_option_index: int,
+        selected_option_index: Optional[int] = None,
+        *,
+        answer_text: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Grade and persist an answer against an exercise generated for this session."""
+        """Grade and persist an answer against an exercise generated for this session.
+
+        Multiple-choice exercises are graded by answer key. Written exercises are marked by the
+        AI for meaning with feedback, falling back to keyword matching if the AI is unavailable.
+        """
         session = await self.repo.get_session_by_id(session_id, student_id)
         if not session:
             raise NotFoundError("Study session not found")
@@ -823,6 +879,13 @@ class GuidedSessionMixin(PlannerBase):
         )
         if not exercise:
             raise ValidationError("Practice exercise was not found for this session.")
+
+        if exercise.get("question_type") == "SHORT_ANSWER":
+            return await self._submit_written_exercise_attempt(
+                session, student_id, exercise, answer_text or ""
+            )
+        if selected_option_index is None:
+            raise ValidationError("Choose one of the options to submit this exercise.")
 
         options = exercise.get("options") or []
         correct_index = exercise.get("correct_option_index")
@@ -851,6 +914,120 @@ class GuidedSessionMixin(PlannerBase):
             "explanation": exercise.get("explanation", ""),
         }
 
+    async def _ai_marking_allowed(self, session: Any, student_id: uuid.UUID) -> bool:
+        """Whether written answers may be sent to the AI marker for this student and course."""
+        try:
+            await assert_student_ai_allowed(self.db, student_id)
+            plan = (
+                await self.repo.get_plan_by_id(session.study_plan_id, student_id)
+                if getattr(session, "study_plan_id", None)
+                else None
+            )
+            if plan and getattr(plan, "teaching_workspace_id", None):
+                from app.core.ai.language_policy import is_ai_allowed
+                from app.db.models.academic import TeachingWorkspace
+
+                workspace = await self.db.get(TeachingWorkspace, plan.teaching_workspace_id)
+                if workspace and not is_ai_allowed(getattr(workspace, "language", None)):
+                    return False
+            return True
+        except Exception:
+            return False
+
+    async def _submit_written_exercise_attempt(
+        self,
+        session: Any,
+        student_id: uuid.UUID,
+        exercise: Dict[str, Any],
+        answer_text: str,
+    ) -> Dict[str, Any]:
+        """Mark a written practice answer and persist the attempt with feedback."""
+        text = answer_text.strip()
+        if not text:
+            raise ValidationError("Write an answer before submitting.")
+        model_answer = str(exercise.get("model_answer") or "")
+        exercise_id = str(exercise.get("id"))
+
+        score_pct: Optional[float] = None
+        feedback: Optional[str] = None
+        graded_by = "keyword"
+
+        if model_answer and await self._ai_marking_allowed(session, student_id):
+            try:
+                from app.agents.study_planner_agent import StudyPlannerAgent
+
+                agent = StudyPlannerAgent(self._build_gateway())
+                marks = await agent.mark_written_answers(
+                    student_id=student_id,
+                    session_id=session.id,
+                    topic=session.topic,
+                    rows=[
+                        {
+                            "id": exercise_id,
+                            "q": {
+                                "question_text": exercise.get("question_text", ""),
+                                "correct_answer": model_answer,
+                            },
+                            "student": text,
+                        }
+                    ],
+                )
+                mark = marks.get(exercise_id)
+                if mark is not None:
+                    score_pct = mark.score
+                    feedback = mark.feedback.strip()
+                    missing = "; ".join(p.strip() for p in mark.missing_points if p.strip())
+                    if missing:
+                        feedback = f"{feedback} Missing: {missing}.".strip()
+                    graded_by = "ai"
+            except Exception as exc:
+                logger.warning(
+                    "written_practice_ai_marking_failed_using_keyword_fallback",
+                    error=str(exc)[:300],
+                    session_id=str(session.id),
+                )
+
+        if score_pct is None:
+            from app.agents.study_planner_agent import evaluate_question_response
+
+            _, score_pct, _, _ = evaluate_question_response(
+                {"question_type": "SHORT_ANSWER", "correct_answer": model_answer}, text
+            )
+            feedback = (
+                "This answer was marked by keyword match because the AI marker was unavailable, "
+                "so the result may be less accurate. Compare it with the model answer yourself."
+            )
+
+        from app.agents.study_planner_agent import OPEN_ANSWER_PASS_SCORE
+
+        is_correct = score_pct >= OPEN_ANSWER_PASS_SCORE
+        attempt = {
+            "exercise_id": exercise_id,
+            "section_index": exercise.get("section_index", 0),
+            "selected_option_index": None,
+            "answer_text": text,
+            "is_correct": is_correct,
+            "score": round(score_pct / 100.0, 3),
+            "feedback": feedback,
+            "graded_by": graded_by,
+            "model_answer": model_answer,
+            "submitted_at": datetime.now(UTC).isoformat(),
+        }
+        attempts = [
+            item
+            for item in (session.guided_practice_attempts_json or [])
+            if item.get("exercise_id") != exercise_id
+        ]
+        attempts.append(attempt)
+        session.guided_practice_attempts_json = attempts[-100:]
+        await self.repo.update_session(session)
+        await self.db.commit()
+        return {
+            **attempt,
+            "correct_option_index": None,
+            "explanation": exercise.get("explanation", ""),
+        }
+
     async def submit_guided_knowledge_check(
         self,
         session_id: uuid.UUID,
@@ -876,6 +1053,10 @@ class GuidedSessionMixin(PlannerBase):
         if not questions:
             raise ValidationError("Unable to grade knowledge check: no questions found or generated.")
 
+        # Written answers are marked by the AI only when this student may use AI here; otherwise
+        # they are graded by keyword match and labelled as such.
+        use_ai_grading = await self._ai_marking_allowed(session, student_id)
+
         try:
             from app.agents.study_planner_agent import StudyPlannerAgent
 
@@ -888,6 +1069,7 @@ class GuidedSessionMixin(PlannerBase):
                 questions=questions,
                 student_answers=answers,
                 session_topic=session.topic,
+                use_ai_grading=use_ai_grading,
             )
             report = report_obj.model_dump()
         except Exception as exc:
@@ -1011,7 +1193,21 @@ class GuidedSessionMixin(PlannerBase):
                     if citation.get("resource_id")
                 ))
                 session.recommended_resource_ids = rec_ids
-                await self.repo.update_session(session)
+                # Titles travel with the report so the summary can say *what* to review and why,
+                # not just that something was recommended.
+                seen_materials: set[str] = set()
+                recommended_materials: List[Dict[str, Any]] = []
+                for citation in recommendation_citations:
+                    rid = str(citation.get("resource_id") or "")
+                    if not rid or rid in seen_materials:
+                        continue
+                    seen_materials.add(rid)
+                    recommended_materials.append({
+                        "resource_id": rid,
+                        "title": citation.get("title") or citation.get("resource_name") or "Course material",
+                        "page_number": citation.get("page_number"),
+                    })
+                report["recommended_materials"] = recommended_materials[:5]
         except Exception as exc:
             logger.warning("Failed to retrieve study materials for weak concepts", error=str(exc))
 
@@ -1020,12 +1216,175 @@ class GuidedSessionMixin(PlannerBase):
         if weak_concepts or score < 70:
             try:
                 spaced_topics = weak_concepts if weak_concepts else [session.topic]
-                await self.schedule_spaced_repetition_session(student_id, session.study_plan_id, spaced_topics, days_ahead=2)
+                review_session = await self.schedule_spaced_repetition_session(
+                    student_id, session.study_plan_id, spaced_topics, days_ahead=2
+                )
+                if review_session is not None:
+                    report["review"] = {
+                        "session_id": str(review_session.id),
+                        "topics": [str(t) for t in spaced_topics[:5]],
+                        "scheduled_start": review_session.scheduled_start.isoformat(),
+                        "duration_minutes": review_session.duration_minutes,
+                    }
             except Exception as exc:
                 logger.warning("Spaced repetition auto-scheduling failed", error=str(exc))
 
+        # Persist the enriched report (reassigned so the JSON column registers the change).
+        session.knowledge_check_report = dict(report)
+        await self.repo.update_session(session)
         await self.db.commit()
         return report
+
+    async def add_written_answer_feedback(
+        self,
+        session_id: uuid.UUID,
+        student_id: uuid.UUID,
+    ) -> Dict[str, Any]:
+        """Give an earlier knowledge-check report AI marking and feedback on its written answers.
+
+        Reports graded before AI marking existed (or while it was unavailable) used keyword
+        matching and carry no feedback. This re-marks only those written answers, updates the
+        report totals, and adjusts the learning profile by the difference, so nothing is
+        counted twice. Safe to call repeatedly: once every written answer is AI-marked it does
+        nothing.
+        """
+        from app.agents.study_planner_agent import OPEN_ANSWER_PASS_SCORE, OPEN_ANSWER_TYPES
+
+        session = await self.repo.get_session_by_id(session_id, student_id)
+        if not session:
+            raise NotFoundError("Study session not found")
+        report = session.knowledge_check_report
+        if not report:
+            raise ValidationError("Take the knowledge check before asking for feedback.")
+
+        questions_by_id: Dict[str, Dict[str, Any]] = {}
+        for index, question in enumerate(session.quiz_questions or []):
+            if isinstance(question, dict):
+                questions_by_id[str(question.get("id", index))] = question
+
+        grades = [dict(grade) for grade in (report.get("question_grades") or [])]
+        pending: List[Tuple[Dict[str, Any], Dict[str, Any], str]] = []
+        for grade in grades:
+            question = questions_by_id.get(str(grade.get("question_id")))
+            if not question or str(question.get("question_type", "")).upper() not in OPEN_ANSWER_TYPES:
+                continue
+            if grade.get("graded_by") == "ai":
+                continue
+            student_answer = str(grade.get("student_answer") or "").strip()
+            if not student_answer or student_answer == "No answer provided":
+                continue
+            if not str(question.get("correct_answer") or "").strip():
+                continue
+            pending.append((grade, question, student_answer))
+
+        if not pending:
+            return report
+
+        if not await self._ai_marking_allowed(session, student_id):
+            raise ValidationError("AI feedback is not available for your account or course.")
+
+        from app.agents.study_planner_agent import StudyPlannerAgent
+
+        agent = StudyPlannerAgent(self._build_gateway())
+        try:
+            marks = await agent.mark_written_answers(
+                student_id=student_id,
+                session_id=session_id,
+                topic=session.topic,
+                rows=[
+                    {
+                        "id": str(grade.get("question_id")),
+                        "q": question,
+                        "student": student_answer,
+                    }
+                    for grade, question, student_answer in pending
+                ],
+            )
+        except Exception as exc:
+            logger.warning("written_feedback_backfill_failed", error=str(exc)[:300], session_id=str(session_id))
+            marks = {}
+        if not marks:
+            raise AITemporarilyUnavailableError(
+                "Could not get feedback on your written answers right now. Please try again."
+            )
+
+        for grade, _question, _answer in pending:
+            mark = marks.get(str(grade.get("question_id")))
+            if mark is None:
+                continue
+            feedback = mark.feedback.strip()
+            missing = "; ".join(p.strip() for p in mark.missing_points if p.strip())
+            if missing:
+                feedback = f"{feedback} Missing: {missing}.".strip()
+            grade["score"] = mark.score / 100.0
+            grade["is_correct"] = mark.score >= OPEN_ANSWER_PASS_SCORE
+            grade["feedback"] = feedback or None
+            grade["graded_by"] = "ai"
+
+        total = len(grades) or 1
+        new_score = round(sum(float(g.get("score") or 0.0) for g in grades) * 100.0 / total, 1)
+        old_score = float(report.get("score_percentage") or 0.0)
+        old_weak = list(report.get("weak_concepts") or [])
+
+        mastered: List[str] = []
+        weak: List[str] = []
+        for grade in grades:
+            question = questions_by_id.get(str(grade.get("question_id")), {})
+            if grade.get("is_correct"):
+                mastered.append(question.get("concept_tag") or question.get("question_text") or session.topic)
+            else:
+                weak.append(
+                    question.get("concept_tag")
+                    or question.get("topic_tag")
+                    or session.topic
+                    or question.get("question_text", "")
+                )
+
+        new_report = dict(report)
+        new_report.update(
+            {
+                "question_grades": grades,
+                "score_percentage": new_score,
+                "mastered_concepts": list(dict.fromkeys(mastered)),
+                "weak_concepts": list(dict.fromkeys(weak)),
+                "estimated_confidence_level": int(min(100, max(0, new_score))),
+                "generated_by": "ai_assisted",
+            }
+        )
+        session.knowledge_check_report = new_report
+        session.knowledge_check_score = new_score
+        await self.repo.update_session(session)
+
+        # Move the learning profile by the difference only: this session was already counted.
+        try:
+            plan = await self.repo.get_plan_by_id(session.study_plan_id, student_id)
+            profile = await self.repo.get_or_create_learning_profile(
+                student_id, plan.course_id if plan else None
+            )
+            count = max(int(getattr(profile, "knowledge_check_count", 0) or 0), 1)
+            avg = profile.average_knowledge_check_score
+            new_avg = (
+                max(0.0, min(100.0, round((float(avg) * count - old_score + new_score) / count, 1)))
+                if avg is not None
+                else new_score
+            )
+            conf = dict(profile.topic_confidence or {})
+            conf[session.topic] = int(new_report["estimated_confidence_level"])
+            weak_list = [w for w in (profile.weak_topics or []) if w not in old_weak or w in weak]
+            for concept in weak:
+                if concept not in weak_list:
+                    weak_list.append(concept)
+            await self.repo.update_learning_profile(
+                profile.id,
+                topic_confidence=conf,
+                weak_topics=weak_list,
+                average_knowledge_check_score=new_avg,
+            )
+        except Exception as exc:
+            logger.warning("written_feedback_profile_update_failed", error=str(exc)[:300])
+
+        await self.db.commit()
+        return new_report
 
     async def complete_guided_session(
         self,
@@ -1190,31 +1549,47 @@ class GuidedSessionMixin(PlannerBase):
             top_k=5,
         )
 
+        # The agent only sees the first ~6000 characters, so every section gets an equal share
+        # of that budget. Otherwise early sections would use it all and the check would never
+        # ask about the later ones.
+        lesson_sections = [s for s in (session.lesson_sections_json or []) if isinstance(s, dict)]
+        total_budget = 5000
+        per_section_budget = max(total_budget // max(len(lesson_sections), 1), 300)
         lesson_content_parts = []
-        for sec in (session.lesson_sections_json or []):
-            if isinstance(sec, dict):
-                title = sec.get("section_title", "")
-                kp = sec.get("key_points") or []
-                kp_str = "; ".join(kp) if isinstance(kp, list) else str(kp)
-                body = sec.get("content", "")
-                part_lines = []
-                if title:
-                    part_lines.append(f"Section: {title}")
-                if kp_str:
-                    part_lines.append(f"Key Points: {kp_str}")
-                if body:
-                    part_lines.append(f"Content: {body}")
-                if part_lines:
-                    lesson_content_parts.append("\n".join(part_lines))
+        for sec_number, sec in enumerate(lesson_sections, start=1):
+            title = sec.get("section_title", "")
+            kp = sec.get("key_points") or []
+            kp_str = "; ".join(kp) if isinstance(kp, list) else str(kp)
+            body = sec.get("content", "")
+            part_lines = []
+            if title:
+                part_lines.append(f"Section {sec_number}: {title}")
+            if kp_str:
+                part_lines.append(f"Key Points: {kp_str}")
+            part_text = "\n".join(part_lines)
+            remaining = max(per_section_budget - len(part_text), 0)
+            if body and remaining > 80:
+                part_lines.append(f"Content: {body[:remaining]}")
+            if part_lines:
+                lesson_content_parts.append("\n".join(part_lines))
 
+        if lesson_content_parts and len(lesson_sections) > 1:
+            lesson_content_parts.insert(
+                0,
+                f"Write the questions so they are spread across all {len(lesson_sections)} "
+                "sections below; do not ask only about the first sections.",
+            )
         if rag_context:
-            lesson_content_parts.append(f"Course Material & Learning Unit Context:\n{rag_context[:1500]}")
+            lesson_content_parts.append(f"Course Material & Learning Unit Context:\n{rag_context[:800]}")
 
         lesson_content = "\n\n".join(lesson_content_parts) if lesson_content_parts else session.topic
 
         max_attempts = 2
         last_error: Optional[Exception] = None
         questions: List[Dict[str, Any]] = []
+        # Invalid questions are dropped one by one, so a batch can shrink a lot. A check built
+        # from one or two questions says very little, so retry once before settling for it.
+        min_questions = min(3, question_count)
 
         for attempt in range(1, max_attempts + 1):
             try:
@@ -1224,10 +1599,20 @@ class GuidedSessionMixin(PlannerBase):
                     question_count=question_count,
                 )
                 if questions_output:
-                    questions = [q.model_dump() for q in questions_output]
-                    for q in questions:
+                    candidate = [q.model_dump() for q in questions_output]
+                    for q in candidate:
                         q["generated_by"] = "ai"
-                    break
+                    if len(candidate) > len(questions):
+                        questions = candidate
+                    if len(questions) >= min_questions:
+                        break
+                    logger.warning(
+                        "Knowledge check came back with too few valid questions",
+                        attempt=attempt,
+                        valid=len(questions),
+                        wanted=question_count,
+                        session_id=str(session_id),
+                    )
                 else:
                     logger.warning(
                         "Empty questions list generated by AI agent",

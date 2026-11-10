@@ -69,6 +69,83 @@ class BaseAgent:
         """Load the configured prompt template for this agent."""
         return get_prompt(self.prompt_name, self.prompt_version)
 
+    def _load_json_payload(self, content: str) -> object:
+        """Extract the JSON object or array from raw AI text, repairing it if it was cut off.
+
+        Raises ``json.JSONDecodeError`` when nothing parseable is found. Callers that want to keep
+        the valid part of a partly broken answer (e.g. a list whose last item was cut off) use this
+        directly and validate item by item; ``_parse_json_output`` is the strict version.
+        """
+        try:
+            content_str = content.strip()
+
+            # Ways the JSON can be wrapped, best guess first. The order matters: the old code
+            # took the first ``` fence found *anywhere*, but a JSON string value can itself hold
+            # a fenced code block (a lesson's code example does), and that would be mistaken for
+            # the response's own fence, leaving only a code snippet to parse.
+            candidates: list[str] = []
+
+            # a) The whole response is wrapped in a fence: strip just the outer fence.
+            if content_str.startswith("```"):
+                inner = re.sub(r"^```[A-Za-z0-9_-]*\s*", "", content_str)
+                inner = re.sub(r"\s*```\s*$", "", inner)
+                candidates.append(inner.strip())
+
+            # b) Everything between the outermost JSON brackets (also skips prose around it).
+            first_curly = content_str.find("{")
+            first_square = content_str.find("[")
+            start = -1
+            if first_curly != -1 and first_square != -1:
+                start = min(first_curly, first_square)
+            elif first_curly != -1:
+                start = first_curly
+            elif first_square != -1:
+                start = first_square
+            end = max(content_str.rfind("}"), content_str.rfind("]"))
+            if start != -1 and end != -1 and start < end:
+                candidates.append(content_str[start : end + 1].strip())
+            else:
+                candidates.append(content_str)
+
+            # c) The first fenced block (prose, then a ```json fence): the original behaviour.
+            fenced = re.search(r"```(?:json)?\s*(.*?)\s*```", content_str, re.DOTALL)
+            if fenced:
+                candidates.append(fenced.group(1).strip())
+
+            def _usable(parsed: object) -> bool:
+                # A repair attempt can "succeed" on junk (e.g. an empty string); only objects
+                # and arrays are real answers.
+                return isinstance(parsed, (dict, list))
+
+            data: object = None
+            for candidate in candidates:
+                try:
+                    parsed = json.loads(candidate, strict=False)
+                except json.JSONDecodeError:
+                    continue
+                if _usable(parsed):
+                    data = parsed
+                    break
+
+            if data is None:
+                # Truncated / malformed LLM output (cut off mid-string, an unescaped quote, ...):
+                # attempt robust recovery on each candidate in turn.
+                for candidate in candidates:
+                    try:
+                        parsed = json.loads(_repair_truncated_json(candidate), strict=False)
+                    except json.JSONDecodeError:
+                        continue
+                    if _usable(parsed):
+                        data = parsed
+                        break
+
+            if data is None:
+                raise json.JSONDecodeError("No parseable JSON in the AI response", content_str, 0)
+            return data
+        except json.JSONDecodeError:
+            # Nothing parseable at all: the caller decides how to report it.
+            raise
+
     def _parse_json_output(
         self,
         content: str,
@@ -84,41 +161,7 @@ class BaseAgent:
             extract_list: If True, expects a JSON array and returns a list of models.
         """
         try:
-            # Clean JSON from markdown blocks if present
-            content_str = content.strip()
-
-            # 1. Try extracting content inside markdown blocks
-            match = re.search(r"```(?:json)?\s*(.*?)\s*```", content_str, re.DOTALL)
-            if match:
-                clean_content = match.group(1).strip()
-            else:
-                # 2. Try extracting content between the outermost JSON brackets
-                first_curly = content_str.find("{")
-                first_square = content_str.find("[")
-
-                start = -1
-                if first_curly != -1 and first_square != -1:
-                    start = min(first_curly, first_square)
-                elif first_curly != -1:
-                    start = first_curly
-                elif first_square != -1:
-                    start = first_square
-
-                last_curly = content_str.rfind("}")
-                last_square = content_str.rfind("]")
-                end = max(last_curly, last_square)
-
-                if start != -1 and end != -1 and start < end:
-                    clean_content = content_str[start:end+1].strip()
-                else:
-                    clean_content = content_str
-
-            try:
-                data = json.loads(clean_content, strict=False)
-            except json.JSONDecodeError:
-                # Attempt robust recovery for truncated / malformed LLM output
-                repaired = _repair_truncated_json(clean_content)
-                data = json.loads(repaired, strict=False)
+            data = self._load_json_payload(content)
 
             if extract_list:
                 if not isinstance(data, list):

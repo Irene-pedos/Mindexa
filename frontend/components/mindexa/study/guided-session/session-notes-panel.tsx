@@ -20,14 +20,18 @@ interface SessionNotesPanelProps {
   sessionId: string;
   initialNotes?: string | null;
   currentSectionTitle?: string;
+  /** Controlled by the page so only one study tool is open at a time. */
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
 }
 
 export function SessionNotesPanel({
   sessionId,
   initialNotes = "",
   currentSectionTitle,
+  open,
+  onOpenChange,
 }: SessionNotesPanelProps) {
-  const [isOpen, setIsOpen] = useState(false);
   const [notes, setNotes] = useState(initialNotes || "");
   const [saving, setSaving] = useState(false);
   const [lastSavedNotes, setLastSavedNotes] = useState(initialNotes || "");
@@ -110,27 +114,18 @@ export function SessionNotesPanel({
   const isDirty = notes !== lastSavedNotes;
   const wordCount = notes.trim() ? notes.trim().split(/\s+/).length : 0;
 
+  // The notes stay mounted while closed, so autosave and the unmount flush keep working.
   return (
     <>
-      {/* Icon-Only Floating Trigger Button */}
-      {!isOpen && (
-        <Button
-          onClick={() => setIsOpen(true)}
-          size="icon"
-          aria-label="My Session Notes"
-          className="fixed bottom-4 left-4 sm:bottom-6 sm:left-6 z-40 rounded-full size-11 bg-card border border-border/60 shadow-xs text-primary hover:bg-muted transition-all cursor-pointer"
-          title="My Session Notes"
+      {open && (
+        <div
+          role="dialog"
+          aria-label="My session notes"
+          className="fixed bottom-[4.5rem] right-4 sm:bottom-[5.5rem] sm:right-6 z-50 w-[calc(100vw-2rem)] max-w-sm md:w-80 max-h-[calc(100dvh-7rem)] overflow-y-auto transition-all"
         >
-          <FileText className="size-5 text-primary" />
-        </Button>
-      )}
-
-      {/* Floating Notes Card Panel */}
-      {isOpen && (
-        <div className="fixed bottom-4 left-4 sm:bottom-6 sm:left-6 z-40 w-[calc(100vw-2rem)] max-w-sm md:w-80 transition-all">
           <Card className="border border-border/60 bg-card rounded-xl overflow-hidden shadow-lg">
             <CardHeader
-              onClick={() => setIsOpen(false)}
+              onClick={() => onOpenChange(false)}
               className="p-3 px-3.5 border-b border-border/60 bg-muted/20 cursor-pointer flex flex-row items-center justify-between hover:bg-muted/40 transition-colors space-y-0"
             >
               <div className="flex items-center gap-2">
@@ -156,7 +151,7 @@ export function SessionNotesPanel({
                 aria-label="Close session notes panel"
                 onClick={(e) => {
                   e.stopPropagation();
-                  setIsOpen(false);
+                  onOpenChange(false);
                 }}
                 className="size-6 text-muted-foreground hover:bg-muted rounded-md cursor-pointer"
               >

@@ -15,11 +15,14 @@ import {
   AlertCircle,
   Loader2,
   Compass,
+  CheckCheck,
+  ArrowRight,
 } from "lucide-react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { ModeToggle } from "@/components/ui/mode-toggle";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import {
   Avatar,
   AvatarBadge,
@@ -53,6 +56,7 @@ import { formatDistanceToNow } from "date-fns";
 
 export function SiteHeader() {
   const pathname = usePathname();
+  const router = useRouter();
   const { logout, user } = useAuth();
   const [notifications, setNotifications] = useState<NotificationResponse[]>(
     [],
@@ -107,30 +111,40 @@ export function SiteHeader() {
     switch (type) {
       // Student
       case "RESULT_RELEASED":
-        return <Award className="size-4 text-emerald-600" />;
+      case "GROUP_RESULT_RELEASED":
+        return <Award className="size-3.5 text-emerald-600 dark:text-emerald-400" />;
       case "DEADLINE_EXTENDED":
-        return <Calendar className="size-4 text-amber-600" />;
+        return <Calendar className="size-3.5 text-amber-600 dark:text-amber-400" />;
       case "ASSESSMENT_PUBLISHED":
-        return <Bell className="size-4 text-blue-600" />;
+      case "ASSESSMENT_AVAILABLE":
+      case "GROUP_WORK_ASSIGNED":
+        return <Bell className="size-3.5 text-blue-600 dark:text-blue-400" />;
+      case "APPEAL_DECISION":
+      case "APPEAL_RESOLVED":
+        return <AlertTriangle className="size-3.5 text-violet-600 dark:text-violet-400" />;
 
       // Lecturer
       case "NEW_SUBMISSION":
-        return <FileText className="size-4 text-blue-600" />;
+      case "SUBMISSION_RECEIVED":
+        return <FileText className="size-3.5 text-blue-600 dark:text-blue-400" />;
       case "GRADING_REMINDER":
-        return <Calendar className="size-4 text-amber-600" />;
+      case "GRADING_REQUIRED":
+        return <Calendar className="size-3.5 text-amber-600 dark:text-amber-400" />;
       case "APPEAL_SUBMITTED":
-        return <AlertTriangle className="size-4 text-red-600" />;
+      case "GROUP_APPEAL_REQUEST":
+        return <AlertTriangle className="size-3.5 text-rose-600 dark:text-rose-400" />;
 
       // Admin
       case "SYSTEM_ALERT":
-        return <Server className="size-4 text-red-600" />;
+        return <Server className="size-3.5 text-rose-600 dark:text-rose-400" />;
       case "SECURITY_EVENT":
-        return <Shield className="size-4 text-amber-600" />;
+      case "POLICY_VIOLATION":
+        return <Shield className="size-3.5 text-amber-600 dark:text-amber-400" />;
       case "NEW_USER_REQUEST":
-        return <UserPlus className="size-4 text-blue-600" />;
+        return <UserPlus className="size-3.5 text-blue-600 dark:text-blue-400" />;
 
       default:
-        return <Bell className="size-4 text-muted-foreground" />;
+        return <Bell className="size-3.5 text-muted-foreground" />;
     }
   };
 
@@ -143,6 +157,25 @@ export function SiteHeader() {
       setUnreadCount((prev) => Math.max(0, prev - 1));
     } catch (err) {
       console.error("Failed to mark notification as read", err);
+    }
+  };
+
+  const handleMarkAllRead = async () => {
+    try {
+      await notificationApi.markAllAsRead();
+      setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
+      setUnreadCount(0);
+    } catch (err) {
+      console.error("Failed to mark all as read", err);
+    }
+  };
+
+  const handleItemClick = async (n: NotificationResponse) => {
+    if (!n.is_read) {
+      void handleMarkRead(n.id);
+    }
+    if (n.action_url) {
+      router.push(n.action_url);
     }
   };
 
@@ -266,63 +299,125 @@ export function SiteHeader() {
               )}
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-80">
-            <DropdownMenuLabel className="flex items-center justify-between">
-              <span>Notifications</span>
-              {loading && (
-                <Loader2 className="size-3 animate-spin text-muted-foreground" />
-              )}
-            </DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            <ScrollArea className="h-72">
+          <DropdownMenuContent
+            align="end"
+            sideOffset={8}
+            collisionPadding={12}
+            className="w-[calc(100vw-2rem)] xs:w-[320px] sm:w-[340px] max-w-[calc(100vw-2rem)] sm:max-w-[350px] p-0 rounded-xl shadow-lg border border-border/60 bg-popover text-popover-foreground overflow-hidden"
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between px-3 py-2 border-b border-border/50 bg-muted/20">
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs font-semibold text-foreground">Notifications</span>
+                {unreadCount > 0 && (
+                  <Badge variant="secondary" className="h-4 px-1.5 text-[9px] font-bold bg-primary/10 text-primary border-primary/20">
+                    {unreadCount} new
+                  </Badge>
+                )}
+              </div>
+              <div className="flex items-center gap-1">
+                {unreadCount > 0 && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      handleMarkAllRead();
+                    }}
+                    className="h-6 px-1.5 text-[10px] text-muted-foreground hover:text-foreground font-medium rounded-md gap-1"
+                  >
+                    <CheckCheck className="size-3 text-primary" />
+                    <span>Mark all read</span>
+                  </Button>
+                )}
+                {loading && (
+                  <Loader2 className="size-3 animate-spin text-muted-foreground" />
+                )}
+              </div>
+            </div>
+
+            {/* List */}
+            <ScrollArea className="max-h-[min(340px,55vh)] overflow-y-auto">
               {notifications.length === 0 ? (
-                <div className="py-10 text-center text-sm text-muted-foreground">
-                  No notifications
+                <div className="py-10 px-3 text-center">
+                  <div className="size-8 rounded-full bg-muted/60 mx-auto mb-2 flex items-center justify-center text-muted-foreground/60 border border-border/40">
+                    <Bell className="size-4" />
+                  </div>
+                  <p className="text-xs font-semibold text-foreground">No notifications</p>
+                  <p className="text-[10px] text-muted-foreground mt-0.5 max-w-[200px] mx-auto">
+                    You&apos;re all caught up! New notices and alerts will appear here.
+                  </p>
                 </div>
               ) : (
-                notifications.map((n) => (
-                  <DropdownMenuItem
-                    key={n.id}
-                    className="flex gap-3 py-3 cursor-pointer"
-                    onClick={() => !n.is_read && handleMarkRead(n.id)}
-                  >
-                    <div className="mt-0.5 shrink-0">
-                      {getIcon(n.notification_type)}
-                    </div>
-                    <div className="flex flex-col gap-0.5 overflow-hidden">
-                      <div
-                        className={`text-sm truncate ${n.is_read ? "text-muted-foreground" : "font-medium"}`}
-                      >
-                        {n.title}
+                <div className="divide-y divide-border/40">
+                  {notifications.map((n) => (
+                    <DropdownMenuItem
+                      key={n.id}
+                      className={cn(
+                        "flex items-start gap-2.5 p-2.5 sm:p-3 cursor-pointer focus:bg-muted/50 rounded-none transition-colors w-full text-left min-w-0 outline-hidden",
+                        !n.is_read
+                          ? "bg-primary/[0.03] dark:bg-primary/[0.06] hover:bg-primary/[0.06]"
+                          : "hover:bg-muted/30"
+                      )}
+                      onClick={() => handleItemClick(n)}
+                    >
+                      <div className="mt-0.5 shrink-0 size-7 rounded-md flex items-center justify-center bg-muted/50 border border-border/50">
+                        {getIcon(n.notification_type)}
                       </div>
-                      <div className="text-xs text-muted-foreground line-clamp-2">
-                        {n.body}
+                      <div className="flex-1 min-w-0 space-y-0.5">
+                        <div className="flex items-start justify-between gap-1.5 min-w-0">
+                          <h4 className={cn(
+                            "text-xs leading-snug break-words [overflow-wrap:anywhere] min-w-0 flex-1",
+                            n.is_read ? "font-medium text-foreground/80" : "font-semibold text-foreground"
+                          )}>
+                            {n.title}
+                          </h4>
+                          {!n.is_read && (
+                            <span
+                              className="size-1.5 rounded-full bg-primary shrink-0 mt-1 ring-2 ring-primary/20"
+                              title="Unread"
+                            />
+                          )}
+                        </div>
+                        <p className="text-[11px] text-muted-foreground leading-relaxed break-words [overflow-wrap:anywhere] whitespace-normal">
+                          {n.body}
+                        </p>
+                        <div className="flex items-center gap-1.5 pt-0.5 text-[9px] text-muted-foreground/75 font-medium">
+                          <span>
+                            {formatDistanceToNow(new Date(n.created_at), {
+                              addSuffix: true,
+                            })}
+                          </span>
+                          {n.action_url && (
+                            <>
+                              <span>•</span>
+                              <span className="text-primary font-medium flex items-center gap-0.5 hover:underline">
+                                Details &rarr;
+                              </span>
+                            </>
+                          )}
+                        </div>
                       </div>
-                      <div className="text-[10px] text-muted-foreground mt-1">
-                        {formatDistanceToNow(new Date(n.created_at), {
-                          addSuffix: true,
-                        })}
-                      </div>
-                    </div>
-                    {!n.is_read && (
-                      <div className="ml-auto size-2 rounded-full bg-primary shrink-0" />
-                    )}
-                  </DropdownMenuItem>
-                ))
+                    </DropdownMenuItem>
+                  ))}
+                </div>
               )}
             </ScrollArea>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              asChild
-              className="w-full justify-center py-2 cursor-pointer"
-            >
-              <Link
-                href={`/${role.toLowerCase()}/notifications`}
-                className="text-primary text-xs font-medium"
+
+            {/* Footer */}
+            <div className="border-t border-border/50 p-1.5 bg-muted/10">
+              <Button
+                variant="ghost"
+                size="sm"
+                asChild
+                className="w-full justify-center h-7 text-[11px] text-primary font-medium hover:text-primary hover:bg-primary/5 rounded-md gap-1"
               >
-                View all notifications
-              </Link>
-            </DropdownMenuItem>
+                <Link href={`/${role.toLowerCase()}/notifications`}>
+                  <span>View all notifications</span>
+                  <ArrowRight className="size-3" />
+                </Link>
+              </Button>
+            </div>
           </DropdownMenuContent>
         </DropdownMenu>
 

@@ -149,7 +149,7 @@ function MarkdownTableRenderer({ content }: { content: string }) {
 }
 
 /** Code block component with syntax header & copy button */
-function CodeBlock({ language, code }: { language: string; code: string }) {
+export function CodeBlock({ language, code }: { language: string; code: string }) {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = () => {

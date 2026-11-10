@@ -1,4 +1,4 @@
-import pytest
+﻿import pytest
 import uuid
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -125,7 +125,8 @@ async def test_analytics_service_compute_aggregates_compilation():
     mock_res_released.scalar.return_value = 30
     
     mock_res_q = MagicMock()
-    mock_res_q.fetchall.return_value = [(uuid.uuid4(), "Question Content here", "ESSAY", 3.0, 10.0)]
+    # (id, content, type, average score, max score, number of finalized scores behind the average)
+    mock_res_q.fetchall.return_value = [(uuid.uuid4(), "Question Content here", "ESSAY", 3.0, 10.0, 12)]
 
     mock_res_total_oe = MagicMock()
     mock_res_total_oe.scalar_one.return_value = 100
@@ -165,7 +166,7 @@ async def test_analytics_service_compute_aggregates_compilation():
 
 
 
-# ── AI narrative cache ───────────────────────────────────────────────────────
+# â”€â”€ AI narrative cache â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 def _service_for_insights(monkeypatch, stats):
@@ -254,3 +255,55 @@ async def test_each_class_section_has_its_own_narrative_and_regenerate_bypasses_
             assessment_id, lecturer_id, class_section_id=section_a, regenerate=True
         )
         assert analyze.call_count == 3
+
+
+# â”€â”€ Pending count and "no data" difficulty â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+def _aggregate_service(question_rows, attempt_row=(1, 1, 0)):
+    db = AsyncMock()
+    cohort = MagicMock(); cohort.fetchone.return_value = (0, None, None, None, 0)
+    grades = MagicMock(); grades.fetchall.return_value = []
+    attempts = MagicMock(); attempts.fetchone.return_value = attempt_row
+    released = MagicMock(); released.scalar.return_value = 0
+    questions = MagicMock(); questions.fetchall.return_value = question_rows
+    total_oe = MagicMock(); total_oe.scalar_one.return_value = 1
+    ai_graded = MagicMock(); ai_graded.scalar_one.return_value = 1
+    db.execute.side_effect = [cohort, grades, attempts, released, questions, total_oe, ai_graded]
+    return AnalyticsService(db), db
+
+
+@pytest.mark.asyncio
+async def test_pending_count_treats_every_unfinished_status_as_pending():
+    from sqlalchemy.dialects import postgresql
+
+    service, db = _aggregate_service([])
+    await service._compute_aggregates(uuid.uuid4())
+
+    attempt_query = db.execute.call_args_list[2].args[0]
+    sql = str(attempt_query.compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}))
+    # pending = handed in AND no final result row yet (not a status column that can be empty)
+    for status in ("SUBMITTED", "AUTO_SUBMITTED", "TIMED_OUT"):
+        assert f"'{status}'" in sql, status
+    assert "NOT (EXISTS (SELECT assessment_result.id" in sql
+    assert "'PENDING_GRADING'" not in sql  # the unreliable column is no longer consulted
+
+
+@pytest.mark.asyncio
+async def test_a_question_with_no_finalized_scores_is_not_called_hard():
+    rows = [
+        (uuid.uuid4(), "Nothing scored yet", "CASE_STUDY", 0.0, 50.0, 0),
+        (uuid.uuid4(), "Scored and low", "MCQ", 2.0, 10.0, 8),
+        (uuid.uuid4(), "Scored and high", "MCQ", 9.0, 10.0, 8),
+    ]
+    service, _ = _aggregate_service(rows)
+    stats = await service._compute_aggregates(uuid.uuid4())
+
+    by_title = {q["question_title"]: q["difficulty"] for q in stats["question_difficulty"]}
+    assert by_title == {
+        "Nothing scored yet": "No data yet",
+        "Scored and low": "Hard",
+        "Scored and high": "Easy",
+    }
+    # only genuinely hard questions feed the AI narrative's "hard questions" list
+    assert stats["hard_questions"] == ["Scored and low..."]
+

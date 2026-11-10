@@ -17,24 +17,33 @@ CORE PHILOSOPHY — READ THIS BEFORE GENERATING ANYTHING
 You are generating a lesson for {{topic}}. NOT every topic is a programming topic.
 NOT every topic is a process. NOT every topic needs a diagram. NOT every topic needs code.
 
-The default structure for any section is:
+The response has a hard size limit. If it is cut off, the student gets NO lesson at all, so a
+complete, compact lesson is far better than a long one that is cut off. Be economical:
+  • "content": about 120–200 words of clear prose per section (not more).
+  • Return COMPACT JSON: no indentation, no blank lines, no commentary, no markdown fences.
+  • Leave out every optional field that a section does not truly need.
+
+The default structure for any section is ONLY:
+  • section_title
   • content (prose explanation)
-  • key_points (3–5 bullet takeaways)
-  • micro_check (one recall question)
+  • key_points (3 short bullet takeaways)
+  • micro_check (one recall question with answer and hint)
   • self_explanation_prompt (one Feynman prompt)
 
-Everything else — examples/code, tables, diagrams, faded_example — is OPTIONAL and must
-only appear when it genuinely improves comprehension of THAT specific sub-topic.
-Do NOT apply the same structure to every section. Homogeneous structure is a failure mode.
+Everything else — examples/code, tables, diagram_prompt, faded_example — is OPTIONAL and must
+only appear when it genuinely improves comprehension of THAT specific sub-topic. Most sections
+should have none of them. Do NOT apply the same structure to every section. Homogeneous
+structure is a failure mode.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-TECHNIQUE SELECTION RULES (apply per section)
+OPTIONAL TECHNIQUES (apply per section, only when needed)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 1. PROSE FIRST (always required)
-   Every section MUST have well-written, detailed prose in "content".
-   Match depth to the time budget: {{duration_minutes}} minutes ÷ {{target_sections}} sections.
-   If {{learning_profile}} lists topics the student knows well, draw brief analogies to those.
+   Every section MUST have well-written prose in "content".
+   If {{learning_profile}} lists topics the student knows well, draw one brief analogy to those
+   (once per lesson, not per section) using phrasing like "This works similarly to X, which you
+   already understand."
 
 2. CODE EXAMPLES ("examples" field) — CONDITIONAL
    Include ONLY if the sub-topic is:
@@ -42,15 +51,12 @@ TECHNIQUE SELECTION RULES (apply per section)
      b) A mathematical derivation or statistical formula that benefits from pseudocode.
    For humanities, business, law, social science, biology (conceptual), history, marketing,
    economics, or any non-computational subject: OMIT examples entirely.
-   When included: one concise, accurate, annotated example. No JavaScript boilerplate.
-   Set technique_justification to explain why code is needed here.
+   When included: ONE concise, accurate, annotated example, in the language the course uses.
 
 3. COMPARISON TABLES ("tables" field) — CONDITIONAL
-   Include ONLY when the sub-topic involves comparing ≥2 clearly distinct items, approaches,
-   theories, or attributes where a table genuinely clarifies differences.
-   Do NOT include a table just to add structure. Prose handles most comparisons fine.
-   Maximum one table per section. Most sections should have NO table.
-   Set technique_justification to name the things being compared.
+   Include ONLY when the sub-topic compares ≥2 clearly distinct items, approaches, theories, or
+   attributes where a table genuinely clarifies differences. Maximum one table per section.
+   Most sections should have NO table.
 
 4. MERMAID DIAGRAMS ("diagram_prompt" field) — CONDITIONAL, MAX ONE PER LESSON
    Include a diagram ONLY if the sub-topic describes:
@@ -58,7 +64,7 @@ TECHNIQUE SELECTION RULES (apply per section)
      - A hierarchy or organisational structure
      - A system with named components and explicit relationships
      - A state machine or sequence of interactions
-   For conceptual explanations, definitions, or analytical sections: OMIT.
+   For conceptual explanations, definitions, or analytical sections: OMIT (use null).
    Use valid Mermaid syntax: flowchart TD, flowchart LR, sequenceDiagram, classDiagram, stateDiagram.
    STRICT MERMAID SYNTAX RULES:
      - ALWAYS enclose all node text in double quotes: A["Step 1: Input Data"] --> B["Step 2: Validation (Rule Check)"]
@@ -66,85 +72,55 @@ TECHNIQUE SELECTION RULES (apply per section)
      - NEVER wrap diagram_prompt in markdown code fences (```). Return raw mermaid syntax only.
    HARD LIMIT: at most ONE diagram across the entire lesson. If a diagram fits section 1,
    all subsequent sections must have diagram_prompt: null.
-   Set technique_justification to name the process/hierarchy being visualised.
 
 5. FADED EXAMPLE ("faded_example" field) — CONDITIONAL
    Include ONLY in sections that already include a code example or worked mathematical derivation.
    Do NOT include a faded_example without a companion example.
-
-6. ANALOGY PERSONALISATION
-   If {{learning_profile}} lists high-confidence topics, draw one explicit analogy per lesson
-   (not per section) using phrasing like "This works similarly to X, which you already understand."
-
-7. VIDEO SEARCH ("suggested_video_search" field) — ALWAYS INCLUDE
-   Every section must include a concise YouTube search query that a student would actually use.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-EXPLAINABILITY — technique_justification
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Every section must include a "technique_justification" string explaining which optional
-techniques you chose and WHY, or confirming why you chose prose-only.
-Examples of good justifications:
-  - "Prose-only: this section defines a theoretical concept with no process or code dimension."
-  - "Added diagram: this section describes a 4-step compilation pipeline (scan→parse→analyse→codegen)."
-  - "Added table: comparing REST vs GraphQL vs gRPC on 4 attributes (latency, schema, caching, tooling)."
-  - "Added code example: this section introduces recursion, which requires a concrete implementation trace."
-  - "Prose-only: marketing segmentation theory — no code, no process diagram, no multi-item comparison needed."
+   A faded example is a NEW problem of the same kind, solved step by step with the LAST step
+   left for the student. Use this exact shape (all four text fields are required, otherwise
+   use null):
+     "faded_example": {
+       "problem": "A new problem like the worked example, stated fully.",
+       "solution_steps": ["Step 1, worked out", "Step 2, worked out"],
+       "completion_prompt": "The final step the student must now complete, as a question.",
+       "answer": "The correct completion of that final step.",
+       "hint": "Optional nudge that does not give the answer away."
+     }
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 OUTPUT FORMAT
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Return ONLY a single valid JSON object. No markdown. No explanation outside the JSON.
+Return ONLY a single valid JSON object (compact, no markdown, no explanation outside the JSON).
+Omit optional section fields entirely instead of writing empty values.
 
 {
   "title": "{{session_title}}",
   "topic": "{{topic}}",
   "estimated_duration_minutes": {{duration_minutes}},
-  "objectives": [
-    "Understand the core principles of {{topic}}",
-    "Analyse key concepts across {{target_sections}} structured sections",
-    "Evaluate comprehension through self-check questions"
-  ],
-  "introduction": "Brief, welcoming introduction to the session (2–3 sentences).",
+  "objectives": ["3 specific things the student will be able to do after this lesson, based on the sections"],
+  "introduction": "2–3 sentences shown to the student before the lesson: what they will be able to do after this session and why it matters for the course. Do not just restate the title.",
   "sections": [
     {
       "section_title": "1. [Descriptive title for this specific sub-topic]",
-      "content": "Detailed prose explanation. Use markdown headings (####), bold (**term**), and bullet lists where they aid readability. Do NOT embed raw code blocks here — use the examples field instead.",
-      "key_points": [
-        "Precise takeaway 1 — specific to this sub-topic, not generic.",
-        "Precise takeaway 2",
-        "Precise takeaway 3"
-      ],
-      "technique_justification": "Explain your technique choices for this section.",
-      "diagram_prompt": null,
-      "estimated_minutes": 10,
-      "examples": [
-        {
-          "title": "Worked Code Example or Calculation",
-          "code": "/* Worked code snippet or formula */\n@media screen and (max-width: 768px) {\n  .container { width: 100%; }\n}",
-          "explanation": "Brief explanation of how this worked code or formula example functions."
-        }
-      ],
-      "faded_example": null,
-      "tables": [],
-      "charts": [],
-      "activities": ["One concrete active-learning task relevant to this section."],
+      "content": "About 120–200 words of prose. Use markdown (####, **term**, bullet lists) where it aids readability. Do NOT embed raw code blocks here; use the examples field instead.",
+      "key_points": ["Precise takeaway specific to this sub-topic.", "Second takeaway", "Third takeaway"],
+      "estimated_minutes": 5,
       "micro_check": {
         "question": "A specific recall question about this section's content.",
         "answer": "The precise correct answer.",
         "hint": "A useful hint that doesn't give away the answer."
       },
       "self_explanation_prompt": "In your own words, explain why [key concept from this section] works the way it does.",
-      "suggested_video_search": "specific YouTube search query for {{topic}} sub-topic"
+      "examples": [{"title": "Optional worked example", "code": "Optional: a worked snippet, formula, or calculation from THIS section's subject. Put code in a fenced block that names the language (```python, ```sql, ...).", "explanation": "How it works."}],
+      "tables": [],
+      "diagram_prompt": null,
+      "faded_example": null
     }
   ],
   "lecturer_references": ["Reference from RAG context if available"],
-  "citations": [],
-  "summary": "2–3 sentence synthesis of what was covered across all sections.",
-  "glossary": [
-    {"term": "Key term", "definition": "Precise academic definition relevant to {{topic}}."}
-  ],
-  "references": ["Official course materials or documentation"]
+  "glossary": [{"term": "A term that appears in the lesson sections", "definition": "One-sentence definition, consistent with how the lesson uses the term."}],
+  "summary": "2–3 sentence synthesis of what was covered across all sections."
 }
+
+The glossary is shown to the student, so include 4 to 6 terms that actually appear in the lesson sections above (no more), each defined in one sentence. Leave it empty rather than inventing terms.

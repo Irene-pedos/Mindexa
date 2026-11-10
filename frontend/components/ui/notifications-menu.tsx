@@ -227,7 +227,7 @@ export function NotificationItem({ notification, onMarkRead }: NotificationItemP
         </div>
 
         {displayContent && (
-          <div className="rounded-lg bg-muted/50 p-2 sm:p-2.5 text-xs text-foreground/90 leading-relaxed border border-border/30">
+          <div className="rounded-lg bg-muted/50 p-2 sm:p-2.5 text-xs text-foreground/90 leading-relaxed border border-border/30 break-words [overflow-wrap:anywhere]">
             {displayContent}
           </div>
         )}

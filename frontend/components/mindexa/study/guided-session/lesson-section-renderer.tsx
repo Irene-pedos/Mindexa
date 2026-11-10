@@ -10,16 +10,20 @@ import {
   Code2,
   Table as TableIcon,
   HelpCircle,
-  AlertOctagon,
   FileText,
   Loader2,
   AlertCircle,
+  Eye,
 } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { RichMessageRenderer } from "@/components/mindexa/common/rich-message-renderer";
+import {
+  CodeBlock,
+  RichMessageRenderer,
+} from "@/components/mindexa/common/rich-message-renderer";
 import { LessonSection, studyPlannerApi } from "@/lib/api/study-planner";
+import { guessCodeLanguage, hasCodeFence } from "@/lib/study-code-language";
 
 interface LessonSectionRendererProps {
   sessionId: string;
@@ -45,6 +49,8 @@ export function LessonSectionRenderer({
   onStartPractice,
 }: LessonSectionRendererProps) {
   const isLastSection = sectionIndex >= totalSections - 1;
+  // Faded-example attempts survive moving between sections while this lesson is open.
+  const [fadedAnswers, setFadedAnswers] = useState<Record<number, FadedExampleState>>({});
 
   return (
     <Card className="border-border/70 bg-card shadow-md rounded-2xl overflow-hidden">
@@ -84,6 +90,7 @@ export function LessonSectionRenderer({
             <div className="grid gap-4">
               {section.examples.map((rawEx, idx) => {
                 const ex = typeof rawEx === "string" ? { code: rawEx, title: "Example" } : rawEx;
+                const exampleCode = (ex?.code ?? "").trim();
                 return (
                   <div key={idx} className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4 md:p-5 space-y-3">
                     {ex?.title && (
@@ -92,11 +99,16 @@ export function LessonSectionRenderer({
                         {ex.title}
                       </div>
                     )}
-                    {ex?.code && (
-                      <div className="bg-background/90 rounded-lg p-3 border border-emerald-500/15 font-mono text-xs overflow-x-auto text-foreground/90 leading-relaxed">
-                        <RichMessageRenderer content={ex.code.startsWith("```") ? ex.code : `\`\`\`javascript\n${ex.code}\n\`\`\``} />
-                      </div>
-                    )}
+                    {exampleCode &&
+                      (hasCodeFence(exampleCode) ? (
+                        // The model already fenced it (and named the language): render as markdown.
+                        <div className="text-xs overflow-x-auto">
+                          <RichMessageRenderer content={exampleCode} />
+                        </div>
+                      ) : (
+                        // Unfenced: label it by what it looks like instead of always "javascript".
+                        <CodeBlock language={guessCodeLanguage(exampleCode)} code={exampleCode} />
+                      ))}
                     {ex?.explanation && (
                       <p className="text-xs text-muted-foreground font-medium leading-relaxed">
                         <strong className="text-foreground">Walkthrough:</strong> {ex.explanation}
@@ -110,27 +122,15 @@ export function LessonSectionRenderer({
         )}
 
         {/* 3b. Faded Example / Progressive Fading Block */}
-        {section.faded_example && (
-          <div className="rounded-xl border border-violet-500/25 bg-violet-500/5 p-5 space-y-3">
-            <h4 className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-violet-600 dark:text-violet-400">
-              <Sparkles className="size-4" /> Your Turn — Progressive Fading Practice
-            </h4>
-            <p className="text-xs text-foreground font-semibold">
-              {section.faded_example.problem}
-            </p>
-            {section.faded_example.solution_steps && section.faded_example.solution_steps.length > 0 && (
-              <div className="space-y-1.5 pl-2 border-l-2 border-violet-500/30">
-                {section.faded_example.solution_steps.map((step, sIdx) => (
-                  <p key={sIdx} className="text-xs text-muted-foreground font-medium">
-                    {step}
-                  </p>
-                ))}
-              </div>
-            )}
-            <div className="bg-background/80 rounded-lg p-3 border border-violet-500/20 text-xs font-mono text-foreground">
-              {section.faded_example.completion_prompt}
-            </div>
-          </div>
+        {section.faded_example?.problem && section.faded_example.completion_prompt && (
+          <FadedExampleCard
+            key={sectionIndex}
+            example={section.faded_example}
+            initial={fadedAnswers[sectionIndex]}
+            onChange={(state) =>
+              setFadedAnswers((prev) => ({ ...prev, [sectionIndex]: state }))
+            }
+          />
         )}
 
         {/* 4. Structured Tables Block */}
@@ -195,7 +195,7 @@ export function LessonSectionRenderer({
               <h4 className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-indigo-600 dark:text-indigo-400">
                 <GitBranch className="size-4" /> Visual Concept & Process Diagram
               </h4>
-              <div className="bg-background/80 rounded-lg p-4 border border-indigo-500/10 font-mono text-xs overflow-x-auto text-foreground/90 leading-relaxed">
+              <div className="bg-background/80 rounded-lg p-4 border border-indigo-500/10 text-xs overflow-x-auto text-foreground/90 leading-relaxed">
                 <RichMessageRenderer content={contentToRender} />
               </div>
             </div>
@@ -291,25 +291,15 @@ export function LessonSectionRenderer({
           </div>
         )}
 
-        {/* 8. Remember This! Critical Concept & Common Pitfalls Callout */}
-        <div className="rounded-xl border border-blue-500/20 bg-blue-500/5 p-5 space-y-2">
-          <h4 className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400">
-            <AlertOctagon className="size-4" /> Remember This for Assessments!
-          </h4>
-          <p className="text-xs text-foreground/90 font-medium leading-relaxed">
-            Ensure you can explain the core mechanism of <strong>{section.section_title}</strong> in your own words. Focus on how this section relates to exam questions and practical problem solving.
-          </p>
-        </div>
-
-        {/* 8. Navigation Bar */}
+        {/* Navigation Bar */}
         <div className="pt-6 border-t border-border/50 flex items-center justify-between gap-4">
           <Button
             variant="outline"
             onClick={onPrevSection}
-            disabled={sectionIndex === 0}
             className="text-xs font-semibold"
           >
-            Previous Section
+            {/* On the first section "previous" means the overview (objectives, key terms, sources). */}
+            {sectionIndex === 0 ? "Back to Overview" : "Previous Section"}
           </Button>
 
           <div className="flex items-center gap-3">
@@ -329,6 +319,109 @@ export function LessonSectionRenderer({
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+interface FadedExampleState {
+  text: string;
+  revealed: boolean;
+}
+
+function FadedExampleCard({
+  example,
+  initial,
+  onChange,
+}: {
+  example: NonNullable<LessonSection["faded_example"]>;
+  initial?: FadedExampleState;
+  onChange: (state: FadedExampleState) => void;
+}) {
+  const [text, setText] = useState(initial?.text ?? "");
+  const [revealed, setRevealed] = useState(initial?.revealed ?? false);
+  const [showHint, setShowHint] = useState(false);
+  const hasAnswer = Boolean(example.answer && example.answer.trim());
+  const steps = example.solution_steps ?? [];
+
+  const update = (next: FadedExampleState) => {
+    setText(next.text);
+    setRevealed(next.revealed);
+    onChange(next);
+  };
+
+  return (
+    <div className="rounded-xl border border-violet-500/25 bg-violet-500/5 p-5 space-y-3">
+      <h4 className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-violet-600 dark:text-violet-400">
+        <Sparkles className="size-4" /> Your Turn — Finish the Solution
+      </h4>
+      <p className="text-xs text-foreground font-semibold">{example.problem}</p>
+
+      {steps.length > 0 && (
+        <div className="space-y-1.5 pl-2 border-l-2 border-violet-500/30">
+          {steps.map((step, sIdx) => (
+            <p key={sIdx} className="text-xs text-muted-foreground font-medium">
+              {step}
+            </p>
+          ))}
+        </div>
+      )}
+
+      <div className="space-y-2">
+        <label
+          htmlFor="faded-example-answer"
+          className="text-xs font-semibold text-foreground block"
+        >
+          {example.completion_prompt}
+        </label>
+        <textarea
+          id="faded-example-answer"
+          value={text}
+          onChange={(e) => update({ text: e.target.value, revealed })}
+          maxLength={1000}
+          placeholder="Type the missing step here before checking..."
+          className="w-full min-h-[70px] p-3 text-xs rounded-lg border border-violet-500/30 bg-background text-foreground focus:outline-hidden focus:ring-1 focus:ring-violet-500 resize-y leading-relaxed font-mono"
+        />
+      </div>
+
+      {example.hint && (
+        <div>
+          <button
+            type="button"
+            onClick={() => setShowHint((shown) => !shown)}
+            className="text-[11px] font-semibold text-violet-600 dark:text-violet-400 underline hover:no-underline cursor-pointer"
+          >
+            {showHint ? "Hide hint" : "Need a hint?"}
+          </button>
+          {showHint && (
+            <p className="mt-1 pl-2 border-l-2 border-violet-500/30 text-xs italic text-muted-foreground">
+              {example.hint}
+            </p>
+          )}
+        </div>
+      )}
+
+      {hasAnswer &&
+        (revealed ? (
+          <div className="space-y-1 animate-in fade-in duration-200">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 block">
+              Compare with the worked answer
+            </span>
+            <p className="text-xs font-medium text-foreground bg-background/80 p-3 rounded-lg border border-emerald-500/20 whitespace-pre-wrap">
+              {example.answer}
+            </p>
+          </div>
+        ) : (
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={!text.trim()}
+            onClick={() => update({ text, revealed: true })}
+            title={text.trim() ? undefined : "Write your attempt first"}
+            className="text-xs font-semibold gap-1.5 border-violet-500/30 text-violet-700 dark:text-violet-300 hover:bg-violet-500/10 cursor-pointer"
+          >
+            <Eye className="size-3.5" /> Check my answer
+          </Button>
+        ))}
+    </div>
   );
 }
 

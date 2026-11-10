@@ -18,17 +18,54 @@ router = APIRouter(prefix="/notifications", tags=["Notifications"])
 )
 async def list_my_notifications(
     unread_only: bool = Query(default=False),
+    category: str | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     current_user = Depends(require_active_user),
     db: AsyncSession = Depends(get_db),
 ) -> NotificationListResponse:
+    notification_types: list[str] | None = None
+    if category:
+        cat = category.lower()
+        if cat in ("assessments", "grades"):
+            notification_types = [
+                "ASSESSMENT_PUBLISHED",
+                "ASSESSMENT_AVAILABLE",
+                "ASSESSMENT_REMINDER",
+                "RESULT_RELEASED",
+                "FEEDBACK_RELEASED",
+                "GROUP_WORK_ASSIGNED",
+                "GROUP_RESULT_RELEASED",
+            ]
+        elif cat in ("alerts", "appeals"):
+            notification_types = [
+                "DEADLINE_EXTENDED",
+                "APPEAL_SUBMITTED",
+                "APPEAL_RESOLVED",
+                "INTEGRITY_ALERT",
+                "GROUP_APPROVAL_REQUEST",
+                "GROUP_APPEAL_REQUEST",
+                "GROUP_REASSESSMENT_ASSIGNED",
+                "REASSESSMENT_SCHEDULED",
+                "SYSTEM_ALERT",
+                "SECURITY_EVENT",
+                "POLICY_VIOLATION",
+                "GRADING_REMINDER",
+            ]
+        elif cat in ("submissions",):
+            notification_types = [
+                "SUBMISSION_RECEIVED",
+                "NEW_SUBMISSION",
+                "GRADING_REQUIRED",
+            ]
+
     repo = NotificationRepository(db)
     items, total = await repo.list_by_recipient(
         recipient_id=current_user.id,
         unread_only=unread_only,
         page=page,
-        page_size=page_size
+        page_size=page_size,
+        notification_types=notification_types,
     )
     return NotificationListResponse(
         items=items,

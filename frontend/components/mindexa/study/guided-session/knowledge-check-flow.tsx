@@ -256,6 +256,14 @@ export function KnowledgeCheckFlow({
   // ── RESULTS VIEW ─────────────────────────────────────────────────────────────
   if (report) {
     const isPassing = report.score_percentage >= 70;
+    const correctCount = (report.question_grades || []).filter((g) => g.is_correct).length;
+    // A handful of questions is a quick signal, not proof of mastery, so the wording stays modest.
+    const resultLabel =
+      report.score_percentage >= 80
+        ? "Strong result"
+        : report.score_percentage >= 50
+          ? "Partly there"
+          : "Worth revisiting";
 
     return (
       <Card className="border-border/70 bg-card shadow-xl rounded-2xl overflow-hidden space-y-6">
@@ -272,13 +280,14 @@ export function KnowledgeCheckFlow({
                 : "border-amber-500 bg-amber-500/10 text-amber-600 dark:text-amber-400",
             )}
           >
-            {isPassing ? "Mastery Demonstrated!" : "Needs Further Practice"}
+            {resultLabel}
           </Badge>
           <CardTitle className="text-2xl font-extrabold text-foreground">
             Score: {Math.round(report.score_percentage)}%
           </CardTitle>
           <p className="text-xs text-muted-foreground">
-            Knowledge Check for {topic}
+            Knowledge Check for {topic} · based on {report.total_questions} questions, so treat it
+            as a quick check rather than a full measure of mastery.
           </p>
         </CardHeader>
 
@@ -286,18 +295,22 @@ export function KnowledgeCheckFlow({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="p-4 rounded-xl border border-border/60 bg-muted/20 space-y-1">
               <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
-                Estimated Confidence
+                Answered Correctly
               </span>
               <p className="text-lg font-bold text-foreground">
-                {report.estimated_confidence_level}%
+                {correctCount} of {report.total_questions}
               </p>
             </div>
             <div className="p-4 rounded-xl border border-border/60 bg-muted/20 space-y-1">
               <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
-                Questions Evaluated
+                Left Unanswered
               </span>
               <p className="text-lg font-bold text-foreground">
-                {report.total_questions}
+                {
+                  (report.question_grades || []).filter(
+                    (g) => !g.student_answer || g.student_answer === "No answer provided",
+                  ).length
+                }
               </p>
             </div>
           </div>
@@ -395,11 +408,9 @@ export function KnowledgeCheckFlow({
                               : "border-rose-500 text-rose-600 dark:text-rose-400 bg-rose-500/10",
                           )}
                         >
-                          {qg.is_correct
-                            ? "Correct (+100%)"
-                            : isUnanswered
-                              ? "Incorrect (Unanswered)"
-                              : "Incorrect (0%)"}
+                          {isUnanswered
+                            ? "Unanswered"
+                            : `${qg.is_correct ? "Correct" : "Incorrect"} (${Math.round((qg.score ?? (qg.is_correct ? 1 : 0)) * 100)}%)`}
                         </Badge>
                       </div>
 
@@ -417,7 +428,7 @@ export function KnowledgeCheckFlow({
                             {isUnanswered ? "No answer provided" : qg.student_answer}
                           </span>
                         </div>
-                        {!qg.is_correct && (
+                        {(!qg.is_correct || (qg.score ?? 1) < 0.85) && (
                           <div className="p-2 rounded bg-emerald-500/10 border border-emerald-500/20">
                             <span className="font-semibold text-emerald-600 dark:text-emerald-400 block text-[10px]">
                               Correct Answer
@@ -428,6 +439,13 @@ export function KnowledgeCheckFlow({
                           </div>
                         )}
                       </div>
+
+                      {qg.feedback && (
+                        <p className="text-[11px] text-foreground bg-primary/5 p-2 rounded border border-primary/20">
+                          <span className="font-semibold text-primary">Feedback on your answer: </span>
+                          {qg.feedback}
+                        </p>
+                      )}
 
                       {qg.explanation && (
                         <p className="text-[11px] text-muted-foreground bg-background/40 p-2 rounded border border-border/30 italic">

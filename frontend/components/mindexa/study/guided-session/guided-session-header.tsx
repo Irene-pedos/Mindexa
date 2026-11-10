@@ -41,8 +41,11 @@ export function GuidedSessionHeader({
         const fraction = Math.min((currentSectionIndex + 1) / total, 1);
         return Math.round(10 + fraction * 55);
       }
-      case "practice":
-        return 75;
+      case "practice": {
+        const total = Math.max(totalSections, 1);
+        const fraction = Math.min((currentSectionIndex + 1) / total, 1);
+        return Math.round(68 + fraction * 17);
+      }
       case "knowledge_check":
         return 90;
       case "summary":
@@ -101,10 +104,10 @@ export function GuidedSessionHeader({
               Start
             </span>
             <span className={cn(stage === "lesson" ? "text-primary font-bold" : currentStageRank > 2 && "text-foreground")}>
-              Lesson ({currentSectionIndex + 1}/{totalSections || 1})
+              Lesson{stage === "lesson" ? ` (${currentSectionIndex + 1}/${totalSections || 1})` : ""}
             </span>
             <span className={cn(stage === "practice" ? "text-primary font-bold" : currentStageRank > 3 && "text-foreground")}>
-              Practice
+              Practice{stage === "practice" ? ` (${currentSectionIndex + 1}/${totalSections || 1})` : ""}
             </span>
             <span className={cn(stage === "knowledge_check" ? "text-primary font-bold" : currentStageRank > 4 && "text-foreground")}>
               Check
@@ -125,7 +128,9 @@ export function GuidedSessionHeader({
           {/* Mobile stage label */}
           <div className="md:hidden flex flex-col items-end text-right">
             <span className="text-[10px] text-muted-foreground uppercase font-semibold">
-              {stage === "lesson" ? `Sec ${currentSectionIndex + 1}/${totalSections || 1}` : "Stage"}
+              {stage === "lesson" || stage === "practice"
+                ? `Sec ${currentSectionIndex + 1}/${totalSections || 1}`
+                : "Stage"}
             </span>
             <span className="text-xs font-bold capitalize text-foreground">
               {stage.replace("_", " ")}

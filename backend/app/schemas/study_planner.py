@@ -155,9 +155,23 @@ class SaveGuidedSectionReflectionRequest(BaseModel):
     reflection: str = Field(default="", max_length=MAX_NOTES_CHARS)
 
 
+MAX_PRACTICE_ANSWER_CHARS = 1_500
+
+
 class SubmitGuidedExerciseRequest(BaseModel):
+    """A practice answer: a chosen option (multiple choice) or written text (written practice)."""
+
     exercise_id: str = Field(min_length=1, max_length=36)
-    selected_option_index: int = Field(ge=0, le=3)
+    selected_option_index: Optional[int] = Field(default=None, ge=0, le=3)
+    answer_text: Optional[str] = Field(default=None, max_length=MAX_PRACTICE_ANSWER_CHARS)
+
+    @model_validator(mode="after")
+    def _exactly_one_answer(self) -> Self:
+        has_text = bool(self.answer_text and self.answer_text.strip())
+        has_option = self.selected_option_index is not None
+        if has_text == has_option:
+            raise ValueError("Provide either selected_option_index or answer_text.")
+        return self
 
 
 class GuidedSessionAskRequest(BaseModel):
@@ -167,6 +181,8 @@ class GuidedSessionAskRequest(BaseModel):
 
 class GuidedSessionExerciseRequest(BaseModel):
     section_index: Optional[int] = Field(default=0, ge=0, le=200)
+    # MCQ is graded instantly by answer key; SHORT_ANSWER is a written answer marked by the AI.
+    exercise_type: Literal["MCQ", "SHORT_ANSWER"] = "MCQ"
 
 
 class SubmitKnowledgeCheckRequest(BaseModel):

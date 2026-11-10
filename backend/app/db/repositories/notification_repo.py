@@ -20,6 +20,7 @@ class NotificationRepository:
         unread_only: bool = False,
         page: int = 1,
         page_size: int = 20,
+        notification_types: list[str] | None = None,
     ) -> tuple[list[Notification], int]:
         filters = [
             Notification.recipient_id == recipient_id,
@@ -28,6 +29,8 @@ class NotificationRepository:
         ]
         if unread_only:
             filters.append(Notification.is_read == False)
+        if notification_types:
+            filters.append(Notification.notification_type.in_(notification_types))
 
         count_result = await self.db.execute(
             select(func.count(Notification.id)).where(*filters)

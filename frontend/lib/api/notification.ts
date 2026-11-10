@@ -23,8 +23,17 @@ import { NotificationType } from "./notification/notificationTypes";
 
 export const notificationApi = {
   NotificationType,
-  getNotifications: async (unreadOnly = false, page = 1, pageSize = 20): Promise<NotificationListResponse> => {
-    return apiClient(`/notifications/me?unread_only=${unreadOnly}&page=${page}&page_size=${pageSize}`);
+  getNotifications: async (
+    unreadOnly = false,
+    page = 1,
+    pageSize = 20,
+    category?: string,
+  ): Promise<NotificationListResponse> => {
+    let url = `/notifications/me?unread_only=${unreadOnly}&page=${page}&page_size=${pageSize}`;
+    if (category && category !== "all" && category !== "unread") {
+      url += `&category=${encodeURIComponent(category)}`;
+    }
+    return apiClient(url);
   },
   markAsRead: async (id: string): Promise<{ success: boolean }> => {
     return apiClient(`/notifications/${id}/read`, { method: "POST" });

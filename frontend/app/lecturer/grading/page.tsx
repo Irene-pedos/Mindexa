@@ -525,9 +525,28 @@ function LecturerGradingQueueContent() {
   const [isEditing, setIsEditing] = useState(false);
   const [isGroupEditing, setIsGroupEditing] = useState(false);
 
-  // SpeedGrader collapsible panel states
-  const [isLeftSidebarOpen, setIsLeftSidebarOpen] = useState(true);
-  const [isRightSidebarOpen, setIsRightSidebarOpen] = useState(true);
+  // SpeedGrader collapsible panel states. Both side panels used to start open at every screen
+  // size, which on a laptop squeezed the question and the student's answer (the part the
+  // lecturer is there to read) into a ~120px column. They now start open only when there is
+  // room: questions list (256px) + AI review (384px) + a readable middle (~480px) + the app
+  // sidebar and padding. The lecturer can still open either one with the toggles or Alt+[ / Alt+].
+  const [isLeftSidebarOpen, setIsLeftSidebarOpen] = useState(
+    () => typeof window === "undefined" || window.innerWidth >= 1100,
+  );
+  const [isRightSidebarOpen, setIsRightSidebarOpen] = useState(
+    () => typeof window === "undefined" || window.innerWidth >= 1500,
+  );
+  // Without room for both panels plus a readable middle, opening one closes the other. This runs
+  // for the toggle buttons and the Alt+[ / Alt+] shortcuts alike, since both just flip the state.
+  const previousPanesRef = useRef({ left: isLeftSidebarOpen, right: isRightSidebarOpen });
+  useEffect(() => {
+    const previous = previousPanesRef.current;
+    previousPanesRef.current = { left: isLeftSidebarOpen, right: isRightSidebarOpen };
+    if (isLeftSidebarOpen && isRightSidebarOpen && window.innerWidth < 1500) {
+      if (!previous.left) setIsRightSidebarOpen(false);
+      else if (!previous.right) setIsLeftSidebarOpen(false);
+    }
+  }, [isLeftSidebarOpen, isRightSidebarOpen]);
   const [isAiAccepted, setIsAiAccepted] = useState(false);
   const [showIntegrityLiftDialog, setShowIntegrityLiftDialog] = useState(false);
   const [liftJustification, setLiftJustification] = useState("");
@@ -4259,7 +4278,7 @@ function LecturerGradingQueueContent() {
                           <Button
                             variant="ghost"
                             size="sm"
-                            className="h-7 w-7 p-0 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                            className="h-7 w-7 p-0 rounded-full text-muted-foreground opacity-60 group-hover:opacity-100 transition-opacity"
                           >
                             <ChevronRight className="size-4" />
                           </Button>
@@ -4390,7 +4409,7 @@ function LecturerGradingQueueContent() {
                           <Button
                             variant="ghost"
                             size="sm"
-                            className="h-7 w-7 p-0 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                            className="h-7 w-7 p-0 rounded-full text-muted-foreground opacity-60 group-hover:opacity-100 transition-opacity"
                           >
                             <ChevronRight className="size-4" />
                           </Button>
@@ -4717,7 +4736,7 @@ function LecturerGradingQueueContent() {
                             <Button
                               variant="ghost"
                               size="sm"
-                              className="h-7 w-7 p-0 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                              className="h-7 w-7 p-0 rounded-full text-muted-foreground opacity-60 group-hover:opacity-100 transition-opacity"
                             >
                               <ChevronRight className="size-4" />
                             </Button>

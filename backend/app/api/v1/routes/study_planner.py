@@ -330,7 +330,10 @@ async def generate_guided_exercise(
 ) -> Dict[str, Any]:
     service = StudyPlannerService(db)
     return await service.generate_guided_exercise(
-        session_id, current_user.id, body.section_index or 0
+        session_id,
+        current_user.id,
+        body.section_index or 0,
+        exercise_type=body.exercise_type,
     )
 
 
@@ -351,6 +354,7 @@ async def submit_guided_exercise(
         current_user.id,
         body.exercise_id,
         body.selected_option_index,
+        answer_text=body.answer_text,
     )
 
 
@@ -389,6 +393,20 @@ async def submit_guided_knowledge_check(
     return await service.submit_guided_knowledge_check(
         session_id, current_user.id, body.answers
     )
+
+
+@router.post(
+    "/sessions/{session_id}/guided/knowledge-check/written-feedback",
+    response_model=Dict[str, Any],
+    summary="Add AI feedback to written answers in an earlier knowledge-check report",
+)
+async def add_written_answer_feedback(
+    session_id: uuid.UUID,
+    current_user=Depends(require_student),
+    db: AsyncSession = Depends(get_db),
+) -> Dict[str, Any]:
+    service = StudyPlannerService(db)
+    return await service.add_written_answer_feedback(session_id, current_user.id)
 
 
 @router.post(

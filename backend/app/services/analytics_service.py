@@ -194,10 +194,22 @@ class AnalyticsService:
                 rows = []
             grade_distribution = {str(r[0]): int(r[1]) for r in rows}
 
-        # Submissions metrics
+        # Submissions metrics. An attempt is "pending" when it has been handed in but has no final
+        # result yet. The old test (submission_status == PENDING_GRADING) missed real cases: that
+        # column is empty for some attempts and moves through AUTO_GRADED / AI_SUGGESTED on the
+        # way, so a CAT whose case study was still waiting was reported as "All Graded".
+        has_final_result = (
+            select(AssessmentResult.id)
+            .where(AssessmentResult.attempt_id == AssessmentAttempt.id)
+            .exists()
+        )
+        handed_in_without_result = and_(
+            AssessmentAttempt.status.in_(["SUBMITTED", "AUTO_SUBMITTED", "TIMED_OUT"]),
+            ~has_final_result,
+        )
         attempt_stmt = select(
             func.count(AssessmentAttempt.id),
-            func.coalesce(func.sum(case((AssessmentAttempt.submission_status == "PENDING_GRADING", 1), else_=0)), 0),
+            func.coalesce(func.sum(case((handed_in_without_result, 1), else_=0)), 0),
             func.coalesce(func.sum(case((AssessmentAttempt.integrity_risk_score > 50, 1), else_=0)), 0),
         ).where(AssessmentAttempt.assessment_id == assessment_id)
 
@@ -266,6 +278,7 @@ class AnalyticsService:
                 Question.question_type,
                 func.coalesce(func.avg(ResultBreakdown.score), 0.0).label("avg_score"),
                 func.coalesce(func.max(ResultBreakdown.max_score), Question.marks).label("max_score"),
+                func.count(ResultBreakdown.id).label("scored_count"),
             )
             .select_from(Question)
             .join(AssessmentQuestion, AssessmentQuestion.question_id == Question.id)
@@ -289,10 +302,14 @@ class AnalyticsService:
             if inspect.iscoroutine(rows_q):
                 rows_q = []
             for r in rows_q:
-                q_id, q_content, q_type, q_avg_score, q_max_score = r
+                q_id, q_content, q_type, q_avg_score, q_max_score, q_scored_count = r
                 avg_pct = (q_avg_score / q_max_score * 100) if q_max_score > 0 else 0.0
                 difficulty = "Easy"
-                if avg_pct < 50:
+                if not q_scored_count:
+                    # Nothing has been finalized for this question yet, so an average of 0 says
+                    # nothing about how hard it was (it used to be labelled "Hard").
+                    difficulty = "No data yet"
+                elif avg_pct < 50:
                     difficulty = "Hard"
                     hard_questions_text.append(q_content[:50] + "...")
                 elif avg_pct <= 75:

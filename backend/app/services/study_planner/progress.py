@@ -415,7 +415,14 @@ class ProgressMixin(PlannerBase):
             knowledge_check_score=_get_val("knowledge_check_score", None),
             knowledge_check_report=_get_val("knowledge_check_report", None) if include_content else None,
             section_reflections_json=_get_val("section_reflections_json", {}) if include_content else {},
-            guided_practice_exercises_json=_get_val("guided_practice_exercises_json", []) if include_content else [],
+            # A written exercise's reference answer is revealed with the attempt, not before.
+            guided_practice_exercises_json=[
+                {k: v for k, v in exercise.items() if k != "model_answer"}
+                for exercise in _get_val("guided_practice_exercises_json", [])
+                if isinstance(exercise, dict)
+            ]
+            if include_content
+            else [],
             guided_practice_attempts_json=_get_val("guided_practice_attempts_json", []) if include_content else [],
             session_summary_text=_get_val("session_summary_text", None) if include_content else None,
             student_notes=_get_val("student_notes", None) if include_content else None,

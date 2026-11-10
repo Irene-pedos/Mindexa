@@ -562,14 +562,16 @@ export default function AssessmentAnalyticsPage() {
                           {q.question_type.replace(/_/g, " ")}
                         </TableCell>
                         <TableCell className="font-mono text-foreground font-medium">
-                          {q.average_score} / {q.max_score}
+                          {q.difficulty === "No data yet" ? "—" : `${q.average_score} / ${q.max_score}`}
                         </TableCell>
                         <TableCell className="text-right pr-3">
                           <Badge
                             variant="outline"
                             className={cn(
                               "text-[10px] font-medium px-2 py-0.5 border shadow-none",
-                              q.difficulty === "Easy"
+                              q.difficulty === "No data yet"
+                                ? "bg-muted/40 text-muted-foreground border-border/60"
+                                : q.difficulty === "Easy"
                                 ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20"
                                 : q.difficulty === "Medium"
                                   ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20"

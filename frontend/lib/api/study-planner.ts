@@ -32,7 +32,15 @@ export interface LessonSection {
   charts?: Array<Record<string, any>>;
   activities?: string[];
   micro_check?: { question: string; answer: string; hint?: string } | null;
-  faded_example?: { problem: string; solution_steps?: string[]; completion_prompt: string; blank_index?: number } | null;
+  faded_example?: {
+    problem: string;
+    solution_steps?: string[];
+    completion_prompt: string;
+    /** The correct completion; absent on lessons generated before it was requested. */
+    answer?: string;
+    hint?: string;
+    blank_index?: number;
+  } | null;
   self_explanation_prompt?: string | null;
   suggested_video_search?: string | null;
   source_learning_unit_id?: string | null;
@@ -51,6 +59,10 @@ export interface LessonPlanOutput {
   glossary?: Array<{ term: string; definition: string }>;
   references?: string[];
   generated_by?: "ai" | "fallback" | string;
+  /** True only when course material was retrieved and used to write the lesson. */
+  grounded?: boolean;
+  /** Fallback lessons only: the AI was rate-limited and says it is free again in about this long. */
+  ai_retry_after_seconds?: number;
 }
 
 export interface KnowledgeCheckQuestionGrade {
@@ -60,7 +72,9 @@ export interface KnowledgeCheckQuestionGrade {
   student_answer?: string;
   correct_answer?: string;
   explanation?: string;
-  feedback?: string;
+  feedback?: string | null;
+  /** How a written answer was marked: by the AI for meaning, or by keyword match (fallback). */
+  graded_by?: "ai" | "keyword" | null;
 }
 
 export interface KnowledgeCheckReport {
@@ -72,6 +86,19 @@ export interface KnowledgeCheckReport {
   estimated_confidence_level: number;
   recommendations: string[];
   generated_by?: "ai" | "fallback" | string;
+  /** Course materials that cover the weak concepts (set by the backend after grading). */
+  recommended_materials?: Array<{
+    resource_id: string;
+    title: string;
+    page_number?: number | null;
+  }>;
+  /** Spaced-review session scheduled because of weak concepts. */
+  review?: {
+    session_id: string;
+    topics: string[];
+    scheduled_start: string;
+    duration_minutes: number;
+  } | null;
 }
 
 export interface GuidedExercise {
@@ -79,20 +106,31 @@ export interface GuidedExercise {
   section_index: number;
   section_title: string;
   question_text: string;
-  question_type?: string;
+  /** "MCQ" (pick an option) or "SHORT_ANSWER" (write an answer that the AI marks). */
+  question_type?: "MCQ" | "SHORT_ANSWER" | string;
   options: string[];
-  correct_option_index: number;
+  /** Absent for written exercises: their reference answer is revealed after submitting. */
+  correct_option_index?: number | null;
   explanation: string;
   generated_by?: "ai" | "fallback" | string;
 }
 
+export type GuidedExerciseType = "MCQ" | "SHORT_ANSWER";
+
 export interface GuidedExerciseAttempt {
   exercise_id: string;
   section_index: number;
-  selected_option_index: number;
+  selected_option_index?: number | null;
+  /** Written exercises only. */
+  answer_text?: string;
   is_correct: boolean;
+  /** 0-1; written exercises only. */
+  score?: number;
+  feedback?: string | null;
+  graded_by?: "ai" | "keyword" | null;
+  model_answer?: string;
   submitted_at: string;
-  correct_option_index?: number;
+  correct_option_index?: number | null;
   explanation?: string;
 }
 
@@ -163,6 +201,8 @@ export interface StudySession {
     role: string;
     content: string;
     citations?: SourceCitation[];
+    /** True when no relevant course material was found (answer from general knowledge). */
+    fallback_used?: boolean;
     timestamp?: string;
   }> | null;
 }
@@ -396,7 +436,7 @@ export const studyPlannerApi = {
     sessionId: string,
     question: string,
     sectionContext?: string
-  ): Promise<{ answer: string; citations: SourceCitation[] }> => {
+  ): Promise<{ answer: string; citations: SourceCitation[]; fallback_used?: boolean }> => {
     return apiClient(`/students/study-plans/sessions/${sessionId}/guided/ask`, {
       method: "POST",
       // The API rejects more than 4,000 characters of section context (a 422 that would fail
@@ -406,25 +446,36 @@ export const studyPlannerApi = {
   },
   generateGuidedExercise: async (
     sessionId: string,
-    sectionIndex: number = 0
+    sectionIndex: number = 0,
+    exerciseType: GuidedExerciseType = "MCQ"
   ): Promise<GuidedExercise> => {
     return apiClient(`/students/study-plans/sessions/${sessionId}/guided/exercise`, {
       method: "POST",
-      body: JSON.stringify({ section_index: sectionIndex }),
+      body: JSON.stringify({ section_index: sectionIndex, exercise_type: exerciseType }),
     });
   },
+  /** Submit a chosen option (multiple choice) or written text (written practice). */
   submitGuidedExercise: async (
     sessionId: string,
     exerciseId: string,
-    selectedOptionIndex: number
+    answer: { selectedOptionIndex: number } | { answerText: string }
   ): Promise<GuidedExerciseAttempt> => {
     return apiClient(`/students/study-plans/sessions/${sessionId}/guided/exercise/submit`, {
       method: "POST",
       body: JSON.stringify({
         exercise_id: exerciseId,
-        selected_option_index: selectedOptionIndex,
+        ...("selectedOptionIndex" in answer
+          ? { selected_option_index: answer.selectedOptionIndex }
+          : { answer_text: answer.answerText }),
       }),
     });
+  },
+  /** AI marking and feedback for written answers in a report graded before it existed. */
+  addWrittenAnswerFeedback: async (sessionId: string): Promise<KnowledgeCheckReport> => {
+    return apiClient(
+      `/students/study-plans/sessions/${sessionId}/guided/knowledge-check/written-feedback`,
+      { method: "POST" }
+    );
   },
   generateKnowledgeCheck: async (
     sessionId: string,

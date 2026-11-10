@@ -212,23 +212,10 @@ def test_migration_chain_integrity():
     # Verify single head (revisions that are not down_revision of any other revision)
     all_down_revs = set(down_revisions.values())
     heads = [rev for rev in revisions if rev not in all_down_revs]
-    assert heads[0] in [
-        "20261022_p6a_eligibility",
-        "20261022_p6a_patch_enum",
-        "20261023_p6b_appeals",
-        "20261023_p6c_calendar_export",
-        "20261024_sync_class_section",
-        "20261024_sync_schema",
-        "20261025_optional_default",
-        "20261025_advisory_events",
-        "20261026_course_department",
-        "20261026_enum_drift_fix",
-        "20261026_enum_drift_fix2",
-        "20261027_compliance_rules",
-        "20261028_option_guidance_text",
-        "20261029_academic_calendar",
-        "20261029_material_progress",
-    ]
+    # Exactly one head: two heads mean two migrations branched from the same parent and
+    # `alembic upgrade head` would refuse to run. (Naming the head here would need an edit for
+    # every new migration, so only the shape of the chain is asserted.)
+    assert len(heads) == 1, f"Expected a single migration head, found {sorted(heads)}"
 
 
 def test_phase1_duties_and_policies_migration_exists():

@@ -81,22 +81,98 @@ function sanitizeAndRepairMermaid(raw: string): string {
   return processedLines.join("\n");
 }
 
+type Rgb = [number, number, number];
+
+/**
+ * Resolve a CSS custom property (e.g. "--primary") to a concrete RGB colour.
+ *
+ * Mermaid's theme parser understands only concrete colours: handing it "hsl(var(--muted) / 0.5)"
+ * throws "Unsupported color format", which made every diagram fall back to the plain flow view.
+ * The browser itself can resolve any CSS colour (hsl, oklch, ...), so a 1x1 canvas converts it.
+ */
+function cssVarToRgb(varName: string, fallback: Rgb): Rgb {
+  try {
+    const raw = getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+    if (!raw) return fallback;
+    const ctx = document.createElement("canvas").getContext("2d", { willReadFrequently: true });
+    if (!ctx) return fallback;
+    ctx.fillStyle = "#010203"; // an invalid colour leaves this unchanged, which tells us it failed
+    ctx.fillStyle = raw;
+    if (ctx.fillStyle === "#010203") return fallback;
+    ctx.clearRect(0, 0, 1, 1);
+    ctx.fillRect(0, 0, 1, 1);
+    const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data;
+    return [r, g, b];
+  } catch {
+    return fallback;
+  }
+}
+
+/** `amount` of `a` mixed into `b`, as "#rrggbb" (Mermaid needs opaque colours, not "x / 0.5"). */
+function mixHex(a: Rgb, b: Rgb, amount: number): string {
+  const channel = (i: 0 | 1 | 2) =>
+    Math.round(a[i] * amount + b[i] * (1 - amount))
+      .toString(16)
+      .padStart(2, "0");
+  return `#${channel(0)}${channel(1)}${channel(2)}`;
+}
+
+/** Mermaid theme built from the app's current (light or dark) colours. */
+function buildMermaidThemeVariables(): Record<string, string> {
+  const foreground = cssVarToRgb("--foreground", [23, 23, 23]);
+  const background = cssVarToRgb("--background", [255, 255, 255]);
+  const card = cssVarToRgb("--card", background);
+  const primary = cssVarToRgb("--primary", [37, 99, 235]);
+  const border = cssVarToRgb("--border", [228, 228, 231]);
+  const muted = cssVarToRgb("--muted", [244, 244, 245]);
+  const mutedForeground = cssVarToRgb("--muted-foreground", [113, 113, 122]);
+
+  return {
+    primaryColor: mixHex(primary, background, 0.15),
+    primaryTextColor: mixHex(foreground, foreground, 1),
+    primaryBorderColor: mixHex(primary, background, 0.5),
+    lineColor: mixHex(mutedForeground, mutedForeground, 1),
+    secondaryColor: mixHex(muted, background, 0.5),
+    tertiaryColor: mixHex(card, card, 1),
+    background: mixHex(background, background, 1),
+    nodeBorder: mixHex(border, border, 1),
+    clusterBkg: mixHex(muted, background, 0.3),
+    titleColor: mixHex(foreground, foreground, 1),
+    edgeLabelBackground: mixHex(card, card, 1),
+    // A fixed stack, not "inherit": Mermaid sizes each box from its own text measurement, so a
+    // font that differs from the one the page draws (e.g. inside a monospace container) clips labels.
+    fontFamily: "ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif",
+    fontSize: "13px",
+  };
+}
+
 /**
  * Parses raw text/mermaid into structured node flow items for visual fallback.
+ *
+ * Node ids (B, C, ...) mean nothing to a student, so ids are replaced by the label given where
+ * the node is defined (`B["Check if stack is full"]`), wherever it appears.
  */
 function extractFlowNodes(raw: string): Array<{ from: string; to: string; label?: string }> {
   const steps: Array<{ from: string; to: string; label?: string }> = [];
   const lines = raw.split("\n");
 
+  // id -> label, from definitions like A["Start"], B(Text), C{"Decision?"}
+  const labels = new Map<string, string>();
+  for (const match of raw.matchAll(/([A-Za-z0-9_-]+)\s*(?:\[\[?|\(\(?|\{)\s*"?([^"\]\)\}\n]+?)"?\s*(?:\]\]?|\)\)?|\})/g)) {
+    if (!labels.has(match[1])) labels.set(match[1], match[2].trim());
+  }
+  const nameOf = (id: string) => labels.get(id) ?? id;
+
+  const edge =
+    /([A-Za-z0-9_-]+)\s*(?:(?:\[\[?|\(\(?|\{)[^\n]*?(?:\]\]?|\)\)?|\}))?\s*(?:-->|==>|-\.->|->)\s*(?:\|([^|\n]+)\|)?\s*([A-Za-z0-9_-]+)/;
   for (const line of lines) {
-    const arrowMatch = line.match(/(?:\["?(.*?)"?\]|([a-zA-Z0-9_-]+))\s*(?:-->|==>|->)\s*(?:\|([^|]+)\|)?\s*(?:\["?(.*?)"?\]|([a-zA-Z0-9_-]+))/);
+    const arrowMatch = line.match(edge);
     if (arrowMatch) {
-      const from = arrowMatch[1] || arrowMatch[2] || "Step";
-      const edgeLabel = arrowMatch[3]?.trim();
-      const to = arrowMatch[4] || arrowMatch[5] || "Next";
-      if (from && to) {
-        steps.push({ from: from.trim(), to: to.trim(), label: edgeLabel });
-      }
+      steps.push({
+        from: nameOf(arrowMatch[1]).trim(),
+        to: nameOf(arrowMatch[3]).trim(),
+        label: arrowMatch[2]?.trim(),
+      });
     }
   }
 
@@ -117,7 +193,10 @@ function extractFlowNodes(raw: string): Array<{ from: string; to: string; label?
 export function MermaidDiagram({ code }: MermaidDiagramProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const reactId = useId();
-  const diagramId = `mermaid-${reactId.replace(/:/g, "")}-${Date.now()}`;
+  const baseId = `mermaid-${reactId.replace(/[^A-Za-z0-9_-]/g, "")}`;
+  // Mermaid needs a fresh element id for every render() call, but a new id on every React render
+  // (the old Date.now()) re-triggered the effect forever, so count renders instead.
+  const renderCountRef = useRef(0);
   const [error, setError] = useState<boolean>(false);
   const [rendered, setRendered] = useState(false);
 
@@ -135,28 +214,15 @@ export function MermaidDiagram({ code }: MermaidDiagramProps) {
         mermaid.initialize({
           startOnLoad: false,
           theme: "base",
-          themeVariables: {
-            primaryColor: "hsl(var(--primary) / 0.15)",
-            primaryTextColor: "hsl(var(--foreground))",
-            primaryBorderColor: "hsl(var(--border))",
-            lineColor: "hsl(var(--muted-foreground))",
-            secondaryColor: "hsl(var(--muted) / 0.5)",
-            tertiaryColor: "hsl(var(--card))",
-            background: "hsl(var(--background))",
-            nodeBorder: "hsl(var(--border))",
-            clusterBkg: "hsl(var(--muted) / 0.3)",
-            titleColor: "hsl(var(--foreground))",
-            edgeLabelBackground: "hsl(var(--card))",
-            fontFamily: "inherit",
-            fontSize: "12px",
-          },
+          themeVariables: buildMermaidThemeVariables(),
           // Diagram text is model output derived from lecturer uploads and student input, and the SVG
           // is injected as HTML below. "strict" sanitises labels and disables click/javascript: links.
           securityLevel: "strict",
           flowchart: { htmlLabels: true, curve: "basis" },
         });
 
-        const { svg } = await mermaid.render(diagramId, sanitizedCode);
+        renderCountRef.current += 1;
+        const { svg } = await mermaid.render(`${baseId}-${renderCountRef.current}`, sanitizedCode);
 
         if (!cancelled && containerRef.current) {
           containerRef.current.innerHTML = svg;
@@ -164,7 +230,8 @@ export function MermaidDiagram({ code }: MermaidDiagramProps) {
           if (svgEl) {
             svgEl.removeAttribute("width");
             svgEl.removeAttribute("height");
-            svgEl.style.maxWidth = "100%";
+            // Full width for wide diagrams, but a small one should not be blown up to fill the card.
+            svgEl.style.maxWidth = "min(100%, 640px)";
             svgEl.style.height = "auto";
           }
           setRendered(true);
@@ -182,10 +249,13 @@ export function MermaidDiagram({ code }: MermaidDiagramProps) {
     return () => {
       cancelled = true;
     };
-  }, [sanitizedCode, diagramId]);
+  }, [sanitizedCode, baseId]);
 
   // ── Fallback Visual Flow View ──────────────────────────────────────────────
-  if (error || (!rendered && fallbackSteps.length > 0)) {
+  // Only after a real failure. While the diagram is still rendering the real container below
+  // must stay mounted: returning the fallback here (as before) removed the element Mermaid writes
+  // its SVG into, so a diagram that rendered fine could never be shown.
+  if (error) {
     // Unique list of connected stages
     const stages: string[] = [];
     fallbackSteps.forEach((s) => {
